@@ -23,7 +23,7 @@ export async function GET(
     };
 
     const graph = await createGraphForMcpUrl();
-    const state = await (graph as any).getState(config);
+    const state = await graph.getState(config);
 
     if (!state.values || !state.values.messages) {
       return Response.json({ messages: [] });
