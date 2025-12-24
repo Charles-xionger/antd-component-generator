@@ -3,11 +3,36 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* shadcn/ui required variables */
+  --primary: 222.2 84% 4.9%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 210 40% 96%;
+  --secondary-foreground: 222.2 84% 4.9%;
+  --accent: 210 40% 96%;
+  --accent-foreground: 222.2 84% 4.9%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 214.3 31.8% 91.4%;
+  --input: 214.3 31.8% 91.4%;
+  --ring: 222.2 84% 4.9%;
+  --radius: 0.5rem;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -23,4 +48,48 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* 防止页面级别的滚动条 */
+}
+
+html {
+  overflow: hidden; /* 确保html也不会出现滚动条 */
+}
+
+/* 代码语法高亮样式 */
+.language-typescript,
+.language-tsx,
+.language-javascript,
+.language-jsx {
+  color: #1f2937; /* 默认文本颜色 */
+}
+
+/* 基础代码样式 */
+pre code {
+  color: #1f2937 !important;
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace !important;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* 确保代码区域字体可见 */
+.code-preview pre,
+.code-preview code {
+  color: #1f2937 !important;
+  background-color: transparent;
+}
+
+/* 确保消息区域字体可见 */
+.message-list {
+  color: #1f2937;
+}
+
+.message-list .message-content {
+  color: #1f2937 !important;
+}
+
+/* 输入框样式 */
+input::placeholder {
+  color: #6b7280;
 }

@@ -8,6 +8,17 @@ export async function GET() {
       orderBy: {
         updatedAt: "desc",
       },
+      include: {
+        artifact: {
+          include: {
+            _count: {
+              select: {
+                versions: true,
+              },
+            },
+          },
+        },
+      },
     });
 
     return Response.json({ threads });

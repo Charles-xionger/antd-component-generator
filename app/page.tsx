@@ -1,241 +1,315 @@
 "use client";
 
-import { useChat, Message } from "@/hooks/use-chat";
 import { useState, useEffect, useCallback } from "react";
-import { MCPConfigPanel, MCPConfig } from "@/components/mcp-config-panel";
+import { CanvasChat } from "@/components/canvas-chat";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
 
 interface Thread {
   id: string;
   title: string;
   createdAt: string;
   updatedAt: string;
+  artifact?: {
+    _count: {
+      versions: number;
+    };
+  };
 }
 
 export default function Home() {
-  const {
-    messages,
-    input,
-    isLoading,
-    setInput,
-    handleSubmit,
-    resetChat,
-    switchThread,
-    setMcpConfigId,
-  } = useChat();
-
   const [threads, setThreads] = useState<Thread[]>([]);
-  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [isLoadingThreads, setIsLoadingThreads] = useState(false);
-  const [mcpConfigs, setMcpConfigs] = useState<MCPConfig[]>([]);
-  const [selectedMcpId, setSelectedMcpId] = useState<string | null>(null);
-  const [isLoadingMcp, setIsLoadingMcp] = useState(false);
+  const [selectedThreadId, setSelectedThreadId] = useState<
+    string | undefined
+  >();
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
+  const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [threadToDelete, setThreadToDelete] = useState<string | null>(null);
+  const { showToast } = useToast();
 
-  // 获取会话列表
+  // 获取 thread 列表
   const fetchThreads = useCallback(async () => {
-    setIsLoadingThreads(true);
     try {
-      const res = await fetch("/api/agent/history");
-      const data = await res.json();
-      setThreads(data.threads || []);
+      const response = await fetch("/api/agent/history");
+      const data = await response.json();
+      if (data.threads) {
+        setThreads(data.threads);
+        // 如果没有选中的 thread，选择最新的一个
+        if (!selectedThreadId && data.threads.length > 0) {
+          setSelectedThreadId(data.threads[0].id);
+        }
+      }
     } catch (error) {
-      console.error("Failed to fetch threads:", error);
+      console.error("获取会话列表失败:", error);
+      showToast("获取会话列表失败，请稍后重试", "error");
     } finally {
-      setIsLoadingThreads(false);
+      setIsLoading(false);
     }
-  }, []);
+  }, [selectedThreadId, showToast]);
 
-  // 初始加载会话列表
+  // 创建新会话
+  const createNewThread = async () => {
+    try {
+      const response = await fetch("/api/agent/history", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ title: "新会话" }),
+      });
+      const data = await response.json();
+      if (data.thread) {
+        setThreads((prev) => [data.thread, ...prev]);
+        setSelectedThreadId(data.thread.id);
+        showToast("新会话创建成功", "success");
+      } else {
+        throw new Error("创建会话响应异常");
+      }
+    } catch (error) {
+      console.error("创建新会话失败:", error);
+      showToast("创建新会话失败，请稍后重试", "error");
+    }
+  };
+
+  // 打开删除确认弹窗
+  const openDeleteDialog = (threadId: string) => {
+    setThreadToDelete(threadId);
+    setDeleteDialogOpen(true);
+  };
+
+  // 删除会话
+  const deleteThread = async () => {
+    if (!threadToDelete) return;
+
+    setDeletingThreadId(threadToDelete);
+    setDeleteDialogOpen(false);
+    try {
+      const response = await fetch(`/api/agent/history/${threadToDelete}`, {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        // 从列表中移除已删除的thread
+        setThreads((prev) =>
+          prev.filter((thread) => thread.id !== threadToDelete)
+        );
+
+        // 如果删除的是当前选中的thread，清除选择
+        if (selectedThreadId === threadToDelete) {
+          setSelectedThreadId(undefined);
+        }
+        // 显示成功消息
+        showToast("会话删除成功", "success");
+      } else {
+        throw new Error("删除失败");
+      }
+    } catch (error) {
+      console.error("删除会话失败:", error);
+      showToast("删除会话失败，请稍后重试", "error");
+    } finally {
+      setDeletingThreadId(null);
+      setThreadToDelete(null);
+    }
+  };
+
   useEffect(() => {
     fetchThreads();
   }, [fetchThreads]);
 
-  // 加载 MCP 配置
-  const fetchMcpConfigs = useCallback(async () => {
-    setIsLoadingMcp(true);
-    try {
-      const res = await fetch("/api/mcp/configs");
-      const data = await res.json();
-      setMcpConfigs(data.configs || []);
-    } catch (err) {
-      console.error("Failed to fetch MCP configs:", err);
-    } finally {
-      setIsLoadingMcp(false);
-    }
-  }, []);
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
-  useEffect(() => {
-    fetchMcpConfigs();
-  }, [fetchMcpConfigs]);
-
-  // 切换会话
-  const handleSwitchThread = async (thread: Thread) => {
-    setActiveThreadId(thread.id);
-    try {
-      const res = await fetch(`/api/agent/history/${thread.id}`);
-      const data = await res.json();
-
-      // 将消息转换为 Message 格式
-      const formattedMessages: Message[] = (data.messages || [])
-        .filter(
-          (msg: { type: string }) => msg.type === "human" || msg.type === "ai"
-        )
-        .map((msg: { type: string; content: string }) => ({
-          role: msg.type === "human" ? "user" : "assistant",
-          content:
-            typeof msg.content === "string"
-              ? msg.content
-              : JSON.stringify(msg.content),
-        }));
-
-      switchThread(thread.id, formattedMessages);
-    } catch (error) {
-      console.error("Failed to load thread messages:", error);
-    }
-  };
-
-  // 创建新会话
-  const handleNewChat = async () => {
-    resetChat();
-    setActiveThreadId(null);
-
-    // 创建新的 thread 记录
-    try {
-      const res = await fetch("/api/agent/history", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "新会话" }),
+    if (diffDays === 0) {
+      return date.toLocaleTimeString("zh-CN", {
+        hour: "2-digit",
+        minute: "2-digit",
       });
-      const data = await res.json();
-      if (data.thread) {
-        setThreads((prev) => [data.thread, ...prev]);
-        setActiveThreadId(data.thread.id);
-        switchThread(data.thread.id, []);
-      }
-    } catch (error) {
-      console.error("Failed to create thread:", error);
-    }
-  };
-
-  // 删除会话
-  const handleDeleteThread = async (e: React.MouseEvent, threadId: string) => {
-    e.stopPropagation();
-    try {
-      await fetch(`/api/agent/history/${threadId}`, { method: "DELETE" });
-      setThreads((prev) => prev.filter((t) => t.id !== threadId));
-      if (activeThreadId === threadId) {
-        resetChat();
-        setActiveThreadId(null);
-      }
-    } catch (error) {
-      console.error("Failed to delete thread:", error);
+    } else if (diffDays === 1) {
+      return "昨天";
+    } else if (diffDays < 7) {
+      return `${diffDays}天前`;
+    } else {
+      return date.toLocaleDateString("zh-CN");
     }
   };
 
   return (
-    <div className="flex h-screen bg-zinc-50 dark:bg-zinc-900">
-      {/* 侧边栏 */}
-      <aside
-        className={`${
-          isSidebarOpen ? "w-64" : "w-0"
-        } flex flex-col border-r border-zinc-200 bg-white transition-all duration-300 dark:border-zinc-800 dark:bg-zinc-950`}
+    <div className="h-screen flex bg-gray-50 overflow-hidden">
+      {/* 左侧边栏 */}
+      <div
+        className={`bg-white border-r border-gray-200 transition-all duration-300 ${
+          sidebarOpen ? "w-80" : "w-0"
+        } overflow-hidden flex flex-col absolute md:static z-20 h-full md:h-auto`}
       >
-        {isSidebarOpen && (
-          <>
-            {/* 新建会话按钮 */}
-            <div className="border-b border-zinc-200 p-3 dark:border-zinc-800">
-              <button
-                onClick={handleNewChat}
-                className="flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              >
-                <svg
-                  className="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 4v16m8-8H4"
-                  />
-                </svg>
-                新建会话
-              </button>
-            </div>
-
-            {/* MCP 配置选择 */}
-            <MCPConfigPanel
-              configs={mcpConfigs}
-              selectedId={selectedMcpId}
-              isLoading={isLoadingMcp}
-              onSelect={(id) => {
-                setSelectedMcpId(id);
-                setMcpConfigId(id);
-              }}
-              onRefresh={fetchMcpConfigs}
-            />
-
-            {/* 会话列表 */}
-            <div className="flex-1 overflow-y-auto p-2">
-              {isLoadingThreads ? (
-                <p className="py-4 text-center text-sm text-zinc-500">
-                  加载中...
-                </p>
-              ) : threads.length === 0 ? (
-                <p className="py-4 text-center text-sm text-zinc-500">
-                  暂无会话记录
-                </p>
-              ) : (
-                <div className="space-y-1">
-                  {threads.map((thread) => (
-                    <div
-                      key={thread.id}
-                      onClick={() => handleSwitchThread(thread)}
-                      className={`group flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
-                        activeThreadId === thread.id
-                          ? "bg-zinc-200 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
-                          : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
-                      }`}
-                    >
-                      <span className="truncate">{thread.title}</span>
-                      <button
-                        onClick={(e) => handleDeleteThread(e, thread.id)}
-                        className="hidden rounded p-1 text-zinc-400 hover:bg-zinc-300 hover:text-zinc-600 group-hover:block dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
-                      >
-                        <svg
-                          className="h-4 w-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                          />
-                        </svg>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </aside>
-
-      {/* 主内容区 */}
-      <div className="flex flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950">
+        {/* 顶部操作栏 */}
+        <div className="p-4 border-b border-gray-100">
           <button
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            onClick={createNewThread}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
           >
             <svg
-              className="h-5 w-5"
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 4v16m8-8H4"
+              />
+            </svg>
+            新建会话
+          </button>
+        </div>
+
+        {/* 会话列表 */}
+        <div className="flex-1 overflow-y-auto">
+          {isLoading ? (
+            <div className="p-4 text-center text-gray-500">加载中...</div>
+          ) : threads.length === 0 ? (
+            <div className="p-4 text-center text-gray-500">
+              <div className="mb-2">暂无会话</div>
+              <div className="text-sm">点击上方按钮创建新会话</div>
+            </div>
+          ) : (
+            <div className="p-2">
+              {threads.map((thread) => (
+                <div
+                  key={thread.id}
+                  className={`p-3 mb-1 rounded-lg transition-all duration-200 group relative ${
+                    selectedThreadId === thread.id
+                      ? "bg-blue-50 border border-blue-200"
+                      : "hover:bg-gray-50 border border-transparent"
+                  }`}
+                >
+                  <div
+                    onClick={() => setSelectedThreadId(thread.id)}
+                    className="cursor-pointer"
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="font-medium text-gray-900 truncate flex-1 mr-2">
+                        {thread.title}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {thread.artifact?._count?.versions &&
+                          thread.artifact._count.versions > 0 && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                              {thread.artifact._count.versions} 个版本
+                            </span>
+                          )}
+                        {/* 删除按钮 */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openDeleteDialog(thread.id);
+                          }}
+                          disabled={deletingThreadId === thread.id}
+                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-100 rounded text-red-500 hover:text-red-700 transition-all duration-200 disabled:opacity-50"
+                          title="删除会话"
+                        >
+                          {deletingThreadId === thread.id ? (
+                            <div className="w-4 h-4 border-2 border-red-300 border-t-red-600 rounded-full animate-spin"></div>
+                          ) : (
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                              />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm text-gray-500">
+                        {formatDate(thread.updatedAt)}
+                      </div>
+                      {thread.artifact ? (
+                        <span className="text-xs text-blue-600">有代码</span>
+                      ) : (
+                        <span className="text-xs text-gray-400">仅对话</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 移动端遮罩层 */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-10 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* 主聊天区域 */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* 顶部工具栏 */}
+        <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="p-2 hover:bg-gray-100 rounded-lg transition-colors md:hidden lg:block"
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d={
+                    sidebarOpen
+                      ? "M11 19l-7-7 7-7M2 12h12"
+                      : "M4 6h16M4 12h16M4 18h16"
+                  }
+                />
+              </svg>
+            </button>
+            <h1 className="text-lg font-semibold text-gray-900">
+              {selectedThreadId
+                ? threads.find((t) => t.id === selectedThreadId)?.title ||
+                  "会话"
+                : "Next LangGraph Demo"}
+            </h1>
+          </div>
+
+          {/* 移动端菜单按钮 */}
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors md:hidden"
+          >
+            <svg
+              className="w-5 h-5"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -248,62 +322,64 @@ export default function Home() {
               />
             </svg>
           </button>
-          <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-            LangGraph Agent Demo
-          </h1>
-          <div className="w-9" /> {/* 占位符保持标题居中 */}
-        </header>
+        </div>
 
-        <main className="flex-1 overflow-y-auto p-4">
-          <div className="mx-auto max-w-2xl space-y-4">
-            {messages.length === 0 && (
-              <p className="text-center text-zinc-500 dark:text-zinc-400">
-                发送消息开始对话
-              </p>
-            )}
-            {messages.map((msg, i) => (
-              <div
-                key={i}
-                className={`rounded-lg p-3 ${
-                  msg.role === "user"
-                    ? "ml-auto max-w-[80%] bg-blue-500 text-white"
-                    : "mr-auto max-w-[80%] bg-zinc-200 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
-                }`}
-              >
-                <p className="whitespace-pre-wrap">{msg.content}</p>
-              </div>
-            ))}
-            {isLoading && messages[messages.length - 1]?.content === "" && (
-              <div className="mr-auto max-w-[80%] rounded-lg bg-zinc-200 p-3 dark:bg-zinc-800">
-                <span className="animate-pulse text-zinc-500">思考中...</span>
-              </div>
-            )}
-          </div>
-        </main>
-
-        <footer className="border-t border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <form
-            onSubmit={handleSubmit}
-            className="mx-auto flex max-w-2xl gap-2"
-          >
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="输入消息..."
-              className="flex-1 rounded-lg border border-zinc-300 bg-white px-4 py-2 text-zinc-900 focus:border-blue-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-              disabled={isLoading}
+        {/* Canvas Chat 区域 */}
+        <div className="flex-1 overflow-hidden">
+          {selectedThreadId ? (
+            <CanvasChat
+              key={selectedThreadId}
+              threadId={selectedThreadId}
+              onThreadUpdate={fetchThreads}
             />
-            <button
-              type="submit"
-              disabled={isLoading || !input.trim()}
-              className="rounded-lg bg-blue-500 px-4 py-2 font-medium text-white transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              发送
-            </button>
-          </form>
-        </footer>
+          ) : (
+            <div className="h-full flex items-center justify-center text-gray-500">
+              <div className="text-center">
+                <div className="text-2xl mb-4">🎯</div>
+                <div className="text-lg mb-2">欢迎使用 Canvas Chat</div>
+                <div className="text-sm">
+                  选择一个会话开始聊天，或创建新的会话
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* 删除确认弹窗 */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除会话</DialogTitle>
+            <DialogDescription>
+              确定要删除这个会话吗？删除后将无法恢复，包括所有聊天记录和生成的代码。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+              disabled={deletingThreadId !== null}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={deleteThread}
+              disabled={deletingThreadId !== null}
+            >
+              {deletingThreadId ? (
+                <>
+                  <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  删除中...
+                </>
+              ) : (
+                "确认删除"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

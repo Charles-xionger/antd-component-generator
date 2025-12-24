@@ -3,7 +3,7 @@ import prisma from "@/lib/database/pirsma";
 import { createGraphForMcpUrl } from "@/lib/agent";
 import { BaseMessage } from "@langchain/core/messages";
 
-// 获取单个会话的消息历史
+// 获取单个会话的消息历史和代码文件
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ threadId: string }> }
@@ -25,29 +25,117 @@ export async function GET(
     const graph = await createGraphForMcpUrl();
     const state = await graph.getState(config);
 
-    if (!state.values || !state.values.messages) {
-      return Response.json({ messages: [] });
-    }
-
     // 格式化消息，提取需要的字段
-    const messages = state.values.messages.map((msg: BaseMessage) => ({
-      id: msg.id,
-      type: msg._getType?.() || "unknown",
-      content: msg.content,
-      // 工具调用信息（如果有）
-      toolCalls:
-        (msg as unknown as { tool_calls?: unknown[] }).tool_calls || undefined,
-      // 工具响应信息（如果有）
-      name: msg.name || undefined,
-    }));
+    const messages =
+      state.values?.messages?.map((msg: BaseMessage) => ({
+        id: msg.id,
+        type: msg._getType?.() || "unknown",
+        content: msg.content,
+        // 工具调用信息（如果有）
+        toolCalls:
+          (msg as unknown as { tool_calls?: unknown[] }).tool_calls ||
+          undefined,
+        // 工具响应信息（如果有）
+        name: msg.name || undefined,
+      })) || [];
 
-    return Response.json({ messages, threadId });
+    // 获取 Thread 及其关联的 Artifact 和所有版本
+    const thread = await prisma.thread.findUnique({
+      where: { id: threadId },
+      include: {
+        artifact: {
+          include: {
+            versions: {
+              orderBy: { versionNumber: "desc" }, // 按版本号降序排列
+              include: {
+                files: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const allVersions = thread?.artifact?.versions || [];
+    const currentVersion = allVersions[0]; // 最新版本
+    const files = currentVersion?.files || [];
+
+    return Response.json({
+      messages,
+      threadId,
+      thread: thread
+        ? {
+            id: thread.id,
+            title: thread.title,
+            createdAt: thread.createdAt,
+            updatedAt: thread.updatedAt,
+          }
+        : null,
+      artifact: thread?.artifact
+        ? {
+            id: thread.artifact.id,
+            versions: allVersions.map((version) => ({
+              id: version.id,
+              versionNumber: version.versionNumber,
+              description: version.description,
+              createdAt: version.createdAt,
+              files: version.files.map((file) => ({
+                id: file.id,
+                path: file.path,
+                content: file.content,
+              })),
+            })),
+            currentVersion: currentVersion
+              ? {
+                  id: currentVersion.id,
+                  versionNumber: currentVersion.versionNumber,
+                  description: currentVersion.description,
+                  createdAt: currentVersion.createdAt,
+                  files: files.map((file) => ({
+                    id: file.id,
+                    path: file.path,
+                    content: file.content,
+                  })),
+                }
+              : null,
+          }
+        : null,
+    });
   } catch (error) {
-    console.error("Failed to fetch messages:", error);
+    console.error("Failed to fetch thread data:", error);
     return Response.json(
-      { error: "Failed to fetch messages" },
+      { error: "Failed to fetch thread data" },
       { status: 500 }
     );
+  }
+}
+
+// 更新会话标题或触发 updatedAt 更新
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ threadId: string }> }
+) {
+  try {
+    const { threadId } = await params;
+    const body = await request.json().catch(() => ({})); // 允许空 body
+    const { title } = body;
+
+    if (!threadId) {
+      return Response.json({ error: "Thread ID is required" }, { status: 400 });
+    }
+
+    // 如果有 title 则更新 title，否则只更新 updatedAt
+    const updateData = title ? { title } : { updatedAt: new Date() };
+
+    const thread = await prisma.thread.update({
+      where: { id: threadId },
+      data: updateData,
+    });
+
+    return Response.json({ thread });
+  } catch (error) {
+    console.error("Failed to update thread:", error);
+    return Response.json({ error: "Failed to update thread" }, { status: 500 });
   }
 }
 
@@ -63,39 +151,18 @@ export async function DELETE(
       return Response.json({ error: "Thread ID is required" }, { status: 400 });
     }
 
-    // 从 Prisma 删除 thread 记录
+    // 删除 thread 及其关联的 artifact 和版本数据
+    // 由于数据库设置了 CASCADE 删除，删除 thread 会自动删除相关数据
     await prisma.thread.delete({
       where: { id: threadId },
     });
 
-    return Response.json({ success: true });
+    return Response.json({
+      success: true,
+      message: "Thread deleted successfully",
+    });
   } catch (error) {
     console.error("Failed to delete thread:", error);
     return Response.json({ error: "Failed to delete thread" }, { status: 500 });
-  }
-}
-
-// 更新会话标题
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ threadId: string }> }
-) {
-  try {
-    const { threadId } = await params;
-    const { title } = await request.json();
-
-    if (!threadId) {
-      return Response.json({ error: "Thread ID is required" }, { status: 400 });
-    }
-
-    const thread = await prisma.thread.update({
-      where: { id: threadId },
-      data: { title },
-    });
-
-    return Response.json({ thread });
-  } catch (error) {
-    console.error("Failed to update thread:", error);
-    return Response.json({ error: "Failed to update thread" }, { status: 500 });
   }
 }

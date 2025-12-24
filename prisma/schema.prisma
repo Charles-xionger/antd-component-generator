@@ -18,6 +18,55 @@ model Thread {
   title     String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // 关联：一个对话对应一个项目工件
+  artifact  Artifact?
+}
+
+// 2. 项目工件 (Canvas 里的那个“项目”)
+model Artifact {
+  id        String   @id @default(uuid())
+  
+  // 外键关联 Thread
+  threadId  String   @unique // 保证 1对1 关系
+  thread    Thread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  // 版本历史
+  versions  ArtifactVersion[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 3. 代码版本快照
+model ArtifactVersion {
+  id             String   @id @default(uuid())
+  
+  artifactId     String
+  artifact       Artifact @relation(fields: [artifactId], references: [id], onDelete: Cascade)
+  
+  versionNumber  Int      // 版本号：1, 2, 3...
+  description    String?  // Agent 的 commit message，如 "Added login page"
+  
+  files          File[]   // 该版本下的文件列表
+
+  createdAt      DateTime @default(now())
+  
+  // 索引优化：方便按项目查最新版本
+  @@index([artifactId, versionNumber])
+}
+
+// 4. 具体文件内容
+model File {
+  id                String          @id @default(uuid())
+  
+  artifactVersionId String
+  artifactVersion   ArtifactVersion @relation(fields: [artifactVersionId], references: [id], onDelete: Cascade)
+  
+  path              String          // 例如 "/app/page.tsx"
+  content           String          @db.Text // 代码内容
+  
+  @@unique([artifactVersionId, path]) // 同一版本下路径唯一
 }
 
 /// MCP 服务器配置表
