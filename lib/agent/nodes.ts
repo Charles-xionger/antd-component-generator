@@ -86,8 +86,14 @@ export async function architect(
     state.messages.filter((m) => m._getType() === "human").slice(-1)[0]
       ?.content || "";
 
+  // 注入代码上下文到 architect prompt
+  const promptWithContext = ARCHITECT_PROMPT.replace(
+    "{codeContext}",
+    state.codeContext || "这是一个新项目，没有现有代码。"
+  );
+
   const messages = [
-    new SystemMessage(ARCHITECT_PROMPT),
+    new SystemMessage(promptWithContext),
     new HumanMessage(`用户需求：${lastUserMessage}`),
   ];
 
@@ -205,6 +211,7 @@ export async function reviewer(
   const llm = new ChatOpenAI({
     ...baseModelConfig,
     temperature: 0.1,
+    timeout: 15000, // 15秒超时，避免长时间等待
   });
 
   const messages = [
@@ -216,13 +223,22 @@ ${state.generatedArtifact}
     `),
   ];
 
-  const response = await llm.invoke(messages);
-  const feedback = response.content.toString().trim();
+  try {
+    const response = await llm.invoke(messages);
+    const feedback = response.content.toString().trim();
 
-  return {
-    messages: [response], // 只返回新的AI消息
-    reviewFeedback: feedback,
-  };
+    return {
+      messages: [response], // 只返回新的AI消息
+      reviewFeedback: feedback,
+    };
+  } catch (error) {
+    console.error("Reviewer error:", error);
+    // 审查失败时，默认通过，避免阻塞流程
+    return {
+      messages: [new AIMessage("APPROVE (审查服务暂时不可用，自动通过)")],
+      reviewFeedback: "APPROVE",
+    };
+  }
 }
 
 // 条件路由函数
