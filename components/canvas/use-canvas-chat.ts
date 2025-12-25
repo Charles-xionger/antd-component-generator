@@ -45,6 +45,7 @@ export function useCanvasChat({
   const lastMessageRef = useRef<string>("");
   const abortControllerRef = useRef<AbortController | null>(null);
   const lastRenderedArtifactRef = useRef<string | null>(null);
+  const pendingRefreshRef = useRef(false); // 标记是否有待处理的刷新
 
   // Version management
   const [versions, setVersions] = useState<ArtifactVersion[]>([]);
@@ -78,37 +79,7 @@ export function useCanvasChat({
     });
   }, []);
 
-  // Sandbox message listener
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      const { type, payload } = event.data;
-
-      switch (type) {
-        case "IFRAME_LOADED":
-          setIsSandboxReady(true);
-          setSandboxError(null);
-          console.log("沙箱已就绪");
-          break;
-
-        case "artifacts-success":
-          setIsRendering(false);
-          setSandboxError(null);
-          console.log("渲染成功");
-          break;
-
-        case "artifacts-error":
-          setIsRendering(false);
-          setSandboxError(payload.errorMessage);
-          console.error("渲染失败:", payload.errorMessage);
-          break;
-      }
-    };
-
-    window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
-  }, []);
-
-  // Send code to sandbox
+  // Send code to sandbox - 移到 effect 之前以避免引用问题
   const sendToSandbox = useCallback(() => {
     if (
       !isSandboxReady ||
@@ -167,6 +138,52 @@ export function useCanvasChat({
       "*"
     );
   }, [isSandboxReady, artifact]);
+
+  // Sandbox message listener
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      const { type, payload } = event.data;
+
+      switch (type) {
+        case "IFRAME_LOADED":
+          setIsSandboxReady(true);
+          setSandboxError(null);
+          console.log("沙箱已就绪");
+
+          // 如果有待处理的刷新，重新发送代码
+          if (pendingRefreshRef.current) {
+            pendingRefreshRef.current = false;
+            lastRenderedArtifactRef.current = null;
+          }
+          break;
+
+        case "artifacts-success":
+          setIsRendering(false);
+          setSandboxError(null);
+          console.log("渲染成功");
+          break;
+
+        case "artifacts-error":
+          setIsRendering(false);
+          setSandboxError(payload.errorMessage);
+          console.error("渲染失败:", payload.errorMessage);
+          break;
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
+
+  // 刷新后沙箱就绪时自动重新发送代码
+  useEffect(() => {
+    if (isSandboxReady && pendingRefreshRef.current === false && artifact) {
+      // 检查是否需要重新渲染（刷新后 lastRenderedArtifactRef 被清空了）
+      if (lastRenderedArtifactRef.current === null) {
+        sendToSandbox();
+      }
+    }
+  }, [isSandboxReady, artifact, sendToSandbox]);
 
   // Fetch version history
   const fetchVersionHistory = useCallback(async () => {
@@ -426,9 +443,14 @@ export function useCanvasChat({
     }
   };
 
-  // Refresh preview
+  // Refresh preview - 刷新后重新发送代码
   const refreshPreview = useCallback(() => {
     if (iframeRef.current) {
+      // 标记待刷新，等沙箱就绪后重新发送代码
+      pendingRefreshRef.current = true;
+      setIsSandboxReady(false);
+
+      // 刷新 iframe
       iframeRef.current.src = iframeRef.current.src;
     }
   }, []);

@@ -77,28 +77,32 @@ export function MessageList({ messages, isLoading }: MessageListProps) {
         let summary = "AI 正在处理...";
         let status: "processing" | "completed" | "reviewing" = "processing";
 
-        if (hasCode && hasApprove) {
+        // 检测消息内容特征
+        const allContent = aiMessages.map((m) => m.content).join(" ");
+        const hasPlan =
+          allContent.includes('"files"') ||
+          allContent.includes('"architecture');
+        const hasError =
+          allContent.includes("错误") ||
+          allContent.includes("失败") ||
+          allContent.includes("error");
+
+        // 简化状态判断：有代码就是完成
+        if (hasCode) {
           summary = "✅ 代码生成完成";
           status = "completed";
-        } else if (hasCode) {
-          summary = "📝 代码已生成";
-          status = "reviewing";
+        } else if (hasError) {
+          summary = "⚠️ 处理过程中出现问题";
+          status = "completed";
+        } else if (hasPlan) {
+          summary = "📋 已生成开发计划";
+          status = "completed";
         } else if (hasApprove) {
           summary = "✅ 审核通过";
           status = "completed";
         } else {
-          const firstMsg = aiMessages[0]?.content || "";
-          if (firstMsg.includes("路由决策")) {
-            summary = "🔄 正在处理请求...";
-          } else {
-            const lines = firstMsg
-              .split("\n")
-              .filter((line) => line.trim() && !line.includes("路由"));
-            if (lines.length > 0) {
-              const firstLine = lines[0].substring(0, 50);
-              summary = firstLine + (lines[0].length > 50 ? "..." : "");
-            }
-          }
+          summary = "🤖 AI 响应";
+          status = "completed";
         }
 
         return (

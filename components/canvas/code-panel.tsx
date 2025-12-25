@@ -129,13 +129,9 @@ export function CodePanel({
               </button>
             </div>
             {/* Code Content */}
-            <div className="flex-1 overflow-auto">
+            <div className="flex-1 overflow-auto bg-white">
               <pre className="p-4 text-sm whitespace-pre font-mono leading-relaxed">
-                <code
-                  className={`language-${selectedFile.language} text-gray-300`}
-                >
-                  {selectedFile.content}
-                </code>
+                <code className="text-gray-100">{selectedFile.content}</code>
               </pre>
             </div>
           </>
