@@ -30,7 +30,11 @@ export function CodePanel({
   onCopyToClipboard,
 }: CodePanelProps) {
   return (
-    <div className={`flex-1 flex overflow-hidden ${isVisible ? "" : "hidden"}`}>
+    <div
+      className={`absolute inset-0 flex overflow-hidden transition-opacity duration-200 ${
+        isVisible ? "opacity-100 z-10" : "opacity-0 z-0 pointer-events-none"
+      }`}
+    >
       {/* File Explorer Sidebar */}
       <div className="w-56 bg-gray-900 border-r border-gray-700 flex flex-col">
         <div className="px-3 py-2 text-xs text-gray-400 font-medium border-b border-gray-700 flex items-center justify-between">

@@ -278,14 +278,24 @@ async function routeToSubgraph(state: AgentState): Promise<string> {
   const prompt = SUPERVISOR_PROMPT.replace("{message}", String(userMessage));
 
   const response = await llm.invoke([new HumanMessage(prompt)]);
-  const decision = response.content.toString().trim().toLowerCase();
+  const responseText = response.content.toString().trim();
 
-  console.log("Supervisor routing decision:", decision);
+  // 从标签中提取路由决策
+  const routeMatch = responseText.match(/<route>(.*?)<\/route>/);
+  const decision = routeMatch ? routeMatch[1].toLowerCase() : "chat";
+
+  console.log(
+    "Supervisor routing decision:",
+    decision,
+    "(from response:",
+    responseText,
+    ")"
+  );
 
   // 返回子图名称
-  if (decision.includes("coding")) {
+  if (decision === "coding") {
     return "coding_subgraph";
-  } else if (decision.includes("mcp")) {
+  } else if (decision === "mcp") {
     return "mcp_subgraph";
   } else {
     return "chat_subgraph";

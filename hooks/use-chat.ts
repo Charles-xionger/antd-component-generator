@@ -8,6 +8,15 @@ export interface Message {
   content: string;
   hasArtifact?: boolean;
   toolCalls?: ToolCall[];
+  agentSteps?: AgentStep[];
+}
+
+export interface AgentStep {
+  id: string;
+  agent: "supervisor" | "architect" | "coder" | "reviewer";
+  status: "running" | "completed" | "error";
+  message?: string;
+  timestamp: number;
 }
 
 export interface ToolCall {
@@ -26,8 +35,10 @@ export interface UseChatOptions {
   threadId?: string;
   /** MCP 配置 ID */
   mcpConfigId?: string | null;
-  /** 检测到 artifact 时的回调 */
+  /** 检测到 artifact 时的回调（流式和最终） */
   onArtifactDetected?: (content: string) => void;
+  /** 后端保存成功时的回调 */
+  onSaved?: () => void;
   /** 工具调用时的回调 */
   onToolCall?: (toolCall: ToolCall) => void;
   /** 发生错误时的回调 */
@@ -40,6 +51,7 @@ export function useChat(options: UseChatOptions = {}) {
     threadId,
     mcpConfigId,
     onArtifactDetected,
+    onSaved,
     onToolCall,
     onError,
   } = options;
@@ -52,12 +64,14 @@ export function useChat(options: UseChatOptions = {}) {
 
   // 使用 ref 存储回调，避免依赖变化导致死循环
   const onArtifactDetectedRef = useRef(onArtifactDetected);
+  const onSavedRef = useRef(onSaved);
   const onToolCallRef = useRef(onToolCall);
   const onErrorRef = useRef(onError);
 
   // 同步更新 ref
   useEffect(() => {
     onArtifactDetectedRef.current = onArtifactDetected;
+    onSavedRef.current = onSaved;
     onToolCallRef.current = onToolCall;
     onErrorRef.current = onError;
   });
@@ -156,6 +170,7 @@ export function useChat(options: UseChatOptions = {}) {
         role: "assistant",
         content: "",
         toolCalls: [],
+        agentSteps: [],
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -189,6 +204,47 @@ export function useChat(options: UseChatOptions = {}) {
                 if (hasArtifact && onArtifactDetectedRef.current) {
                   onArtifactDetectedRef.current(assistantContent);
                 }
+              } else if (data.type === "agent_start") {
+                // 处理 agent 开始事件
+                const agentStep: AgentStep = {
+                  id: `${data.agent}-${Date.now()}`,
+                  agent: data.agent,
+                  status: "running",
+                  message: data.message,
+                  timestamp: Date.now(),
+                };
+
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMessage.id
+                      ? {
+                          ...msg,
+                          agentSteps: [...(msg.agentSteps || []), agentStep],
+                        }
+                      : msg
+                  )
+                );
+              } else if (data.type === "agent_end") {
+                // 处理 agent 结束事件
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMessage.id
+                      ? {
+                          ...msg,
+                          agentSteps: msg.agentSteps?.map((step) =>
+                            step.agent === data.agent &&
+                            step.status === "running"
+                              ? {
+                                  ...step,
+                                  status: "completed" as const,
+                                  message: data.message,
+                                }
+                              : step
+                          ),
+                        }
+                      : msg
+                  )
+                );
               } else if (data.type === "tool_start") {
                 // 使用 run_id 作为唯一标识符
                 const toolCallId =
@@ -254,6 +310,10 @@ export function useChat(options: UseChatOptions = {}) {
                       : msg
                   )
                 );
+              } else if (data.type === "saved") {
+                // 后端保存成功，触发回调刷新版本历史
+                console.log("[useChat] 后端保存成功，触发 onSaved");
+                onSavedRef.current?.();
               }
             } catch {
               // 忽略解析错误

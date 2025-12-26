@@ -9,9 +9,9 @@ import { useChat } from "@/hooks/use-chat";
 import { useCanvas } from "@/hooks/use-canvas";
 
 // Components
-import { MCPConfigPanel, type MCPConfig } from "@/components/mcp-config-panel";
+import { MCPConfigPanel, type MCPConfig } from "@/components/mcp";
 import { MessageItem, InputBar } from "@/components/chat";
-import { CanvasPanel } from "@/components/canvas-panel";
+import { CanvasPanel } from "@/components/canvas";
 
 interface UnifiedChatProps {
   threadId?: string;
@@ -27,6 +27,10 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
   const [selectedMcpId, setSelectedMcpId] = useState<string | null>(null);
   const [isMcpLoading, setIsMcpLoading] = useState(false);
 
+  // Sandbox state
+  const [isSandboxReady, setIsSandboxReady] = useState(false);
+  const [sandboxError, setSandboxError] = useState<string | null>(null);
+
   // Canvas hook
   const canvas = useCanvas({ threadId });
 
@@ -35,9 +39,55 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
     threadId,
     mcpConfigId: selectedMcpId,
     onArtifactDetected: (content: string) => {
-      canvas.setGeneratedCode(content);
+      // 使用合并逻辑，保留未修改的文件
+      canvas.mergeAndSetGeneratedCode(content);
+
+      // 检查是否审查通过，如果通过则允许发送到沙箱
+      const hasReviewApproval =
+        content.includes("<reviewer_result>APPROVE") ||
+        content.includes("APPROVE");
+      if (hasReviewApproval) {
+        console.log("[UnifiedChat] 审查通过，允许发送到沙箱");
+        canvas.setShouldSendToSandbox(true);
+      } else {
+        console.log("[UnifiedChat] 代码生成中或未通过审查，暂不发送到沙箱");
+        canvas.setShouldSendToSandbox(false);
+      }
+    },
+    onSaved: () => {
+      // 后端保存成功后，刷新版本列表（不切换内容，避免打断流式显示）
+      console.log("[UnifiedChat] 收到 saved 事件，刷新版本列表");
+      canvas.refreshVersionList();
     },
   });
+
+  // Sandbox message listener
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      const { type, payload } = event.data || {};
+
+      switch (type) {
+        case "IFRAME_LOADED":
+          setIsSandboxReady(true);
+          setSandboxError(null);
+          console.log("沙箱已就绪");
+          break;
+
+        case "artifacts-success":
+          setSandboxError(null);
+          console.log("渲染成功");
+          break;
+
+        case "artifacts-error":
+          setSandboxError(payload?.errorMessage || "渲染失败");
+          console.error("渲染失败:", payload?.errorMessage);
+          break;
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -99,7 +149,6 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
             <MessageItem
               key={message.id}
               message={message}
-              artifact={canvas.artifact}
               onCanvasExpand={handleCanvasExpand}
             />
           ))}
@@ -135,6 +184,8 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
             canvas={canvas}
             onClose={handleCanvasClose}
             iframeRef={iframeRef}
+            isSandboxReady={isSandboxReady}
+            sandboxError={sandboxError}
           />
         </div>
       )}

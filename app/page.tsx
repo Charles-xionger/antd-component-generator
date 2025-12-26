@@ -27,15 +27,30 @@ interface Thread {
 
 export default function Home() {
   const [threads, setThreads] = useState<Thread[]>([]);
-  const [selectedThreadId, setSelectedThreadId] = useState<
-    string | undefined
-  >();
+  const [selectedThreadId, setSelectedThreadId] = useState<string | undefined>(
+    () => {
+      // 从 localStorage 恢复选中的会话
+      if (typeof window !== "undefined") {
+        return localStorage.getItem("selectedThreadId") || undefined;
+      }
+      return undefined;
+    }
+  );
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [threadToDelete, setThreadToDelete] = useState<string | null>(null);
   const { showToast } = useToast();
+
+  // 保存选中的会话到 localStorage
+  useEffect(() => {
+    if (selectedThreadId) {
+      localStorage.setItem("selectedThreadId", selectedThreadId);
+    } else {
+      localStorage.removeItem("selectedThreadId");
+    }
+  }, [selectedThreadId]);
 
   // 获取 thread 列表
   const fetchThreads = useCallback(async () => {
@@ -44,10 +59,16 @@ export default function Home() {
       const data = await response.json();
       if (data.threads) {
         setThreads(data.threads);
-        // 如果没有选中的 thread，选择最新的一个
-        if (!selectedThreadId && data.threads.length > 0) {
-          setSelectedThreadId(data.threads[0].id);
-        }
+        // 如果没有选中的 thread，或者选中的 thread 不存在于列表中，选择最新的一个
+        setSelectedThreadId((currentId) => {
+          const existsInList = data.threads.some(
+            (t: Thread) => t.id === currentId
+          );
+          if ((!currentId || !existsInList) && data.threads.length > 0) {
+            return data.threads[0].id;
+          }
+          return currentId;
+        });
       }
     } catch (error) {
       console.error("获取会话列表失败:", error);
@@ -55,7 +76,7 @@ export default function Home() {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedThreadId, showToast]);
+  }, [showToast]);
 
   // 创建新会话
   const createNewThread = async () => {

@@ -6,12 +6,7 @@ import {
 } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
 import type { AgentState } from "./state";
-import {
-  ARCHITECT_PROMPT,
-  CODER_PROMPT,
-  REVIEWER_PROMPT,
-  SUPERVISOR_PROMPT,
-} from "./prompts";
+import { ARCHITECT_PROMPT, CODER_PROMPT, REVIEWER_PROMPT } from "./prompts";
 
 // JSON解析工具函数
 function extractJSONFromResponse(response: string): string {
@@ -53,25 +48,6 @@ const baseModelConfig = {
   maxRetries: 3,
   timeout: 30000, // 30秒超时
 };
-
-// Supervisor Node: 路由用户请求
-export async function supervisor(
-  state: AgentState
-): Promise<Partial<AgentState>> {
-  const llm = new ChatOpenAI(baseModelConfig);
-
-  const lastMessage = state.messages[state.messages.length - 1];
-  const userMessage = lastMessage?.content || "";
-
-  const prompt = SUPERVISOR_PROMPT.replace("{message}", String(userMessage));
-
-  const response = await llm.invoke([new SystemMessage(prompt)]);
-  const decision = response.content.toString().trim().toLowerCase();
-
-  return {
-    messages: [new AIMessage(`路由决策: ${decision}`)], // 只返回新的路由消息
-  };
-}
 
 // Architect Node: 生成开发计划
 export async function architect(

@@ -1,8 +1,8 @@
-// components/canvas-card.tsx
+// components/canvas/canvas-card.tsx
 "use client";
 
-import { Code2, ChevronRight, FileCode } from "lucide-react";
-import type { ParsedFile } from "./canvas/types";
+import { Code2, ChevronRight, FileCode, Loader2 } from "lucide-react";
+import type { ParsedFile } from "./types";
 
 interface CanvasCardProps {
   artifact: {
@@ -12,27 +12,59 @@ interface CanvasCardProps {
   };
   versionNumber?: number;
   onExpand: () => void;
+  isLoading?: boolean;
 }
 
 export function CanvasCard({
   artifact,
   versionNumber,
   onExpand,
+  isLoading = false,
 }: CanvasCardProps) {
   return (
     <div
       onClick={onExpand}
-      className="group cursor-pointer rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition-all hover:border-blue-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-800"
+      className={`
+        group cursor-pointer rounded-lg border bg-white p-4 shadow-sm transition-all
+        dark:bg-gray-800
+        ${
+          isLoading
+            ? "border-blue-300 ring-2 ring-blue-100 dark:border-blue-700 dark:ring-blue-900/30"
+            : "border-gray-200 hover:border-blue-300 hover:shadow-md dark:border-gray-700"
+        }
+      `}
     >
       {/* Header */}
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="rounded-md bg-blue-100 p-2 dark:bg-blue-900/30">
-            <Code2 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+          <div
+            className={`
+              rounded-md p-2
+              ${
+                isLoading
+                  ? "bg-blue-500 dark:bg-blue-600"
+                  : "bg-blue-100 dark:bg-blue-900/30"
+              }
+            `}
+          >
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin text-white" />
+            ) : (
+              <Code2
+                className={`h-4 w-4 ${
+                  isLoading ? "text-white" : "text-blue-600 dark:text-blue-400"
+                }`}
+              />
+            )}
           </div>
           <div>
-            <div className="font-medium text-gray-900 dark:text-gray-100">
+            <div className="flex items-center gap-2 font-medium text-gray-900 dark:text-gray-100">
               {artifact.title}
+              {isLoading && (
+                <span className="text-xs font-normal text-blue-600 dark:text-blue-400">
+                  生成中...
+                </span>
+              )}
             </div>
             {versionNumber && (
               <div className="text-xs text-gray-500">版本 {versionNumber}</div>
@@ -50,7 +82,14 @@ export function CanvasCard({
         {artifact.files.slice(0, 3).map((file, index) => (
           <div
             key={index}
-            className="flex items-center gap-2 rounded px-2 py-1 text-sm text-gray-600 dark:text-gray-400"
+            className={`
+              flex items-center gap-2 rounded px-2 py-1 text-sm
+              ${
+                isLoading
+                  ? "animate-pulse text-blue-600 dark:text-blue-400"
+                  : "text-gray-600 dark:text-gray-400"
+              }
+            `}
           >
             <FileCode className="h-3 w-3" />
             <span className="truncate">{file.path}</span>
@@ -69,7 +108,7 @@ export function CanvasCard({
           {artifact.files.length} 个文件
         </div>
         <div className="text-xs text-gray-500 group-hover:text-blue-600 dark:group-hover:text-blue-400">
-          点击查看详情 →
+          {isLoading ? "生成中，点击查看进度 →" : "点击查看详情 →"}
         </div>
       </div>
     </div>

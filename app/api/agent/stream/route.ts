@@ -102,6 +102,39 @@ export async function POST(request: NextRequest) {
           );
 
           for await (const event of eventStream) {
+            // 处理 agent 节点开始
+            if (event.event === "on_chain_start" && event.name) {
+              const agentName = event.name.toLowerCase();
+              // 只发送我们关心的 agent 节点（排除 subgraph，只关注实际的 agent）
+              if (["architect", "coder", "reviewer"].includes(agentName)) {
+                const chunk = encoder.encode(
+                  `data: ${JSON.stringify({
+                    type: "agent_start",
+                    agent: agentName,
+                    message: getAgentStartMessage(agentName),
+                    threadId: finalThreadId,
+                  })}\n\n`
+                );
+                controller.enqueue(chunk);
+              }
+            }
+
+            // 处理 agent 节点结束
+            if (event.event === "on_chain_end" && event.name) {
+              const agentName = event.name.toLowerCase();
+              if (["architect", "coder", "reviewer"].includes(agentName)) {
+                const chunk = encoder.encode(
+                  `data: ${JSON.stringify({
+                    type: "agent_end",
+                    agent: agentName,
+                    message: getAgentEndMessage(agentName),
+                    threadId: finalThreadId,
+                  })}\n\n`
+                );
+                controller.enqueue(chunk);
+              }
+            }
+
             // 流式发送 AI 消息内容
             if (
               event.event === "on_chat_model_stream" &&
@@ -201,17 +234,31 @@ export async function POST(request: NextRequest) {
                   // 合并逻辑：旧文件 + 新修改 = 新快照
                   const nextFiles = mergeFiles(currentFiles, generatedFilesMap);
 
+                  // 重新查询最新版本号，避免并发问题
+                  const latestVersion = await prisma.artifactVersion.findFirst({
+                    where: { artifactId: artifact.id },
+                    orderBy: { versionNumber: "desc" },
+                    select: { versionNumber: true },
+                  });
+                  const nextVersionNumber =
+                    (latestVersion?.versionNumber || 0) + 1;
+
                   const newVersion = await prisma.artifactVersion.create({
                     data: {
                       artifactId: artifact.id,
-                      versionNumber: (currentVersion?.versionNumber || 0) + 1,
+                      versionNumber: nextVersionNumber,
                       description: `更新于 ${new Date().toLocaleString()}`,
                       files: {
                         create: nextFiles,
                       },
                     },
                   });
-                  console.log("Created new version:", newVersion.id);
+                  console.log(
+                    "Created new version:",
+                    newVersion.id,
+                    "versionNumber:",
+                    nextVersionNumber
+                  );
                 }
 
                 // 发送保存完成信号
@@ -270,5 +317,33 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("API error:", error);
     return Response.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+// 获取 agent 开始时的友好消息
+function getAgentStartMessage(agent: string): string {
+  switch (agent) {
+    case "architect":
+      return "🏗️ 架构师正在设计方案...";
+    case "coder":
+      return "💻 工程师正在编写代码...";
+    case "reviewer":
+      return "🔍 审查员正在检查代码...";
+    default:
+      return "处理中...";
+  }
+}
+
+// 获取 agent 结束时的友好消息
+function getAgentEndMessage(agent: string): string {
+  switch (agent) {
+    case "architect":
+      return "✅ 方案设计完成";
+    case "coder":
+      return "✅ 代码编写完成";
+    case "reviewer":
+      return "✅ 代码审查完成";
+    default:
+      return "完成";
   }
 }
