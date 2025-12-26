@@ -13,7 +13,7 @@ import {
 
 export async function POST(request: NextRequest) {
   try {
-    const { message, threadId } = await request.json();
+    const { message, threadId, mcpConfigId } = await request.json();
 
     if (!message) {
       return Response.json({ error: "Message is required" }, { status: 400 });
@@ -67,11 +67,26 @@ export async function POST(request: NextRequest) {
     }
 
     // ==========================================
-    // 3. 创建 Graph 并注入上下文
+    // 3. 获取 MCP 配置（如果提供了 mcpConfigId）
     // ==========================================
 
-    // 创建图 (暂时禁用 MCP 功能)
-    const graph = await createGraphForMcpUrl(codeContext);
+    let mcpUrl: string | undefined;
+    if (mcpConfigId) {
+      const mcpConfig = await prisma.mCPConfig.findUnique({
+        where: { id: mcpConfigId, enabled: true },
+      });
+      if (mcpConfig) {
+        mcpUrl = mcpConfig.url;
+        console.log("使用 MCP 配置:", mcpConfig.name, mcpUrl);
+      }
+    }
+
+    // ==========================================
+    // 4. 创建 Graph 并注入上下文
+    // ==========================================
+
+    // 创建图（支持 MCP 功能）
+    const graph = await createGraphForMcpUrl(codeContext, mcpUrl);
 
     // 创建可读流
     const encoder = new TextEncoder();
@@ -105,26 +120,38 @@ export async function POST(request: NextRequest) {
               controller.enqueue(chunk);
             }
 
-            // 处理工具调用
+            // 处理工具调用开始
             if (event.event === "on_tool_start") {
               const toolName = event.name;
+              const runId = event.run_id;
+              const toolInput = event.data?.input || {};
               const chunk = encoder.encode(
                 `data: ${JSON.stringify({
                   type: "tool_start",
+                  tool_call_id: runId,
+                  tool_name: toolName,
                   tool: toolName,
+                  args: toolInput,
                   threadId: finalThreadId,
                 })}\n\n`
               );
               controller.enqueue(chunk);
             }
 
+            // 处理工具调用结束
             if (event.event === "on_tool_end") {
               const toolName = event.name;
-              const output = event.data.output;
+              const runId = event.run_id;
+              const output = event.data?.output;
               const chunk = encoder.encode(
                 `data: ${JSON.stringify({
                   type: "tool_end",
+                  tool_call_id: runId,
                   tool: toolName,
+                  result:
+                    typeof output === "string"
+                      ? output
+                      : JSON.stringify(output),
                   output,
                   threadId: finalThreadId,
                 })}\n\n`

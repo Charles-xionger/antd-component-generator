@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { CanvasChat } from "@/components/canvas-chat";
+import { UnifiedChat } from "@/components/unified-chat";
 import {
   Dialog,
   DialogContent,
@@ -324,10 +324,10 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Canvas Chat 区域 */}
+        {/* Unified Chat 区域 */}
         <div className="flex-1 overflow-hidden">
           {selectedThreadId ? (
-            <CanvasChat
+            <UnifiedChat
               key={selectedThreadId}
               threadId={selectedThreadId}
               onThreadUpdate={fetchThreads}
@@ -336,7 +336,7 @@ export default function Home() {
             <div className="h-full flex items-center justify-center text-gray-500">
               <div className="text-center">
                 <div className="text-2xl mb-4">🎯</div>
-                <div className="text-lg mb-2">欢迎使用 Canvas Chat</div>
+                <div className="text-lg mb-2">欢迎使用 AI 助手</div>
                 <div className="text-sm">
                   选择一个会话开始聊天，或创建新的会话
                 </div>

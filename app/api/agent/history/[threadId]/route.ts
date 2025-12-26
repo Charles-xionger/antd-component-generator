@@ -31,12 +31,16 @@ export async function GET(
         id: msg.id,
         type: msg._getType?.() || "unknown",
         content: msg.content,
-        // 工具调用信息（如果有）
+        // 工具调用信息（如果有，用于 AI 消息）
         toolCalls:
           (msg as unknown as { tool_calls?: unknown[] }).tool_calls ||
           undefined,
-        // 工具响应信息（如果有）
+        // 工具响应信息（如果有，用于 tool 消息）
         name: msg.name || undefined,
+        // tool 消息关联的 tool_call_id
+        tool_call_id:
+          (msg as unknown as { tool_call_id?: string }).tool_call_id ||
+          undefined,
       })) || [];
 
     // 获取 Thread 及其关联的 Artifact 和所有版本

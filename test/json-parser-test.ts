@@ -96,7 +96,8 @@ testCases.forEach((testCase, index) => {
     console.log(`✅ 测试案例 ${index + 1} 通过`);
     console.log("解析结果:", parsed);
   } catch (error) {
-    console.log(`❌ 测试案例 ${index + 1} 失败:`, error.message);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.log(`❌ 测试案例 ${index + 1} 失败:`, errorMessage);
     console.log("输入:", testCase.input);
     console.log("提取结果:", extractJSONFromResponse(testCase.input));
   }

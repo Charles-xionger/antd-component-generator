@@ -93,3 +93,39 @@ pre code {
 input::placeholder {
   color: #6b7280;
 }
+
+/* Canvas 展开动画 (豆包风格) */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-out-right {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 300ms ease-out forwards;
+}
+
+.animate-slide-out-right {
+  animation: slide-out-right 300ms ease-out forwards;
+}
+
+/* 聊天面板收缩动画 */
+.chat-panel-transition {
+  transition: width 300ms ease-out;
+}

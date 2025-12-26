@@ -1,9 +1,11 @@
 import "dotenv/config";
 
-import { BaseMessage, HumanMessage } from "@langchain/core/messages";
+import { BaseMessage, HumanMessage, AIMessage } from "@langchain/core/messages";
 import { Annotation, START, StateGraph } from "@langchain/langgraph";
 import { ChatOpenAI } from "@langchain/openai";
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
+import { MultiServerMCPClient } from "@langchain/mcp-adapters";
+import { ToolNode } from "@langchain/langgraph/prebuilt";
 
 // Import our new multi-agent components
 import { StateAnnotations, type AgentState } from "./state";
@@ -15,6 +17,7 @@ import {
   shouldRetryOrFinish,
 } from "./nodes";
 import { SUPERVISOR_PROMPT } from "./prompts";
+import { StructuredToolInterface } from "@langchain/core/tools";
 
 // 创建 checkpointer 并初始化
 const postgresCheckpointer = PostgresSaver.fromConnString(
@@ -41,6 +44,73 @@ const baseModelConfig = {
   timeout: 30000, // 30秒超时
 };
 
+/**
+ * 清理消息历史，移除不完整的 tool calls
+ * OpenAI 兼容 API 要求：带有 tool_calls 的 assistant 消息后必须跟着对应的 tool 响应消息
+ */
+function sanitizeMessages(messages: BaseMessage[]): BaseMessage[] {
+  const result: BaseMessage[] = [];
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    const msgType = msg._getType();
+
+    // 检查是否是带 tool_calls 的 AI 消息
+    if (msgType === "ai") {
+      const aiMsg = msg as AIMessage;
+      const toolCalls = aiMsg.tool_calls;
+
+      if (toolCalls && toolCalls.length > 0) {
+        // 检查后续是否有对应的 tool 响应消息
+        const toolCallIds = new Set(toolCalls.map((tc) => tc.id));
+        let hasAllResponses = true;
+        let nextIdx = i + 1;
+
+        // 查找后续的 tool 消息
+        while (
+          nextIdx < messages.length &&
+          messages[nextIdx]._getType() === "tool"
+        ) {
+          const toolMsg = messages[nextIdx] as unknown as {
+            tool_call_id?: string;
+          };
+          if (toolMsg.tool_call_id) {
+            toolCallIds.delete(toolMsg.tool_call_id);
+          }
+          nextIdx++;
+        }
+
+        // 如果还有未响应的 tool_call_id，说明不完整
+        if (toolCallIds.size > 0) {
+          console.log("跳过不完整的 tool call 消息:", Array.from(toolCallIds));
+          hasAllResponses = false;
+        }
+
+        if (!hasAllResponses) {
+          // 跳过这条 AI 消息和后续的不完整 tool 消息
+          continue;
+        }
+      }
+    }
+
+    // 跳过孤立的 tool 消息（没有对应的 AI 消息）
+    if (msgType === "tool") {
+      // 检查前一条是否是带 tool_calls 的 AI 消息
+      if (result.length === 0) {
+        continue;
+      }
+      const prevMsg = result[result.length - 1];
+      if (prevMsg._getType() !== "ai") {
+        continue;
+      }
+    }
+
+    result.push(msg);
+  }
+
+  return result;
+}
+
 // 创建简单对话 subgraph (无 MCP 功能)
 function createChatSubgraph() {
   const model = new ChatOpenAI(baseModelConfig);
@@ -54,7 +124,9 @@ function createChatSubgraph() {
   });
 
   const agentNode = async (state: typeof ChatStateAnnotations.State) => {
-    const response = await model.invoke(state.messages);
+    // 清理消息，移除不完整的 tool calls
+    const cleanMessages = sanitizeMessages(state.messages);
+    const response = await model.invoke(cleanMessages);
     return { messages: [response] };
   };
 
@@ -85,6 +157,114 @@ function createCodingSubgraph() {
   return codingWorkflow.compile();
 }
 
+// 创建 MCP subgraph (使用官方 @langchain/mcp-adapters)
+async function createMcpSubgraph(mcpUrl?: string) {
+  const model = new ChatOpenAI(baseModelConfig);
+
+  // MCP 状态定义
+  const McpStateAnnotations = Annotation.Root({
+    messages: Annotation<BaseMessage[]>({
+      reducer: (x, y) => x.concat(y),
+      default: () => [],
+    }),
+  });
+
+  // 如果没有提供 mcpUrl，返回简单的对话模式
+  if (!mcpUrl) {
+    const simpleNode = async (state: typeof McpStateAnnotations.State) => {
+      const cleanMessages = sanitizeMessages(state.messages);
+      const response = await model.invoke(cleanMessages);
+      return { messages: [response] };
+    };
+
+    const workflow = new StateGraph(McpStateAnnotations)
+      .addNode("agent", simpleNode)
+      .addEdge(START, "agent");
+
+    return workflow.compile();
+  }
+
+  // 使用官方 MCP 客户端
+  console.log("初始化 MCP 客户端，服务器:", mcpUrl);
+
+  let mcpTools: StructuredToolInterface[] = [];
+  let toolNode: ToolNode | null = null;
+
+  try {
+    // 使用 MultiServerMCPClient 连接 MCP 服务器
+    const client = new MultiServerMCPClient({
+      mcpServer: {
+        transport: "http",
+        url: mcpUrl,
+      },
+    });
+
+    // 获取工具列表
+    mcpTools = await client.getTools();
+    console.log(
+      `成功加载 ${mcpTools.length} 个 MCP 工具:`,
+      mcpTools.map((t) => t.name).join(", ")
+    );
+
+    // 创建 ToolNode
+    if (mcpTools.length > 0) {
+      toolNode = new ToolNode(mcpTools);
+    }
+  } catch (error) {
+    console.error("MCP 客户端初始化失败:", error);
+    // 继续执行，但不使用工具
+  }
+
+  // 如果成功获取了工具，创建带工具的 agent
+  if (mcpTools.length > 0 && toolNode) {
+    const llmWithTools = model.bindTools(mcpTools);
+
+    // 判断是否需要调用工具
+    const shouldContinue = (state: typeof McpStateAnnotations.State) => {
+      const lastMessage = state.messages[
+        state.messages.length - 1
+      ] as AIMessage;
+      return lastMessage.tool_calls && lastMessage.tool_calls.length > 0
+        ? "tools"
+        : "end";
+    };
+
+    // LLM 节点
+    const llmNode = async (state: typeof McpStateAnnotations.State) => {
+      const cleanMessages = sanitizeMessages(state.messages);
+      const response = await llmWithTools.invoke(cleanMessages);
+      return { messages: [response] };
+    };
+
+    // 构建带工具的图
+    const workflow = new StateGraph(McpStateAnnotations)
+      .addNode("llmNode", llmNode)
+      .addNode("tools", toolNode)
+      .addEdge(START, "llmNode")
+      .addConditionalEdges("llmNode", shouldContinue, {
+        tools: "tools",
+        end: "__end__",
+      })
+      .addEdge("tools", "llmNode");
+
+    return workflow.compile();
+  } else {
+    // 回退到普通对话模式
+    console.warn("未能加载 MCP 工具，使用普通对话模式");
+    const simpleNode = async (state: typeof McpStateAnnotations.State) => {
+      const cleanMessages = sanitizeMessages(state.messages);
+      const response = await model.invoke(cleanMessages);
+      return { messages: [response] };
+    };
+
+    const workflow = new StateGraph(McpStateAnnotations)
+      .addNode("agent", simpleNode)
+      .addEdge(START, "agent");
+
+    return workflow.compile();
+  }
+}
+
 // 主 supervisor 路由逻辑
 async function routeToSubgraph(state: AgentState): Promise<string> {
   const llm = new ChatOpenAI({
@@ -105,16 +285,22 @@ async function routeToSubgraph(state: AgentState): Promise<string> {
   // 返回子图名称
   if (decision.includes("coding")) {
     return "coding_subgraph";
+  } else if (decision.includes("mcp")) {
+    return "mcp_subgraph";
   } else {
     return "chat_subgraph";
   }
 }
 
-// 创建主图 (禁用 MCP 功能)
-export async function createGraphForMcpUrl(codeContext?: string) {
-  // 创建子图
+// 创建主图 (支持三个子图：chat、coding、mcp)
+export async function createGraphForMcpUrl(
+  codeContext?: string,
+  mcpUrl?: string
+) {
+  // 创建子图（MCP subgraph 现在是异步的）
   const chatSubgraph = createChatSubgraph();
   const codingSubgraph = createCodingSubgraph();
+  const mcpSubgraph = await createMcpSubgraph(mcpUrl);
 
   // 创建主 supervisor graph
   const supervisorWorkflow = new StateGraph(StateAnnotations)
@@ -144,9 +330,21 @@ export async function createGraphForMcpUrl(codeContext?: string) {
         messages: newMessages,
       };
     })
+    .addNode("mcp_subgraph", async (state: AgentState) => {
+      // MCP 工具调用子图
+      const result = await mcpSubgraph.invoke({
+        messages: state.messages,
+      });
+      // 只返回新消息
+      const newMessages = result.messages.slice(state.messages.length);
+      return {
+        messages: newMessages,
+      };
+    })
     .addConditionalEdges(START, routeToSubgraph, {
       chat_subgraph: "chat_subgraph",
       coding_subgraph: "coding_subgraph",
+      mcp_subgraph: "mcp_subgraph",
     });
 
   const graph = supervisorWorkflow.compile({

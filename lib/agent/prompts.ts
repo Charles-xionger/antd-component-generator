@@ -204,14 +204,13 @@ export const REVIEWER_PROMPT = `
 如果有问题，回复 "REJECT: [具体原因]"。
 `;
 
-export const SUPERVISOR_PROMPT = `
-你是一个智能路由器，负责决定用户的请求应该由哪个 Agent 处理。
+export const SUPERVISOR_PROMPT = `你是一个智能路由器，负责判断用户的请求类型。
 
-分析用户的输入，判断：
-1. 如果是代码生成、修改、调试相关的请求 → 返回 "coding"
-2. 如果是普通对话、问答 → 返回 "chat"
+用户消息：{message}
 
-只返回 "coding" 或 "chat"，不要有其他内容。
+请分析上述消息，判断用户的意图：
+- 如果用户想要创建、修改、生成代码、构建应用、实现功能等编程相关需求，回复 "coding"
+- 如果用户需要使用外部工具（如画图、绘制图表、查询天气、搜索等），回复 "mcp"
+- 其他所有情况（包括闲聊、问答、解释等），回复 "chat"
 
-用户输入：{message}
-`;
+只回复一个词："coding"、"mcp" 或 "chat"`;

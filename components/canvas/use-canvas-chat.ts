@@ -4,6 +4,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useArtifactParser } from "@/hooks/use-artifact-parser";
 import type { Message, ArtifactVersion, DeviceType, TabType } from "./types";
+import type { MCPConfig } from "@/components/mcp-config-panel";
 
 interface HistoryFile {
   id: string;
@@ -65,6 +66,32 @@ export function useCanvasChat({
   const [expandedMessages, setExpandedMessages] = useState<Set<string>>(
     new Set()
   );
+
+  // MCP configuration state
+  const [mcpConfigs, setMcpConfigs] = useState<MCPConfig[]>([]);
+  const [selectedMcpId, setSelectedMcpId] = useState<string | null>(null);
+  const [isMcpLoading, setIsMcpLoading] = useState(false);
+
+  // Fetch MCP configurations
+  const fetchMcpConfigs = useCallback(async () => {
+    setIsMcpLoading(true);
+    try {
+      const response = await fetch("/api/mcp/configs");
+      if (response.ok) {
+        const data = await response.json();
+        setMcpConfigs(data.configs || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch MCP configs:", error);
+    } finally {
+      setIsMcpLoading(false);
+    }
+  }, []);
+
+  // Load MCP configs on mount
+  useEffect(() => {
+    fetchMcpConfigs();
+  }, [fetchMcpConfigs]);
 
   // Toggle message expansion
   const toggleMessageExpansion = useCallback((messageId: string) => {
@@ -339,6 +366,7 @@ export function useCanvasChat({
         body: JSON.stringify({
           message: currentInput,
           threadId,
+          mcpConfigId: selectedMcpId,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -528,6 +556,13 @@ export function useCanvasChat({
     // Message expansion
     expandedMessages,
     toggleMessageExpansion,
+
+    // MCP configuration
+    mcpConfigs,
+    selectedMcpId,
+    isMcpLoading,
+    onSelectMcp: setSelectedMcpId,
+    onRefreshMcp: fetchMcpConfigs,
 
     // Actions
     sendMessage,

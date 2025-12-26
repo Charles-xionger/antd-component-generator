@@ -5,6 +5,7 @@ import { useCanvasChat } from "./use-canvas-chat";
 import { MessageList } from "./message-list";
 import { PreviewPanel } from "./preview-panel";
 import { CodePanel } from "./code-panel";
+import { MCPConfigPanel } from "@/components/mcp-config-panel";
 
 interface CanvasChatProps {
   threadId?: string;
@@ -46,6 +47,13 @@ export function CanvasChat({
     selectedDevice,
     setSelectedDevice,
 
+    // MCP configuration
+    mcpConfigs,
+    selectedMcpId,
+    isMcpLoading,
+    onSelectMcp,
+    onRefreshMcp,
+
     // Actions
     sendMessage,
     selectVersion,
@@ -59,6 +67,15 @@ export function CanvasChat({
     <div className="flex h-full">
       {/* Chat Panel */}
       <div className="w-1/3 flex flex-col border-r min-h-0">
+        {/* MCP 配置面板 */}
+        <MCPConfigPanel
+          configs={mcpConfigs}
+          selectedId={selectedMcpId}
+          isLoading={isMcpLoading}
+          onSelect={onSelectMcp}
+          onRefresh={onRefreshMcp}
+        />
+
         <MessageList messages={messages} isLoading={isLoading} />
 
         {/* Input */}

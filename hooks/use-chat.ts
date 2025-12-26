@@ -1,23 +1,35 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 
 export interface Message {
+  id: string;
   role: "user" | "assistant";
   content: string;
+  hasArtifact?: boolean;
+  toolCalls?: ToolCall[];
+}
+
+export interface ToolCall {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+  status: "pending" | "running" | "success" | "error";
+  result?: string;
+  error?: string;
 }
 
 export interface UseChatOptions {
   /** API 端点，默认 /api/agent/stream */
   api?: string;
-  /** 初始消息列表 */
-  initialMessages?: Message[];
   /** 初始 threadId，用于恢复对话 */
   threadId?: string;
-  /** 发送消息前的回调 */
-  onSend?: (message: string) => void;
-  /** 收到响应后的回调 */
-  onResponse?: (message: Message) => void;
+  /** MCP 配置 ID */
+  mcpConfigId?: string | null;
+  /** 检测到 artifact 时的回调 */
+  onArtifactDetected?: (content: string) => void;
+  /** 工具调用时的回调 */
+  onToolCall?: (toolCall: ToolCall) => void;
   /** 发生错误时的回调 */
   onError?: (error: Error) => void;
 }
@@ -25,128 +37,258 @@ export interface UseChatOptions {
 export function useChat(options: UseChatOptions = {}) {
   const {
     api = "/api/agent/stream",
-    initialMessages = [],
-    threadId: initialThreadId,
-    onSend,
-    onResponse,
+    threadId,
+    mcpConfigId,
+    onArtifactDetected,
+    onToolCall,
     onError,
   } = options;
 
-  const [messages, setMessages] = useState<Message[]>(initialMessages);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-  const threadIdRef = useRef(initialThreadId || crypto.randomUUID());
   const abortControllerRef = useRef<AbortController | null>(null);
-  const mcpConfigIdRef = useRef<string | null>(null);
 
-  /** 当前会话的 threadId */
-  const threadId = threadIdRef.current;
+  // 使用 ref 存储回调，避免依赖变化导致死循环
+  const onArtifactDetectedRef = useRef(onArtifactDetected);
+  const onToolCallRef = useRef(onToolCall);
+  const onErrorRef = useRef(onError);
+
+  // 同步更新 ref
+  useEffect(() => {
+    onArtifactDetectedRef.current = onArtifactDetected;
+    onToolCallRef.current = onToolCall;
+    onErrorRef.current = onError;
+  });
+
+  // 标记是否已经加载过历史消息
+  const historyLoadedRef = useRef<string | null>(null);
+
+  // Fetch message history when threadId changes
+  useEffect(() => {
+    // 如果 threadId 没变，不重新加载
+    if (historyLoadedRef.current === threadId) {
+      return;
+    }
+
+    if (!threadId) {
+      setMessages([]);
+      historyLoadedRef.current = null;
+      return;
+    }
+
+    const fetchHistory = async () => {
+      setIsLoading(true);
+      try {
+        const response = await fetch(`/api/agent/history/${threadId}`);
+        if (response.ok) {
+          const data = await response.json();
+          const formattedMessages = formatMessagesFromHistory(
+            data.messages || []
+          );
+          setMessages(formattedMessages);
+
+          // 标记已加载
+          historyLoadedRef.current = threadId;
+
+          // Check for artifacts in history and notify the last one
+          const lastArtifactMsg = [...formattedMessages]
+            .reverse()
+            .find((msg) => msg.hasArtifact);
+          if (lastArtifactMsg && onArtifactDetectedRef.current) {
+            onArtifactDetectedRef.current(lastArtifactMsg.content);
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching messages:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchHistory();
+  }, [threadId]);
 
   /** 发送消息 */
-  const sendMessage = useCallback(
-    async (content: string) => {
-      if (!content.trim() || isLoading) return;
+  const sendMessage = useCallback(async () => {
+    if (!input.trim() || isLoading) return;
 
-      const userMessage: Message = { role: "user", content: content.trim() };
-      setMessages((prev) => [...prev, userMessage]);
-      setIsLoading(true);
-      setError(null);
-      onSend?.(content);
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      content: input.trim(),
+    };
 
-      // 创建新的 AbortController
-      abortControllerRef.current = new AbortController();
+    setMessages((prev) => [...prev, userMessage]);
+    setInput("");
+    setIsLoading(true);
+    setError(null);
 
-      try {
-        const response = await fetch(api, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            message: content.trim(),
-            threadId: threadIdRef.current,
-            mcpConfigId: mcpConfigIdRef.current,
-          }),
-          signal: abortControllerRef.current.signal,
-        });
+    // 创建新的 AbortController
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
 
-        if (!response.ok) {
-          throw new Error(`请求失败: ${response.status}`);
-        }
+    try {
+      const response = await fetch(api, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: userMessage.content,
+          threadId,
+          mcpConfigId,
+        }),
+        signal: abortControllerRef.current.signal,
+      });
 
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let assistantContent = "";
+      if (!response.ok) {
+        throw new Error(`请求失败: ${response.status}`);
+      }
 
-        // 添加空的 assistant 消息
-        setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No reader available");
 
-        while (reader) {
-          const { done, value } = await reader.read();
-          if (done) break;
+      let assistantContent = "";
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: "",
+        toolCalls: [],
+      };
 
-          const chunk = decoder.decode(value);
-          const lines = chunk.split("\n");
+      setMessages((prev) => [...prev, assistantMessage]);
 
-          for (const line of lines) {
-            if (line.startsWith("data: ") && line !== "data: [DONE]") {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data.content) {
-                  assistantContent += data.content;
-                  setMessages((prev) => {
-                    const newMessages = [...prev];
-                    newMessages[newMessages.length - 1] = {
-                      role: "assistant",
-                      content: assistantContent,
-                    };
-                    return newMessages;
-                  });
+      // Process streaming response
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = new TextDecoder().decode(value);
+        const lines = chunk.split("\n");
+
+        for (const line of lines) {
+          if (line.startsWith("data: ") && line !== "data: [DONE]") {
+            try {
+              const data = JSON.parse(line.slice(6));
+
+              if (data.type === "content" || data.content) {
+                const content = data.content || "";
+                assistantContent += content;
+                const hasArtifact = assistantContent.includes("<boltArtifact");
+
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMessage.id
+                      ? { ...msg, content: assistantContent, hasArtifact }
+                      : msg
+                  )
+                );
+
+                if (hasArtifact && onArtifactDetectedRef.current) {
+                  onArtifactDetectedRef.current(assistantContent);
                 }
-              } catch {
-                // 忽略解析错误
+              } else if (data.type === "tool_start") {
+                // 使用 run_id 作为唯一标识符
+                const toolCallId =
+                  data.tool_call_id || data.run_id || Date.now().toString();
+                const toolCall: ToolCall = {
+                  id: toolCallId,
+                  name: data.tool_name || data.tool || "unknown",
+                  args: data.args || {},
+                  status: "running",
+                };
+
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMessage.id
+                      ? {
+                          ...msg,
+                          toolCalls: [...(msg.toolCalls || []), toolCall],
+                        }
+                      : msg
+                  )
+                );
+
+                if (onToolCallRef.current) {
+                  onToolCallRef.current(toolCall);
+                }
+              } else if (data.type === "tool_end") {
+                const toolCallId = data.tool_call_id || data.run_id;
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMessage.id
+                      ? {
+                          ...msg,
+                          toolCalls: msg.toolCalls?.map((tc) =>
+                            tc.id === toolCallId
+                              ? {
+                                  ...tc,
+                                  status: "success" as const,
+                                  result: data.result || data.output,
+                                }
+                              : tc
+                          ),
+                        }
+                      : msg
+                  )
+                );
+              } else if (data.type === "tool_error") {
+                const toolCallId = data.tool_call_id || data.run_id;
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMessage.id
+                      ? {
+                          ...msg,
+                          toolCalls: msg.toolCalls?.map((tc) =>
+                            tc.id === toolCallId
+                              ? {
+                                  ...tc,
+                                  status: "error" as const,
+                                  error: data.error,
+                                }
+                              : tc
+                          ),
+                        }
+                      : msg
+                  )
+                );
               }
+            } catch {
+              // 忽略解析错误
             }
           }
         }
-
-        const assistantMessage: Message = {
-          role: "assistant",
-          content: assistantContent,
-        };
-        onResponse?.(assistantMessage);
-      } catch (err) {
-        if (err instanceof Error && err.name === "AbortError") {
-          return; // 请求被取消，不处理
-        }
-        const error = err instanceof Error ? err : new Error("未知错误");
-        setError(error);
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: "发生错误，请重试" },
-        ]);
-        onError?.(error);
-      } finally {
-        setIsLoading(false);
-        abortControllerRef.current = null;
       }
-    },
-    [api, isLoading, onSend, onResponse, onError]
-  );
-
-  const setMcpConfigId = useCallback((id: string | null) => {
-    mcpConfigIdRef.current = id;
-  }, []);
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        return; // 请求被取消，不处理
+      }
+      const error = err instanceof Error ? err : new Error("未知错误");
+      setError(error);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 2).toString(),
+          role: "assistant",
+          content: "抱歉，发生了错误。请重试。",
+        },
+      ]);
+      onErrorRef.current?.(error);
+    } finally {
+      setIsLoading(false);
+      abortControllerRef.current = null;
+    }
+  }, [api, input, isLoading, threadId, mcpConfigId]);
 
   /** 表单提交处理 */
   const handleSubmit = useCallback(
     (e?: React.FormEvent) => {
       e?.preventDefault();
-      if (input.trim()) {
-        sendMessage(input);
-        setInput("");
-      }
+      sendMessage();
     },
-    [input, sendMessage]
+    [sendMessage]
   );
 
   /** 停止当前请求 */
@@ -159,27 +301,6 @@ export function useChat(options: UseChatOptions = {}) {
   const clearMessages = useCallback(() => {
     setMessages([]);
     setError(null);
-  }, []);
-
-  /** 重置会话（清空消息并生成新的 threadId） */
-  const resetChat = useCallback(() => {
-    clearMessages();
-    threadIdRef.current = crypto.randomUUID();
-  }, [clearMessages]);
-
-  /** 切换到指定的会话 */
-  const switchThread = useCallback(
-    (newThreadId: string, threadMessages: Message[] = []) => {
-      threadIdRef.current = newThreadId;
-      setMessages(threadMessages);
-      setError(null);
-    },
-    []
-  );
-
-  /** 追加消息（用于恢复历史记录等场景） */
-  const append = useCallback((message: Message) => {
-    setMessages((prev) => [...prev, message]);
   }, []);
 
   return {
@@ -196,15 +317,99 @@ export function useChat(options: UseChatOptions = {}) {
 
     // 消息操作
     sendMessage,
-    append,
     clearMessages,
-    resetChat,
-    switchThread,
-
-    // MCP 控制
-    setMcpConfigId,
 
     // 请求控制
     stop,
   };
+}
+
+// 原始消息类型定义
+interface RawMessage {
+  id?: string;
+  type: string;
+  content: string | Array<{ text?: string }>;
+  toolCalls?: Array<{
+    id?: string;
+    name: string;
+    args: Record<string, unknown>;
+  }>;
+  name?: string; // tool 消息的工具名称
+  tool_call_id?: string; // tool 消息关联的 tool_call_id
+}
+
+// Helper function to format messages from history
+function formatMessagesFromHistory(rawMessages: RawMessage[]): Message[] {
+  const formattedMessages: Message[] = [];
+
+  // 收集所有 tool 消息的响应，用于匹配 tool calls
+  const toolResponses = new Map<string, { result: string; error?: string }>();
+
+  // 第一遍：收集 tool 响应
+  for (const msg of rawMessages) {
+    if (msg.type === "tool" && msg.tool_call_id) {
+      const content =
+        typeof msg.content === "string"
+          ? msg.content
+          : Array.isArray(msg.content)
+          ? msg.content.map((c) => c.text || "").join("")
+          : "";
+      toolResponses.set(msg.tool_call_id, { result: content });
+    }
+  }
+
+  // 第二遍：格式化消息
+  for (const msg of rawMessages) {
+    // Skip system messages and tool messages (tool responses are attached to AI messages)
+    if (msg.type === "system" || msg.type === "tool") continue;
+
+    // Map message types to UI roles
+    let role: "user" | "assistant" = "assistant";
+    if (msg.type === "human") {
+      role = "user";
+    } else if (msg.type === "ai") {
+      role = "assistant";
+    }
+
+    // Extract content
+    let content = "";
+    if (typeof msg.content === "string") {
+      content = msg.content;
+    } else if (Array.isArray(msg.content)) {
+      content = msg.content
+        .map((c: { text?: string }) => c.text || "")
+        .join("");
+    }
+
+    // 处理 tool calls（仅 AI 消息）
+    let toolCalls: ToolCall[] | undefined;
+    if (msg.type === "ai" && msg.toolCalls && msg.toolCalls.length > 0) {
+      toolCalls = msg.toolCalls.map((tc) => {
+        const toolCallId = tc.id || `tc-${Date.now()}`;
+        const response = toolResponses.get(toolCallId);
+        return {
+          id: toolCallId,
+          name: tc.name,
+          args: tc.args || {},
+          status: response ? ("success" as const) : ("pending" as const),
+          result: response?.result,
+          error: response?.error,
+        };
+      });
+    }
+
+    // 只有有内容或有 tool calls 的消息才显示
+    if (content || (toolCalls && toolCalls.length > 0)) {
+      const hasArtifact = content.includes("<boltArtifact");
+      formattedMessages.push({
+        id: msg.id || `msg-${formattedMessages.length}`,
+        role,
+        content,
+        hasArtifact,
+        toolCalls,
+      });
+    }
+  }
+
+  return formattedMessages;
 }
