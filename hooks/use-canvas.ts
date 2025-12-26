@@ -431,7 +431,7 @@ export function useCanvas({
       return;
     }
 
-    // 合并文件：新文件覆盖旧文件，保留未修改的旧文件
+    // 直接合并文件，保留未修改的文件
     const mergedFilesMap = new Map<string, string>();
 
     // 先添加所有旧文件（从缓存）
@@ -449,7 +449,7 @@ export function useCanvas({
       /<boltArtifact[^>]*id="([^"]*)"[^>]*title="([^"]*)"[^>]*>/
     );
     const id = artifactMatch?.[1] || "merged";
-    const title = artifactMatch?.[2] || "Merged Version";
+    const title = artifactMatch?.[2] || "新版本";
 
     // 重建合并后的代码
     const mergedFiles = Array.from(mergedFilesMap.entries()).map(
@@ -461,8 +461,7 @@ export function useCanvas({
       "[mergeAndSetGeneratedCode] 合并完成:",
       `旧文件 ${currentVersionFilesRef.current.size} 个`,
       `新文件 ${newFiles.length} 个`,
-      `合并后 ${mergedFilesMap.size} 个`,
-      `文件列表: ${Array.from(mergedFilesMap.keys()).join(", ")}`
+      `合并后 ${mergedFilesMap.size} 个`
     );
 
     // 更新缓存

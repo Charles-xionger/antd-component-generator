@@ -109,7 +109,7 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
       <div
         ref={isFullscreen ? undefined : ref}
         className={`flex flex-col bg-gray-50 dark:bg-gray-900 transition-all duration-300 ${
-          isFullscreen ? "fixed inset-0 z-[9999] bg-gray-900" : "h-full"
+          isFullscreen ? "fixed inset-0 z-9999 bg-gray-900" : "h-full"
         }`}
       >
         {/* Canvas Header */}

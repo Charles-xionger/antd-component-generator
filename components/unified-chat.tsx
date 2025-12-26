@@ -9,7 +9,7 @@ import { useChat } from "@/hooks/use-chat";
 import { useCanvas } from "@/hooks/use-canvas";
 
 // Components
-import { MCPConfigPanel, type MCPConfig } from "@/components/mcp";
+import { type MCPConfig } from "@/components/mcp";
 import { MessageItem, InputBar } from "@/components/chat";
 import { CanvasPanel } from "@/components/canvas";
 
@@ -21,6 +21,9 @@ interface UnifiedChatProps {
 export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // 保留 onThreadUpdate 参数以供将来使用
+  void onThreadUpdate;
 
   // MCP configuration state
   const [mcpConfigs, setMcpConfigs] = useState<MCPConfig[]>([]);
@@ -54,10 +57,22 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
         canvas.setShouldSendToSandbox(false);
       }
     },
-    onSaved: () => {
-      // 后端保存成功后，刷新版本列表（不切换内容，避免打断流式显示）
+    onSaved: async () => {
+      // 后端保存成功后，刷新版本列表并切换到最新完整版本
       console.log("[UnifiedChat] 收到 saved 事件，刷新版本列表");
-      canvas.refreshVersionList();
+      await canvas.refreshVersionList();
+
+      // 延迟一下，确保版本列表已更新，然后切换到最新版本获取完整代码
+      setTimeout(async () => {
+        if (canvas.versions.length > 0) {
+          const latestVersion = canvas.versions[0];
+          console.log(
+            "[UnifiedChat] 切换到最新完整版本:",
+            latestVersion.versionNumber
+          );
+          canvas.selectVersion(latestVersion.versionNumber);
+        }
+      }, 500);
     },
   });
 
@@ -132,15 +147,6 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
           canvas.isExpanded ? "w-[35%] border-r dark:border-gray-700" : "w-full"
         }`}
       >
-        {/* MCP Config Panel */}
-        <MCPConfigPanel
-          configs={mcpConfigs}
-          selectedId={selectedMcpId}
-          isLoading={isMcpLoading}
-          onSelect={setSelectedMcpId}
-          onRefresh={fetchMcpConfigs}
-        />
-
         {/* Messages */}
         <div className="flex-1 space-y-4 overflow-y-auto p-4">
           {chat.messages.length === 0 && <EmptyState />}
@@ -174,6 +180,11 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
           onSubmit={chat.sendMessage}
           isLoading={chat.isLoading}
           isCanvasMode={canvas.isExpanded}
+          mcpConfigs={mcpConfigs}
+          selectedMcpId={selectedMcpId}
+          isMcpLoading={isMcpLoading}
+          onMcpSelect={setSelectedMcpId}
+          onMcpRefresh={fetchMcpConfigs}
         />
       </div>
 

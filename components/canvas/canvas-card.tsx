@@ -1,7 +1,7 @@
 // components/canvas/canvas-card.tsx
 "use client";
 
-import { Code2, ChevronRight, FileCode, Loader2 } from "lucide-react";
+import { Code2, ChevronRight, Loader2 } from "lucide-react";
 import type { ParsedFile } from "./types";
 
 interface CanvasCardProps {
@@ -10,14 +10,12 @@ interface CanvasCardProps {
     title: string;
     files: ParsedFile[];
   };
-  versionNumber?: number;
   onExpand: () => void;
   isLoading?: boolean;
 }
 
 export function CanvasCard({
   artifact,
-  versionNumber,
   onExpand,
   isLoading = false,
 }: CanvasCardProps) {
@@ -25,90 +23,64 @@ export function CanvasCard({
     <div
       onClick={onExpand}
       className={`
-        group cursor-pointer rounded-lg border bg-white p-4 shadow-sm transition-all
-        dark:bg-gray-800
+        relative cursor-pointer overflow-hidden rounded-xl border bg-gradient-to-br from-white to-gray-50/50 
+        shadow-sm dark:from-gray-800 dark:to-gray-900/50 dark:border-gray-700
         ${
           isLoading
-            ? "border-blue-300 ring-2 ring-blue-100 dark:border-blue-700 dark:ring-blue-900/30"
-            : "border-gray-200 hover:border-blue-300 hover:shadow-md dark:border-gray-700"
+            ? "border-blue-200 bg-gradient-to-br from-blue-50 to-blue-100/30 dark:border-blue-600 dark:from-blue-900/20 dark:to-blue-800/20"
+            : "border-gray-200 dark:border-gray-700"
         }
       `}
     >
-      {/* Header */}
-      <div className="mb-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      {/* 主内容 */}
+      <div className="relative p-6">
+        {/* 图标和标题区域 */}
+        <div className="mb-4 flex items-start gap-4">
           <div
             className={`
-              rounded-md p-2
+              shrink-0 rounded-lg p-3
               ${
                 isLoading
-                  ? "bg-blue-500 dark:bg-blue-600"
-                  : "bg-blue-100 dark:bg-blue-900/30"
+                  ? "bg-blue-500 shadow-lg shadow-blue-500/25"
+                  : "bg-gradient-to-br from-blue-500 to-blue-600 shadow-md shadow-blue-500/20"
               }
             `}
           >
             {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin text-white" />
+              <Loader2 className="h-5 w-5 animate-spin text-white" />
             ) : (
-              <Code2
-                className={`h-4 w-4 ${
-                  isLoading ? "text-white" : "text-blue-600 dark:text-blue-400"
-                }`}
-              />
+              <Code2 className="h-5 w-5 text-white" />
             )}
           </div>
-          <div>
-            <div className="flex items-center gap-2 font-medium text-gray-900 dark:text-gray-100">
-              {artifact.title}
+
+          <div className="min-w-0 flex-1">
+            <div className="mb-1">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                {artifact.title}
+              </h3>
               {isLoading && (
-                <span className="text-xs font-normal text-blue-600 dark:text-blue-400">
-                  生成中...
-                </span>
+                <div className="mt-1 flex items-center gap-2">
+                  <div className="h-1 w-16 bg-blue-200 rounded-full overflow-hidden dark:bg-blue-800">
+                    <div className="h-full bg-blue-500 rounded-full animate-pulse" />
+                  </div>
+                  <span className="text-sm text-blue-600 dark:text-blue-400">
+                    生成中...
+                  </span>
+                </div>
               )}
             </div>
-            {versionNumber && (
-              <div className="text-xs text-gray-500">版本 {versionNumber}</div>
-            )}
           </div>
         </div>
-        <div className="flex items-center gap-1 text-sm text-blue-600 opacity-0 transition-opacity group-hover:opacity-100 dark:text-blue-400">
-          <span>展开编辑</span>
-          <ChevronRight className="h-4 w-4" />
-        </div>
-      </div>
 
-      {/* File List */}
-      <div className="space-y-1">
-        {artifact.files.slice(0, 3).map((file, index) => (
-          <div
-            key={index}
-            className={`
-              flex items-center gap-2 rounded px-2 py-1 text-sm
-              ${
-                isLoading
-                  ? "animate-pulse text-blue-600 dark:text-blue-400"
-                  : "text-gray-600 dark:text-gray-400"
-              }
-            `}
-          >
-            <FileCode className="h-3 w-3" />
-            <span className="truncate">{file.path}</span>
+        {/* 操作区域 */}
+        <div className="flex items-center justify-between">
+          <div className="text-sm text-gray-500 dark:text-gray-400">
+            {isLoading ? "正在生成代码..." : "点击查看和编辑"}
           </div>
-        ))}
-        {artifact.files.length > 3 && (
-          <div className="px-2 py-1 text-xs text-gray-500">
-            +{artifact.files.length - 3} 个文件
+          <div className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
+            <span className="text-sm font-medium">打开</span>
+            <ChevronRight className="h-4 w-4" />
           </div>
-        )}
-      </div>
-
-      {/* Footer */}
-      <div className="mt-3 flex items-center justify-between border-t border-gray-100 pt-3 dark:border-gray-700">
-        <div className="text-xs text-gray-500">
-          {artifact.files.length} 个文件
-        </div>
-        <div className="text-xs text-gray-500 group-hover:text-blue-600 dark:group-hover:text-blue-400">
-          {isLoading ? "生成中，点击查看进度 →" : "点击查看详情 →"}
         </div>
       </div>
     </div>

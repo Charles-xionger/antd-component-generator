@@ -193,10 +193,22 @@ export function useChat(options: UseChatOptions = {}) {
                 assistantContent += content;
                 const hasArtifact = assistantContent.includes("<boltArtifact");
 
+                // 检测内容变化，实时更新状态提示
+                const contentType = analyzeContentType(assistantContent);
+
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === assistantMessage.id
-                      ? { ...msg, content: assistantContent, hasArtifact }
+                      ? {
+                          ...msg,
+                          content: assistantContent,
+                          hasArtifact,
+                          // 基于内容实时更新状态提示
+                          agentSteps: updateAgentStepsFromContent(
+                            msg.agentSteps || [],
+                            contentType
+                          ),
+                        }
                       : msg
                   )
                 );
@@ -458,6 +470,12 @@ function formatMessagesFromHistory(rawMessages: RawMessage[]): Message[] {
       });
     }
 
+    // 为历史数据重建 agentSteps 以保持UI一致性
+    let agentSteps: AgentStep[] | undefined;
+    if (msg.type === "ai" && content) {
+      agentSteps = reconstructAgentSteps(content);
+    }
+
     // 只有有内容或有 tool calls 的消息才显示
     if (content || (toolCalls && toolCalls.length > 0)) {
       const hasArtifact = content.includes("<boltArtifact");
@@ -467,9 +485,170 @@ function formatMessagesFromHistory(rawMessages: RawMessage[]): Message[] {
         content,
         hasArtifact,
         toolCalls,
+        agentSteps,
       });
     }
   }
 
   return formattedMessages;
+}
+
+// 从历史内容重建 agentSteps，用于保持UI状态一致性
+function reconstructAgentSteps(content: string): AgentStep[] {
+  const steps: AgentStep[] = [];
+  const timestamp = Date.now();
+
+  // 检查内容特征来推断曾经经历的步骤
+  const hasArchitectPlan =
+    content.includes("<architect_plan>") || content.includes("架构师");
+  const hasCode = content.includes("<boltArtifact") || content.includes("代码");
+  const hasReview =
+    content.includes("<reviewer_result>") ||
+    content.includes("审查") ||
+    content.includes("APPROVE") ||
+    content.includes("REJECT");
+
+  // 重建步骤历史
+  if (hasArchitectPlan || hasCode || hasReview) {
+    // Supervisor 步骤
+    steps.push({
+      id: `supervisor-${timestamp}`,
+      agent: "supervisor",
+      status: "completed",
+      message: "任务分析完成",
+      timestamp: timestamp,
+    });
+  }
+
+  if (hasArchitectPlan) {
+    // Architect 步骤
+    steps.push({
+      id: `architect-${timestamp}`,
+      agent: "architect",
+      status: "completed",
+      message: "架构设计完成",
+      timestamp: timestamp + 1,
+    });
+  }
+
+  if (hasCode) {
+    // Coder 步骤
+    steps.push({
+      id: `coder-${timestamp}`,
+      agent: "coder",
+      status: "completed",
+      message: "代码生成完成",
+      timestamp: timestamp + 2,
+    });
+  }
+
+  if (hasReview) {
+    // Reviewer 步骤
+    const isReviewComplete =
+      content.includes("APPROVE") || content.includes("REJECT:");
+    steps.push({
+      id: `reviewer-${timestamp}`,
+      agent: "reviewer",
+      status: isReviewComplete ? "completed" : "running",
+      message: isReviewComplete ? "代码审查完成" : "正在审查代码",
+      timestamp: timestamp + 3,
+    });
+  }
+
+  return steps;
+}
+
+// 分析内容类型，用于实时状态更新
+function analyzeContentType(content: string): {
+  hasArchitect: boolean;
+  hasCoder: boolean;
+  hasReviewer: boolean;
+  isReviewComplete: boolean;
+} {
+  return {
+    hasArchitect:
+      content.includes("<architect_plan>") || content.includes("架构师"),
+    hasCoder: content.includes("<boltArtifact") || content.includes("代码"),
+    hasReviewer:
+      content.includes("<reviewer_result>") ||
+      content.includes("审查") ||
+      content.includes("APPROVE") ||
+      content.includes("REJECT"),
+    isReviewComplete:
+      content.includes("APPROVE") || content.includes("REJECT:"),
+  };
+}
+
+// 根据内容实时更新 agentSteps
+function updateAgentStepsFromContent(
+  currentSteps: AgentStep[],
+  contentType: any
+): AgentStep[] {
+  const steps = [...currentSteps];
+  const timestamp = Date.now();
+
+  // 如果还没有supervisor步骤且有任何内容，添加supervisor
+  const hasSupervisor = steps.some((s) => s.agent === "supervisor");
+  if (
+    !hasSupervisor &&
+    (contentType.hasArchitect ||
+      contentType.hasCoder ||
+      contentType.hasReviewer)
+  ) {
+    steps.unshift({
+      id: `supervisor-${timestamp}`,
+      agent: "supervisor",
+      status: "completed",
+      message: "任务分析完成",
+      timestamp: timestamp - 3,
+    });
+  }
+
+  // 如果有架构内容且没有architect步骤，添加architect
+  const hasArchitect = steps.some((s) => s.agent === "architect");
+  if (!hasArchitect && contentType.hasArchitect) {
+    steps.push({
+      id: `architect-${timestamp}`,
+      agent: "architect",
+      status: "completed",
+      message: "架构设计完成",
+      timestamp: timestamp - 2,
+    });
+  }
+
+  // 如果有代码内容且没有coder步骤，添加coder
+  const hasCoder = steps.some((s) => s.agent === "coder");
+  if (!hasCoder && contentType.hasCoder) {
+    steps.push({
+      id: `coder-${timestamp}`,
+      agent: "coder",
+      status: "completed",
+      message: "代码生成完成",
+      timestamp: timestamp - 1,
+    });
+  }
+
+  // 如果有审查内容，处理reviewer步骤
+  if (contentType.hasReviewer) {
+    const reviewerIndex = steps.findIndex((s) => s.agent === "reviewer");
+    if (reviewerIndex === -1) {
+      // 添加新的reviewer步骤
+      steps.push({
+        id: `reviewer-${timestamp}`,
+        agent: "reviewer",
+        status: contentType.isReviewComplete ? "completed" : "running",
+        message: contentType.isReviewComplete ? "代码审查完成" : "正在审查代码",
+        timestamp: timestamp,
+      });
+    } else {
+      // 更新现有的reviewer步骤
+      steps[reviewerIndex] = {
+        ...steps[reviewerIndex],
+        status: contentType.isReviewComplete ? "completed" : "running",
+        message: contentType.isReviewComplete ? "代码审查完成" : "正在审查代码",
+      };
+    }
+  }
+
+  return steps;
 }

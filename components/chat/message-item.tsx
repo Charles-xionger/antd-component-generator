@@ -8,8 +8,8 @@ import {
   Code2,
   ChevronDown,
   ChevronRight,
-  FileCode,
   AlertCircle,
+  FileCode,
 } from "lucide-react";
 import type { Message, AgentStep } from "@/hooks/use-chat";
 import {
@@ -97,23 +97,52 @@ function parseArtifactFromContent(content: string): Artifact | null {
 
 // 检查是否正在生成
 function isGenerating(steps: AgentStep[] | undefined): boolean {
-  if (!steps || steps.length === 0) return false;
-  return steps.some((s) => s.status === "running");
+  if (steps && steps.length > 0) {
+    // 有 agentSteps 时，检查是否有正在运行的步骤
+    return steps.some((s) => s.status === "running");
+  }
+
+  // 没有 agentSteps 时，直接认为历史数据已完成，不再生成
+  // 历史数据加载时不应该显示为"生成中"状态
+  return false;
 }
 
-// 检查是否全部完成（历史数据没有 steps 时，如果有 artifact 就认为完成）
+// 检查是否全部完成
 function isCompleted(
   steps: AgentStep[] | undefined,
+  content: string,
   hasArtifact: boolean
 ): boolean {
-  // 历史数据：没有 steps 但有 artifact，认为已完成
-  if (!steps || steps.length === 0) {
-    return hasArtifact;
+  // 有 agentSteps 时，检查所有步骤是否完成
+  if (steps && steps.length > 0) {
+    return steps.every((s) => s.status === "completed");
   }
-  // 实时数据：检查 reviewer 是否完成
-  const hasReviewer = steps.some((s) => s.agent === "reviewer");
-  if (!hasReviewer) return false;
-  return steps.every((s) => s.status === "completed");
+
+  // 没有 agentSteps 时（历史数据），认为都是已完成的
+  // 历史数据不应该显示为处理中状态
+  if (hasArtifact) {
+    // 有 artifact 的历史数据都认为是完成的
+    return true;
+  }
+
+  // 没有 artifact 但有实质内容的消息也认为是完成的
+  return !!(content && content.trim().length > 0);
+}
+
+// 检查是否需要修改（审查未通过）
+function needsModification(
+  steps: AgentStep[] | undefined,
+  content: string,
+  reviewResult: ReviewResult
+): boolean {
+  if (reviewResult === "reject") return true;
+
+  // 历史数据中检查是否包含拒绝信息
+  if (!steps || steps.length === 0) {
+    return content.includes("REJECT:") || content.includes("需要修改");
+  }
+
+  return false;
 }
 
 export function MessageItem({ message, onCanvasExpand }: MessageItemProps) {
@@ -130,7 +159,16 @@ export function MessageItem({ message, onCanvasExpand }: MessageItemProps) {
   }, [message.content, isUser]);
 
   const generating = isGenerating(message.agentSteps);
-  const completed = isCompleted(message.agentSteps, !!messageArtifact);
+  const completed = isCompleted(
+    message.agentSteps,
+    message.content,
+    !!messageArtifact
+  );
+  const needsModify = needsModification(
+    message.agentSteps,
+    message.content,
+    reviewResult.result
+  );
 
   // 用户消息
   if (isUser) {
@@ -162,6 +200,7 @@ export function MessageItem({ message, onCanvasExpand }: MessageItemProps) {
           artifact={messageArtifact}
           isGenerating={generating}
           isCompleted={completed}
+          needsModification={needsModify}
           reviewResult={reviewResult.result}
           reviewReason={reviewResult.reason}
           onExpand={onCanvasExpand}
@@ -179,6 +218,7 @@ function GenerationCard({
   artifact,
   isGenerating,
   isCompleted,
+  needsModification,
   reviewResult,
   reviewReason,
   onExpand,
@@ -187,6 +227,7 @@ function GenerationCard({
   artifact: Artifact | null;
   isGenerating: boolean;
   isCompleted: boolean;
+  needsModification: boolean;
   reviewResult: ReviewResult;
   reviewReason?: string;
   onExpand?: () => void;
@@ -194,9 +235,10 @@ function GenerationCard({
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // 状态配置
+  // 状态配置 - 优化状态判断优先级
   const getStatusConfig = () => {
     if (isGenerating) {
+      // 正在生成中
       return {
         icon: Loader2,
         iconClass: "animate-spin text-blue-500",
@@ -206,7 +248,9 @@ function GenerationCard({
         bgClass: "bg-blue-50/50 dark:bg-blue-900/10",
       };
     }
-    if (reviewResult === "reject") {
+
+    if (needsModification || reviewResult === "reject") {
+      // 需要修改
       return {
         icon: AlertCircle,
         iconClass: "text-amber-500",
@@ -216,7 +260,9 @@ function GenerationCard({
         bgClass: "bg-amber-50/50 dark:bg-amber-900/10",
       };
     }
+
     if (isCompleted || reviewResult === "approve") {
+      // 生成完成
       return {
         icon: CheckCircle2,
         iconClass: "text-green-500",
@@ -226,6 +272,8 @@ function GenerationCard({
         bgClass: "bg-green-50/50 dark:bg-green-900/10",
       };
     }
+
+    // 处理中（默认状态）
     return {
       icon: Code2,
       iconClass: "text-gray-400",
@@ -243,20 +291,22 @@ function GenerationCard({
   if (artifact) {
     return (
       <div className="space-y-2">
-        {/* 状态指示器 */}
-        <div
-          className={`flex items-center gap-2 rounded-lg border px-3 py-2 ${status.borderClass} ${status.bgClass}`}
-        >
-          <StatusIcon className={`h-4 w-4 ${status.iconClass}`} />
-          <span className={`text-sm font-medium ${status.textClass}`}>
-            {status.text}
-          </span>
-          {reviewResult === "reject" && reviewReason && (
-            <span className="text-xs text-amber-600 dark:text-amber-400">
-              - {reviewReason}
+        {/* 只在有审查拒绝信息时显示状态指示器 */}
+        {(needsModification || reviewResult === "reject") && (
+          <div
+            className={`flex items-center gap-2 rounded-lg border px-3 py-2 border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-900/10`}
+          >
+            <AlertCircle className="h-4 w-4 text-amber-500" />
+            <span className="text-sm font-medium text-amber-600 dark:text-amber-400">
+              需要修改
             </span>
-          )}
-        </div>
+            {reviewReason && (
+              <span className="text-xs text-amber-600 dark:text-amber-400">
+                - {reviewReason}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* 代码卡片 */}
         <CanvasCard
