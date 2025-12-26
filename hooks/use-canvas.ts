@@ -32,10 +32,12 @@ export interface UseCanvasReturn {
   versions: ArtifactVersion[];
   selectedVersion: number | null;
   isLoadingVersions: boolean;
-  selectVersion: (versionNumber: number) => void;
+  selectVersion: (versionNumber: number, allowSandboxUpdate?: boolean) => void;
   fetchVersionHistory: () => Promise<void>;
   /** 刷新版本列表（不切换内容，用于保存后刷新） */
   refreshVersionList: () => Promise<void>;
+  /** 创建乐观更新版本，展示代码生成过程 */
+  createOptimisticVersion: () => void;
 
   // UI 状态
   activeTab: "preview" | "code";
@@ -214,20 +216,30 @@ export function useCanvas({
             cacheVersion(version);
           });
 
-          // 更新选中版本为最新版本号（但不切换内容）
+          // 更新选中版本为最新版本号并切换内容
           if (fetchedVersions.length > 0) {
             const latestVersion = fetchedVersions[0];
             setSelectedVersion(latestVersion.versionNumber);
 
-            // 更新文件缓存为最新版本的文件（用于下次合并）
+            // 更新文件缓存为最新版本的文件
             const filesMap = new Map<string, string>();
             latestVersion.files.forEach((file) => {
               filesMap.set(file.path, file.content);
             });
             currentVersionFilesRef.current = filesMap;
 
+            // 更新显示的代码内容为最新版本
+            const filesXml = latestVersion.files
+              .map(
+                (file) =>
+                  `<boltAction type="file" filePath="${file.path}">\n${file.content}\n</boltAction>`
+              )
+              .join("\n");
+            const versionXml = `<boltArtifact id="version-${latestVersion.versionNumber}" title="Version ${latestVersion.versionNumber}">\n${filesXml}\n</boltArtifact>`;
+            setGeneratedCode(versionXml);
+
             console.log(
-              "[refreshVersionList] 版本列表已更新，最新版本:",
+              "[refreshVersionList] 版本列表已更新，切换到最新版本:",
               latestVersion.versionNumber,
               `文件数: ${filesMap.size}`
             );
@@ -241,7 +253,7 @@ export function useCanvas({
 
   // 版本选择 - 使用缓存快速切换
   const selectVersion = useCallback(
-    (versionNumber: number) => {
+    (versionNumber: number, allowSandboxUpdate: boolean = true) => {
       // 先尝试从缓存获取
       const cachedVersion = getCachedVersion(versionNumber);
       if (cachedVersion) {
@@ -263,11 +275,15 @@ export function useCanvas({
         const versionXml = `<boltArtifact id="version-${versionNumber}" title="Version ${versionNumber}">\n${filesXml}\n</boltArtifact>`;
         setGeneratedCode(versionXml);
 
-        // 切换版本时自动展开并允许渲染
+        // 切换版本时自动展开，根据参数决定是否允许渲染
         setIsExpanded(true);
-        setShouldSendToSandbox(true);
+        setShouldSendToSandbox(allowSandboxUpdate);
 
-        console.log("从缓存加载版本:", versionNumber, "，自动展开并允许渲染");
+        console.log(
+          "从缓存加载版本:",
+          versionNumber,
+          allowSandboxUpdate ? "，允许渲染" : "，暂不渲染"
+        );
         return;
       }
 
@@ -293,15 +309,35 @@ export function useCanvas({
         const versionXml = `<boltArtifact id="version-${versionNumber}" title="Version ${versionNumber}">\n${filesXml}\n</boltArtifact>`;
         setGeneratedCode(versionXml);
 
-        // 切换版本时自动展开并允许渲染
+        // 切换版本时自动展开，根据参数决定是否允许渲染
         setIsExpanded(true);
-        setShouldSendToSandbox(true);
+        setShouldSendToSandbox(allowSandboxUpdate);
 
-        console.log("加载版本:", versionNumber, "，自动展开并允许渲染");
+        console.log(
+          "加载版本:",
+          versionNumber,
+          allowSandboxUpdate ? "，允许渲染" : "，暂不渲染"
+        );
       }
     },
     [versions, getCachedVersion, cacheVersion]
   );
+
+  // 创建乐观更新版本，用于代码生成过程的展示
+  const createOptimisticVersion = useCallback(() => {
+    // 计算下一个版本号
+    const nextVersionNumber =
+      versions.length > 0
+        ? Math.max(...versions.map((v) => v.versionNumber)) + 1
+        : 1;
+
+    // 设置为新版本，但不允许沙箱渲染
+    setSelectedVersion(nextVersionNumber);
+    setIsExpanded(true);
+    setShouldSendToSandbox(false);
+
+    console.log("创建乐观版本:", nextVersionNumber, "，展示代码生成但暂不渲染");
+  }, [versions]);
 
   // threadId 变化时获取版本
   useEffect(() => {
@@ -324,6 +360,20 @@ export function useCanvas({
       currentVersionFilesRef.current = filesMap;
     }
   }, [artifact]);
+
+  // 当activeTab切换到preview且有artifact时，确保shouldSendToSandbox为true（适用于历史版本或已审查通过的内容）
+  useEffect(() => {
+    if (
+      activeTab === "preview" &&
+      artifact &&
+      artifact.files.length > 0 &&
+      !shouldSendToSandbox
+    ) {
+      // 检查这是否是一个已存在的完整版本（有artifact说明已经审查通过或者是历史版本）
+      console.log("[activeTab切换] 切换到preview且有artifact，允许渲染");
+      setShouldSendToSandbox(true);
+    }
+  }, [activeTab, artifact, shouldSendToSandbox]);
 
   // 复制到剪贴板
   const copyToClipboard = useCallback(
@@ -497,6 +547,7 @@ export function useCanvas({
     selectVersion,
     fetchVersionHistory,
     refreshVersionList,
+    createOptimisticVersion,
 
     // UI 状态
     activeTab,

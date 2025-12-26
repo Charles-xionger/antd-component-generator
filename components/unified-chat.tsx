@@ -41,38 +41,46 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
   const chat = useChat({
     threadId,
     mcpConfigId: selectedMcpId,
+    onStreamStart: () => {
+      // 流式响应开始，创建乐观版本用于展示代码生成过程
+      console.log("[UnifiedChat] 代码生成开始，创建乐观版本");
+      canvas.createOptimisticVersion();
+    },
     onArtifactDetected: (content: string) => {
       // 使用合并逻辑，保留未修改的文件
       canvas.mergeAndSetGeneratedCode(content);
 
-      // 检查是否审查通过，如果通过则允许发送到沙箱
-      const hasReviewApproval =
-        content.includes("<reviewer_result>APPROVE") ||
-        content.includes("APPROVE");
+      // 在代码生成过程中，暂时不发送到沙箱
+      // 只有生成完成且审查通过后才发送
+      canvas.setShouldSendToSandbox(false);
+    },
+    onStreamComplete: (content: string) => {
+      // 流式响应完成，检查是否审查通过
+      const hasReviewApproval = (() => {
+        const match = content.match(
+          /<reviewer_result>([\s\S]*?)<\/reviewer_result>/
+        );
+        if (match) {
+          const result = match[1].trim();
+          return result.toUpperCase().startsWith("APPROVE");
+        }
+        return content.includes("APPROVE");
+      })();
+
       if (hasReviewApproval) {
-        console.log("[UnifiedChat] 审查通过，允许发送到沙箱");
+        console.log("[UnifiedChat] 代码生成完成且审查通过，允许发送到沙箱");
         canvas.setShouldSendToSandbox(true);
       } else {
-        console.log("[UnifiedChat] 代码生成中或未通过审查，暂不发送到沙箱");
+        console.log("[UnifiedChat] 代码生成完成但未通过审查，不发送到沙箱");
         canvas.setShouldSendToSandbox(false);
       }
     },
     onSaved: async () => {
-      // 后端保存成功后，刷新版本列表并切换到最新完整版本
+      // 后端保存成功后，刷新版本列表
+      // refreshVersionList 会自动设置 selectedVersion 为最新版本
       console.log("[UnifiedChat] 收到 saved 事件，刷新版本列表");
       await canvas.refreshVersionList();
-
-      // 延迟一下，确保版本列表已更新，然后切换到最新版本获取完整代码
-      setTimeout(async () => {
-        if (canvas.versions.length > 0) {
-          const latestVersion = canvas.versions[0];
-          console.log(
-            "[UnifiedChat] 切换到最新完整版本:",
-            latestVersion.versionNumber
-          );
-          canvas.selectVersion(latestVersion.versionNumber);
-        }
-      }, 500);
+      console.log("[UnifiedChat] 版本列表刷新完成，已自动选中最新版本");
     },
   });
 

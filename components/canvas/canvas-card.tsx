@@ -23,11 +23,11 @@ export function CanvasCard({
     <div
       onClick={onExpand}
       className={`
-        relative cursor-pointer overflow-hidden rounded-xl border bg-gradient-to-br from-white to-gray-50/50 
+        relative cursor-pointer overflow-hidden rounded-xl border bg-linear-to-br from-white to-gray-50/50 
         shadow-sm dark:from-gray-800 dark:to-gray-900/50 dark:border-gray-700
         ${
           isLoading
-            ? "border-blue-200 bg-gradient-to-br from-blue-50 to-blue-100/30 dark:border-blue-600 dark:from-blue-900/20 dark:to-blue-800/20"
+            ? "border-blue-200 bg-linear-to-br from-blue-50 to-blue-100/30 dark:border-blue-600 dark:from-blue-900/20 dark:to-blue-800/20"
             : "border-gray-200 dark:border-gray-700"
         }
       `}
@@ -42,7 +42,7 @@ export function CanvasCard({
               ${
                 isLoading
                   ? "bg-blue-500 shadow-lg shadow-blue-500/25"
-                  : "bg-gradient-to-br from-blue-500 to-blue-600 shadow-md shadow-blue-500/20"
+                  : "bg-linear-to-br from-blue-500 to-blue-600 shadow-md shadow-blue-500/20"
               }
             `}
           >

@@ -39,6 +39,10 @@ export interface UseChatOptions {
   onArtifactDetected?: (content: string) => void;
   /** 后端保存成功时的回调 */
   onSaved?: () => void;
+  /** 流式响应开始时的回调 */
+  onStreamStart?: () => void;
+  /** 流式响应完成时的回调 */
+  onStreamComplete?: (content: string) => void;
   /** 工具调用时的回调 */
   onToolCall?: (toolCall: ToolCall) => void;
   /** 发生错误时的回调 */
@@ -52,6 +56,8 @@ export function useChat(options: UseChatOptions = {}) {
     mcpConfigId,
     onArtifactDetected,
     onSaved,
+    onStreamStart,
+    onStreamComplete,
     onToolCall,
     onError,
   } = options;
@@ -65,6 +71,8 @@ export function useChat(options: UseChatOptions = {}) {
   // 使用 ref 存储回调，避免依赖变化导致死循环
   const onArtifactDetectedRef = useRef(onArtifactDetected);
   const onSavedRef = useRef(onSaved);
+  const onStreamStartRef = useRef(onStreamStart);
+  const onStreamCompleteRef = useRef(onStreamComplete);
   const onToolCallRef = useRef(onToolCall);
   const onErrorRef = useRef(onError);
 
@@ -72,6 +80,8 @@ export function useChat(options: UseChatOptions = {}) {
   useEffect(() => {
     onArtifactDetectedRef.current = onArtifactDetected;
     onSavedRef.current = onSaved;
+    onStreamStartRef.current = onStreamStart;
+    onStreamCompleteRef.current = onStreamComplete;
     onToolCallRef.current = onToolCall;
     onErrorRef.current = onError;
   });
@@ -138,6 +148,11 @@ export function useChat(options: UseChatOptions = {}) {
     setInput("");
     setIsLoading(true);
     setError(null);
+
+    // 触发流式响应开始回调
+    if (onStreamStartRef.current) {
+      onStreamStartRef.current();
+    }
 
     // 创建新的 AbortController
     if (abortControllerRef.current) {
@@ -332,6 +347,11 @@ export function useChat(options: UseChatOptions = {}) {
             }
           }
         }
+      }
+
+      // 流式响应完成，触发回调
+      if (onStreamCompleteRef.current && assistantContent) {
+        onStreamCompleteRef.current(assistantContent);
       }
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
