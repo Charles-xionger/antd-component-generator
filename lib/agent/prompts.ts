@@ -24,14 +24,13 @@ export const ARCHITECT_PROMPT = `
    - **宽度占满**：所有组件默认使用 w-full 占满父容器宽度，确保充分利用屏幕空间
 
 **输出格式**：
-使用 <architect_plan> 标签包裹你的规划结果，输出纯JSON格式：
+直接输出纯 JSON 格式，不需要任何标签包裹。
 
 **文件路径规范**：为了沙箱兼容性，所有文件都应该在根目录下，不要使用子目录结构。
 
 **重要**：入口文件必须是React组件文件（.tsx），不能是Hook文件（.ts）！
 
 新建模式示例：
-<architect_plan>
 {
   "mode": "create",
   "files": [
@@ -42,17 +41,14 @@ export const ARCHITECT_PROMPT = `
   "dependencies": ["@/components/ui/button", "@/components/ui/input", "lucide-react"],
   "architecture_notes": "采用 Headless 架构，逻辑与视图分离。"
 }
-</architect_plan>
 
 修改模式示例（只列出需要修改的文件）：
-<architect_plan>
 {
   "mode": "modify",
   "target_files": ["App.tsx", "useTodo.ts"],
   "dependencies": [],
   "architecture_notes": "在现有 Hook 中添加 deleteTodo action"
 }
-</architect_plan>
 
 ### 现有代码上下文
 {codeContext}
@@ -454,16 +450,44 @@ export default function App() {
 **重要**：如果上面有现有代码，请基于这些代码进行增量修改，不要从头重写！
 `;
 
-export const SUPERVISOR_PROMPT = `你是一个智能路由器，负责判断用户的请求类型并路由到相应的处理流程。
+export const SUPERVISOR_PROMPT = `你是项目主管，负责根据用户需求分配任务给最合适的处理流程。
+
+可用路由（请务必只从以下三个选项中选择一个）：
+
+1. **coding** - 代码生成流程
+   - 职责：创建/修改代码、构建应用、实现功能、编写程序
+   - 适用场景：
+     * 用户明确要求"创建"、"写"、"实现"、"构建"应用或功能
+     * 需要生成具体的代码文件
+     * 需要修改现有代码
+   - 示例："帮我创建一个 Todo 应用"、"写一个计数器组件"、"修改这段代码"
+
+2. **mcp** - 外部工具调用流程
+   - 职责：使用外部工具和服务
+   - 适用场景：
+     * 画图、绘制图表
+     * 查询天气、搜索信息
+     * 需要调用特定工具的任务
+   - 示例："画一个流程图"、"查询今天的天气"、"搜索资料"
+
+3. **chat** - 对话交互流程（默认选项）
+   - 职责：回答问题、解释概念、提供建议、闲聊
+   - 适用场景：
+     * 所有不涉及代码生成的对话
+     * 知识问答、概念解释
+     * 技术咨询、方案建议
+     * 闲聊、自我介绍
+   - 示例："你是谁"、"解释一下 React Hooks"、"给我一些建议"
+
+决策规则：
+- 仅当用户**明确要求生成代码或构建应用**时，才选择 coding
+- 仅当用户**明确需要使用外部工具**时，才选择 mcp  
+- 其他所有情况（问答、解释、建议等）都选择 chat
+- 如果不确定，默认选择 chat
 
 用户消息：{message}
 
-请分析上述消息，判断用户的意图并使用对应的标签包裹你的决策：
-- 如果用户想要创建、修改、生成代码、构建应用、实现功能等编程相关需求，回复：<route>coding</route>
-- 如果用户需要使用外部工具（如画图、绘制图表、查询天气、搜索等），回复：<route>mcp</route>
-- 其他所有情况（包括闲聊、问答、解释等），回复：<route>chat</route>
-
-**重要**：只回复带标签的决策，不要添加任何其他内容。`;
+请基于上述规则，输出你的决策（只需回复：coding、mcp 或 chat）：`;
 
 export const REVIEWER_PROMPT = `
 你是一个代码审计专家和构建系统管理员。请检查 Coder 生成的代码：
@@ -488,11 +512,11 @@ export const REVIEWER_PROMPT = `
    - Hook 和 View 的接口定义是否匹配？
 
 **输出格式**：
-使用 <reviewer_result> 标签包裹你的审查结果。
+直接返回审查结果，不需要标签包裹。
 
 如果代码完美：
-<reviewer_result>APPROVE</reviewer_result>
+APPROVE
 
 如果有问题：
-<reviewer_result>REJECT: [具体原因]</reviewer_result>
+REJECT: [具体原因]
 `;

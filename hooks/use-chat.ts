@@ -8,15 +8,6 @@ export interface Message {
   content: string;
   hasArtifact?: boolean;
   toolCalls?: ToolCall[];
-  agentSteps?: AgentStep[];
-}
-
-export interface AgentStep {
-  id: string;
-  agent: "supervisor" | "architect" | "coder" | "reviewer";
-  status: "running" | "completed" | "error";
-  message?: string;
-  timestamp: number;
 }
 
 export interface ToolCall {
@@ -116,13 +107,8 @@ export function useChat(options: UseChatOptions = {}) {
           // 标记已加载
           historyLoadedRef.current = threadId;
 
-          // Check for artifacts in history and notify the last one
-          const lastArtifactMsg = [...formattedMessages]
-            .reverse()
-            .find((msg) => msg.hasArtifact);
-          if (lastArtifactMsg && onArtifactDetectedRef.current) {
-            onArtifactDetectedRef.current(lastArtifactMsg.content);
-          }
+          // 历史消息不需要触发 onArtifactDetected
+          // 因为历史消息已经完整，不需要创建乐观版本或触发实时处理
         }
       } catch (err) {
         console.error("Error fetching messages:", err);
@@ -185,7 +171,6 @@ export function useChat(options: UseChatOptions = {}) {
         role: "assistant",
         content: "",
         toolCalls: [],
-        agentSteps: [],
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -208,9 +193,6 @@ export function useChat(options: UseChatOptions = {}) {
                 assistantContent += content;
                 const hasArtifact = assistantContent.includes("<boltArtifact");
 
-                // 检测内容变化，实时更新状态提示
-                const contentType = analyzeContentType(assistantContent);
-
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === assistantMessage.id
@@ -218,11 +200,6 @@ export function useChat(options: UseChatOptions = {}) {
                           ...msg,
                           content: assistantContent,
                           hasArtifact,
-                          // 基于内容实时更新状态提示
-                          agentSteps: updateAgentStepsFromContent(
-                            msg.agentSteps || [],
-                            contentType
-                          ),
                         }
                       : msg
                   )
@@ -231,47 +208,6 @@ export function useChat(options: UseChatOptions = {}) {
                 if (hasArtifact && onArtifactDetectedRef.current) {
                   onArtifactDetectedRef.current(assistantContent);
                 }
-              } else if (data.type === "agent_start") {
-                // 处理 agent 开始事件
-                const agentStep: AgentStep = {
-                  id: `${data.agent}-${Date.now()}`,
-                  agent: data.agent,
-                  status: "running",
-                  message: data.message,
-                  timestamp: Date.now(),
-                };
-
-                setMessages((prev) =>
-                  prev.map((msg) =>
-                    msg.id === assistantMessage.id
-                      ? {
-                          ...msg,
-                          agentSteps: [...(msg.agentSteps || []), agentStep],
-                        }
-                      : msg
-                  )
-                );
-              } else if (data.type === "agent_end") {
-                // 处理 agent 结束事件
-                setMessages((prev) =>
-                  prev.map((msg) =>
-                    msg.id === assistantMessage.id
-                      ? {
-                          ...msg,
-                          agentSteps: msg.agentSteps?.map((step) =>
-                            step.agent === data.agent &&
-                            step.status === "running"
-                              ? {
-                                  ...step,
-                                  status: "completed" as const,
-                                  message: data.message,
-                                }
-                              : step
-                          ),
-                        }
-                      : msg
-                  )
-                );
               } else if (data.type === "tool_start") {
                 // 使用 run_id 作为唯一标识符
                 const toolCallId =

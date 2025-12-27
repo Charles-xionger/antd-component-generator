@@ -11,7 +11,7 @@ import {
   AlertCircle,
   FileCode,
 } from "lucide-react";
-import type { Message, AgentStep } from "@/hooks/use-chat";
+import type { Message } from "@/hooks/use-chat";
 import {
   CanvasCard,
   type Artifact,
@@ -95,54 +95,13 @@ function parseArtifactFromContent(content: string): Artifact | null {
   return { id, title, files };
 }
 
-// 检查是否正在生成
-function isGenerating(steps: AgentStep[] | undefined): boolean {
-  if (steps && steps.length > 0) {
-    // 有 agentSteps 时，检查是否有正在运行的步骤
-    return steps.some((s) => s.status === "running");
-  }
-
-  // 没有 agentSteps 时，直接认为历史数据已完成，不再生成
-  // 历史数据加载时不应该显示为"生成中"状态
-  return false;
-}
-
-// 检查是否全部完成
-function isCompleted(
-  steps: AgentStep[] | undefined,
-  content: string,
-  hasArtifact: boolean
-): boolean {
-  // 有 agentSteps 时，检查所有步骤是否完成
-  if (steps && steps.length > 0) {
-    return steps.every((s) => s.status === "completed");
-  }
-
-  // 没有 agentSteps 时（历史数据），认为都是已完成的
-  // 历史数据不应该显示为处理中状态
-  if (hasArtifact) {
-    // 有 artifact 的历史数据都认为是完成的
-    return true;
-  }
-
-  // 没有 artifact 但有实质内容的消息也认为是完成的
-  return !!(content && content.trim().length > 0);
-}
-
 // 检查是否需要修改（审查未通过）
 function needsModification(
-  steps: AgentStep[] | undefined,
   content: string,
   reviewResult: ReviewResult
 ): boolean {
   if (reviewResult === "reject") return true;
-
-  // 历史数据中检查是否包含拒绝信息
-  if (!steps || steps.length === 0) {
-    return content.includes("REJECT:") || content.includes("需要修改");
-  }
-
-  return false;
+  return content.includes("REJECT:") || content.includes("需要修改");
 }
 
 export function MessageItem({ message, onCanvasExpand }: MessageItemProps) {
@@ -158,17 +117,17 @@ export function MessageItem({ message, onCanvasExpand }: MessageItemProps) {
     return parseReviewResult(message.content);
   }, [message.content, isUser]);
 
-  const generating = isGenerating(message.agentSteps);
-  const completed = isCompleted(
-    message.agentSteps,
-    message.content,
-    !!messageArtifact
-  );
-  const needsModify = needsModification(
-    message.agentSteps,
-    message.content,
-    reviewResult.result
-  );
+  // 判断是否是代码生成相关的消息
+  // 注意：architect_plan 和 reviewer_result 是内部流程标签，不应该展示给用户
+  const isCodingMessage =
+    message.hasArtifact || message.content.includes("<boltArtifact");
+
+  // 简化状态判断：
+  // - 如果有完整的 artifact，说明已完成
+  // - 只有正在流式生成 boltArtifact 时才显示"生成中"
+  const generating = isCodingMessage && !messageArtifact;
+  const completed = !!messageArtifact;
+  const needsModify = needsModification(message.content, reviewResult.result);
 
   // 用户消息
   if (isUser) {
@@ -185,10 +144,23 @@ export function MessageItem({ message, onCanvasExpand }: MessageItemProps) {
     );
   }
 
-  // AI 消息 - 简化展示
-  const hasContent = message.agentSteps && message.agentSteps.length > 0;
+  // AI 消息 - 普通聊天回复（非代码生成）
+  if (!isCodingMessage) {
+    return (
+      <div className="flex justify-start">
+        <div className="max-w-[85%]">
+          <div className="rounded-lg bg-gray-100 px-4 py-2 dark:bg-gray-800">
+            <div className="whitespace-pre-wrap text-gray-900 dark:text-gray-100">
+              {message.content}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  if (!hasContent && !messageArtifact) {
+  // AI 消息 - 代码生成相关
+  if (!message.content && !messageArtifact) {
     return null;
   }
 

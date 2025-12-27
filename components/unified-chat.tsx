@@ -41,12 +41,13 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
   const chat = useChat({
     threadId,
     mcpConfigId: selectedMcpId,
-    onStreamStart: () => {
-      // 流式响应开始，创建乐观版本用于展示代码生成过程
-      console.log("[UnifiedChat] 代码生成开始，创建乐观版本");
-      canvas.createOptimisticVersion();
-    },
     onArtifactDetected: (content: string) => {
+      // 首次检测到代码时，创建乐观版本用于展示代码生成过程
+      if (!canvas.selectedVersion || canvas.selectedVersion === 0) {
+        console.log("[UnifiedChat] 检测到代码生成，创建乐观版本");
+        canvas.createOptimisticVersion();
+      }
+
       // 使用合并逻辑，保留未修改的文件
       canvas.mergeAndSetGeneratedCode(content);
 

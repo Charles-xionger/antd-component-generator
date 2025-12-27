@@ -41,7 +41,13 @@ export default function Home() {
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [threadToDelete, setThreadToDelete] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
   const { showToast } = useToast();
+
+  // 修复 hydration 错误：标记组件已挂载
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // 保存选中的会话到 localStorage
   useEffect(() => {
@@ -148,6 +154,9 @@ export default function Home() {
   }, [fetchThreads]);
 
   const formatDate = (dateString: string) => {
+    // 避免 hydration 错误：只在客户端挂载后格式化日期
+    if (!mounted) return "";
+
     const date = new Date(dateString);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();

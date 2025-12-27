@@ -6,6 +6,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
+import { z } from "zod";
 
 // Import our new multi-agent components
 import { StateAnnotations, type AgentState } from "./state";
@@ -18,6 +19,14 @@ import {
 } from "./nodes";
 import { SUPERVISOR_PROMPT } from "./prompts";
 import { StructuredToolInterface } from "@langchain/core/tools";
+
+// 定义路由响应的结构化输出（关键优化！）
+const RouteSchema = z.object({
+  next: z
+    .enum(["coding_subgraph", "mcp_subgraph", "chat_subgraph"])
+    .describe("下一个要路由到的子图名称"),
+  reasoning: z.string().optional().describe("路由决策的理由（可选）"),
+});
 
 // 创建 checkpointer 并初始化
 const postgresCheckpointer = PostgresSaver.fromConnString(
@@ -265,39 +274,40 @@ async function createMcpSubgraph(mcpUrl?: string) {
   }
 }
 
-// 主 supervisor 路由逻辑
+// 主 supervisor 路由逻辑（优化版：使用结构化输出）
 async function routeToSubgraph(state: AgentState): Promise<string> {
-  const llm = new ChatOpenAI({
-    ...baseModelConfig,
-    temperature: 0.1, // 路由决策需要确定性
-  });
-
   const lastMessage = state.messages[state.messages.length - 1];
-  const userMessage = lastMessage?.content || "";
 
-  const prompt = SUPERVISOR_PROMPT.replace("{message}", String(userMessage));
+  try {
+    // 使用强模型 + temperature=0 确保决策准确性
+    // 注意：这里创建独立的 LLM 实例，不会影响主对话流
+    const llm = new ChatOpenAI({
+      ...baseModelConfig,
+      temperature: 0, // 路由决策需要确定性
+      streaming: false, // 关键：禁用流式输出，避免 JSON 泄漏到前端
+    });
 
-  const response = await llm.invoke([new HumanMessage(prompt)]);
-  const responseText = response.content.toString().trim();
+    const prompt = SUPERVISOR_PROMPT.replace(
+      "{message}",
+      String(lastMessage?.content || "")
+    );
 
-  // 从标签中提取路由决策
-  const routeMatch = responseText.match(/<route>(.*?)<\/route>/);
-  const decision = routeMatch ? routeMatch[1].toLowerCase() : "chat";
+    // 关键优化：使用 withStructuredOutput 强制输出符合 RouteSchema 的结果
+    // 注意：直接 invoke 不会添加到消息历史，因为这只是内部路由决策
+    const structuredLlm = llm.withStructuredOutput(RouteSchema);
 
-  console.log(
-    "Supervisor routing decision:",
-    decision,
-    "(from response:",
-    responseText,
-    ")"
-  );
+    // 只传递系统提示和用户消息，不传递完整历史，避免路由决策被保存
+    const response = await structuredLlm.invoke([new HumanMessage(prompt)]);
 
-  // 返回子图名称
-  if (decision === "coding") {
-    return "coding_subgraph";
-  } else if (decision === "mcp") {
-    return "mcp_subgraph";
-  } else {
+    console.log(
+      "路由决策:",
+      response.next,
+      response.reasoning ? `(${response.reasoning})` : ""
+    );
+
+    return response.next;
+  } catch (error) {
+    console.error("路由失败，默认 chat:", error);
     return "chat_subgraph";
   }
 }

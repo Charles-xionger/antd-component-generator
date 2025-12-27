@@ -102,45 +102,49 @@ export async function POST(request: NextRequest) {
           );
 
           for await (const event of eventStream) {
-            // 处理 agent 节点开始
-            if (event.event === "on_chain_start" && event.name) {
-              const agentName = event.name.toLowerCase();
-              // 只发送我们关心的 agent 节点（排除 subgraph，只关注实际的 agent）
-              if (["architect", "coder", "reviewer"].includes(agentName)) {
-                const chunk = encoder.encode(
-                  `data: ${JSON.stringify({
-                    type: "agent_start",
-                    agent: agentName,
-                    message: getAgentStartMessage(agentName),
-                    threadId: finalThreadId,
-                  })}\n\n`
-                );
-                controller.enqueue(chunk);
-              }
-            }
-
-            // 处理 agent 节点结束
-            if (event.event === "on_chain_end" && event.name) {
-              const agentName = event.name.toLowerCase();
-              if (["architect", "coder", "reviewer"].includes(agentName)) {
-                const chunk = encoder.encode(
-                  `data: ${JSON.stringify({
-                    type: "agent_end",
-                    agent: agentName,
-                    message: getAgentEndMessage(agentName),
-                    threadId: finalThreadId,
-                  })}\n\n`
-                );
-                controller.enqueue(chunk);
-              }
-            }
-
             // 流式发送 AI 消息内容
             if (
               event.event === "on_chat_model_stream" &&
               event.data?.chunk?.content
             ) {
               const content = event.data.chunk.content;
+
+              // 智能过滤：基于事件元数据和内容特征
+              // 定义需要过滤的节点（这些是内部流程，不应展示给用户）
+              const FILTERED_NODES = [
+                "routeToSubgraph", // Supervisor 路由决策
+                "architect", // 架构规划
+                "reviewer", // 代码审查
+              ];
+
+              // 检查事件来源（通过 tags 或 name 判断）
+              const eventTags = event.tags || [];
+              const eventName = event.name || "";
+              const isFilteredNode = FILTERED_NODES.some(
+                (node) =>
+                  eventTags.includes(node) ||
+                  eventName.includes(node) ||
+                  eventName === node
+              );
+
+              // 额外的内容特征检测（作为后备方案）
+              const isInternalContent =
+                // JSON 结构化输出（路由决策、架构规划）
+                (content.includes("{") &&
+                  (content.includes('"next"') ||
+                    content.includes('"mode"') ||
+                    content.includes('"files"'))) ||
+                // 审查结果标记
+                content.match(/^(APPROVE|REJECT)/i);
+
+              if (isFilteredNode || isInternalContent) {
+                console.log("[过滤] 内部流程消息:", {
+                  node: eventName || "unknown",
+                  contentPreview: content.substring(0, 50),
+                });
+                continue;
+              }
+
               finalArtifact += content; // 累积内容
 
               const chunk = encoder.encode(
@@ -317,33 +321,5 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("API error:", error);
     return Response.json({ error: "Internal server error" }, { status: 500 });
-  }
-}
-
-// 获取 agent 开始时的友好消息
-function getAgentStartMessage(agent: string): string {
-  switch (agent) {
-    case "architect":
-      return "🏗️ 架构师正在设计方案...";
-    case "coder":
-      return "💻 工程师正在编写代码...";
-    case "reviewer":
-      return "🔍 审查员正在检查代码...";
-    default:
-      return "处理中...";
-  }
-}
-
-// 获取 agent 结束时的友好消息
-function getAgentEndMessage(agent: string): string {
-  switch (agent) {
-    case "architect":
-      return "✅ 方案设计完成";
-    case "coder":
-      return "✅ 代码编写完成";
-    case "reviewer":
-      return "✅ 代码审查完成";
-    default:
-      return "完成";
   }
 }
