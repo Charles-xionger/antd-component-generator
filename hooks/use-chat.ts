@@ -409,6 +409,21 @@ function formatMessagesFromHistory(rawMessages: RawMessage[]): Message[] {
         .join("");
     }
 
+    // 🚫 只过滤纯内部消息（Supervisor 路由决策）
+    if (msg.type === "ai" && content) {
+      // 检测 Supervisor 的路由决策
+      const isSupervisorRoute =
+        content.trim().startsWith("{") && content.includes('"next"');
+
+      // 如果是纯内部消息，跳过
+      if (isSupervisorRoute) {
+        continue;
+      }
+    }
+
+    // 注意：Architect 消息已经被后端用 <architectPlan> 标签包裹
+    // 前端直接通过标签识别，不需要额外处理
+
     // 处理 tool calls（仅 AI 消息）
     let toolCalls: ToolCall[] | undefined;
     if (msg.type === "ai" && msg.toolCalls && msg.toolCalls.length > 0) {

@@ -15,11 +15,21 @@ interface CanvasPanelProps {
   iframeRef?: React.RefObject<HTMLIFrameElement | null>;
   isSandboxReady?: boolean;
   sandboxError?: string | null;
+  onFullscreenToggle?: () => void;
+  onSandboxReset?: () => void;
 }
 
 export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
   function CanvasPanel(
-    { canvas, onClose, iframeRef, isSandboxReady = false, sandboxError = null },
+    {
+      canvas,
+      onClose,
+      iframeRef,
+      isSandboxReady = false,
+      sandboxError = null,
+      onFullscreenToggle,
+      onSandboxReset,
+    },
     ref
   ) {
     const {
@@ -38,35 +48,59 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
       copyToClipboard,
       sendFilesToSandbox,
       shouldSendToSandbox,
+      setShouldSendToSandbox,
     } = canvas;
 
     // 全屏状态
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
 
-    // 切换全屏
+    // 切换全屏 - 调用父组件回调
     const toggleFullscreen = useCallback(() => {
-      setIsFullscreen((prev) => !prev);
-    }, []);
+      console.log("[全屏] 点击全屏按钮");
+      // 进入全屏时，自动切换到 preview 并允许渲染
+      if (artifact && artifact.files.length > 0) {
+        setActiveTab("preview");
+        setShouldSendToSandbox(true);
+      }
+      onFullscreenToggle?.();
+    }, [artifact, setActiveTab, setShouldSendToSandbox, onFullscreenToggle]);
 
     // 刷新预览
     const handleRefresh = useCallback(() => {
-      if (!iframeRef?.current) return;
+      if (!iframeRef?.current || !artifact) {
+        console.log("[刷新] 无法刷新：iframe 或 artifact 不存在");
+        return;
+      }
+
+      console.log("[刷新] 开始刷新沙箱...");
+
+      // 通知父组件重置沙箱状态
+      onSandboxReset?.();
 
       setIsRefreshing(true);
 
       // 重新加载 iframe
       const iframe = iframeRef.current;
-      iframe.src = iframe.src;
+      try {
+        // 使用 contentWindow.location.reload() 刷新
+        iframe.contentWindow?.location.reload();
+        console.log("[刷新] iframe 重新加载");
+      } catch {
+        // 如果跨域导致失败，回退到修改 src 的方式
+        console.log("[刷新] 使用备用刷新方式");
+        const currentSrc = iframe.src;
+        iframe.src = "";
+        setTimeout(() => {
+          iframe.src = currentSrc;
+        }, 50);
+      }
 
-      // 等待重新加载后发送文件
+      // 5秒后取消loading状态
       setTimeout(() => {
-        if (artifact && iframeRef) {
-          sendFilesToSandbox(iframeRef);
-        }
         setIsRefreshing(false);
-      }, 1000);
-    }, [artifact, iframeRef, sendFilesToSandbox]);
+      }, 5000);
+    }, [artifact, iframeRef, onSandboxReset]);
 
     // 沙箱就绪且应该发送文件时才发送（审查通过后）
     useEffect(() => {
@@ -163,7 +197,6 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
           <PreviewToolbar
             selectedDevice={selectedDevice}
             onDeviceChange={setSelectedDevice}
-            isFullscreen={isFullscreen}
             onToggleFullscreen={toggleFullscreen}
             onRefresh={handleRefresh}
             isRefreshing={isRefreshing}

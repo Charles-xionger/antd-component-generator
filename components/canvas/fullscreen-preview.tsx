@@ -1,49 +1,33 @@
-// components/canvas/preview-panel.tsx
+// components/canvas/fullscreen-preview.tsx
 "use client";
 
 import { forwardRef } from "react";
-import type { DeviceType } from "./types";
+import { X } from "lucide-react";
 
-interface PreviewPanelProps {
-  isVisible: boolean;
-  selectedDevice: DeviceType;
-  sandboxError: string | null;
+interface FullscreenPreviewProps {
   isSandboxReady: boolean;
+  sandboxError: string | null;
+  onClose: () => void;
 }
 
-function getDeviceSize(device: DeviceType) {
-  switch (device) {
-    case "mobile":
-      return { width: "375px", height: "667px" };
-    case "tablet":
-      return { width: "768px", height: "1024px" };
-    default:
-      return { width: "100%", height: "100%" };
-  }
-}
-
-export const PreviewPanel = forwardRef<HTMLIFrameElement, PreviewPanelProps>(
-  function PreviewPanel(
-    { isVisible, selectedDevice, sandboxError, isSandboxReady },
-    ref
-  ) {
-    const deviceSize = getDeviceSize(selectedDevice);
-
-    return (
-      <div
-        className={`absolute inset-0 flex items-center justify-center bg-gray-800 transition-opacity duration-200 p-4 ${
-          isVisible ? "opacity-100 z-10" : "opacity-0 z-0 pointer-events-none"
-        }`}
+export const FullscreenPreview = forwardRef<
+  HTMLIFrameElement,
+  FullscreenPreviewProps
+>(function FullscreenPreview({ isSandboxReady, sandboxError, onClose }, ref) {
+  return (
+    <div className="fixed inset-0 z-9999 bg-gray-900 flex flex-col">
+      {/* 退出按钮 */}
+      <button
+        onClick={onClose}
+        className="absolute top-4 right-4 z-10000 rounded-full bg-black/50 hover:bg-black/70 p-2 text-white transition-colors"
+        title="退出全屏 (ESC)"
       >
-        <div
-          className="bg-white rounded-lg shadow-2xl overflow-hidden transition-all duration-300 relative"
-          style={{
-            width: deviceSize.width,
-            height: deviceSize.height,
-            maxWidth: "100%",
-            maxHeight: "100%",
-          }}
-        >
+        <X className="h-5 w-5" />
+      </button>
+
+      {/* Preview 容器 */}
+      <div className="absolute inset-0 bg-gray-800">
+        <div className="w-full h-full bg-white relative">
           {sandboxError && (
             <div className="absolute top-0 left-0 right-0 bg-red-100 border-b border-red-400 text-red-700 px-3 py-2 text-xs z-10">
               <div className="font-semibold">渲染错误:</div>
@@ -94,10 +78,10 @@ export const PreviewPanel = forwardRef<HTMLIFrameElement, PreviewPanelProps>(
             ref={ref}
             src="http://localhost:4000"
             className="w-full h-full border-0"
-            title="Code Sandbox"
+            title="Code Sandbox Fullscreen"
           />
         </div>
       </div>
-    );
-  }
-);
+    </div>
+  );
+});

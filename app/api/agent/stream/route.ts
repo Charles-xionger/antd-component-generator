@@ -110,11 +110,10 @@ export async function POST(request: NextRequest) {
               const content = event.data.chunk.content;
 
               // 智能过滤：基于事件元数据和内容特征
-              // 定义需要过滤的节点（这些是内部流程，不应展示给用户）
+              // 定义需要过滤的节点（只过滤纯内部逻辑，不过滤有用户价值的消息）
               const FILTERED_NODES = [
-                "routeToSubgraph", // Supervisor 路由决策
-                "architect", // 架构规划
-                "reviewer", // 代码审查
+                "routeToSubgraph", // Supervisor 路由决策（纯内部逻辑）
+                // 注意：不过滤 architect，让前端智能渲染为架构规划卡片
               ];
 
               // 检查事件来源（通过 tags 或 name 判断）
@@ -127,15 +126,10 @@ export async function POST(request: NextRequest) {
                   eventName === node
               );
 
-              // 额外的内容特征检测（作为后备方案）
+              // 额外的内容特征检测（只过滤纯内部逻辑）
               const isInternalContent =
-                // JSON 结构化输出（路由决策、架构规划）
-                (content.includes("{") &&
-                  (content.includes('"next"') ||
-                    content.includes('"mode"') ||
-                    content.includes('"files"'))) ||
-                // 审查结果标记
-                content.match(/^(APPROVE|REJECT)/i);
+                // Supervisor 路由决策
+                content.includes("{") && content.includes('"next"');
 
               if (isFilteredNode || isInternalContent) {
                 console.log("[过滤] 内部流程消息:", {
@@ -144,6 +138,9 @@ export async function POST(request: NextRequest) {
                 });
                 continue;
               }
+
+              // 注意：Architect 消息已经用 <architectPlan> 标签包裹
+              // 不再需要过滤，前端会优雅地渲染为卡片
 
               finalArtifact += content; // 累积内容
 

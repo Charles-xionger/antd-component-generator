@@ -15,10 +15,6 @@ export interface AgentState {
   plan?: AgentPlan;
   // 当前生成的代码片段 (XML)
   generatedArtifact?: string;
-  // 审查反馈
-  reviewFeedback?: string;
-  // 迭代计数 (防止死循环)
-  iterationCount: number;
   // 当前代码上下文（用于向 Agent 注入已有代码）
   codeContext?: string;
 }
@@ -47,14 +43,6 @@ export const StateAnnotations = Annotation.Root({
   generatedArtifact: Annotation<string | undefined>({
     reducer: (x, y) => y ?? x,
     default: () => undefined,
-  }),
-  reviewFeedback: Annotation<string | undefined>({
-    reducer: (x, y) => y ?? x,
-    default: () => undefined,
-  }),
-  iterationCount: Annotation<number>({
-    reducer: (x, y) => y ?? x,
-    default: () => 0,
   }),
   codeContext: Annotation<string | undefined>({
     reducer: (x, y) => y ?? x,

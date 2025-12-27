@@ -95,6 +95,40 @@ function parseArtifactFromContent(content: string): Artifact | null {
   return { id, title, files };
 }
 
+// 解析 Architect 规划消息
+interface ArchitectPlan {
+  mode: "create" | "modify";
+  files?: Array<{ path: string; description: string }>;
+  target_files?: string[];
+  dependencies?: string[];
+  architecture_notes?: string;
+}
+
+function parseArchitectPlan(content: string): ArchitectPlan | null {
+  try {
+    // 通过标签提取 JSON（更简单可靠）
+    const match = content.match(
+      /<architectPlan>\s*([\s\S]*?)\s*<\/architectPlan>/
+    );
+    if (!match) return null;
+
+    const jsonStr = match[1].trim();
+    const plan = JSON.parse(jsonStr);
+
+    // 验证是否是有效的 Architect 规划
+    if (
+      plan.mode === "create" ||
+      plan.mode === "modify" ||
+      (plan.files && Array.isArray(plan.files))
+    ) {
+      return plan;
+    }
+  } catch {
+    // 解析失败
+  }
+  return null;
+}
+
 // 检查是否需要修改（审查未通过）
 function needsModification(
   content: string,
@@ -112,19 +146,22 @@ export function MessageItem({ message, onCanvasExpand }: MessageItemProps) {
     return parseArtifactFromContent(message.content);
   }, [message.content, message.hasArtifact, isUser]);
 
+  const architectPlan = useMemo(() => {
+    if (isUser) return null;
+    return parseArchitectPlan(message.content);
+  }, [message.content, isUser]);
+
   const reviewResult = useMemo(() => {
     if (isUser) return { result: null };
     return parseReviewResult(message.content);
   }, [message.content, isUser]);
 
-  // 判断是否是代码生成相关的消息
-  // 注意：architect_plan 和 reviewer_result 是内部流程标签，不应该展示给用户
+  // 判断消息类型
+  const isArchitectMessage = !!architectPlan;
   const isCodingMessage =
     message.hasArtifact || message.content.includes("<boltArtifact");
 
-  // 简化状态判断：
-  // - 如果有完整的 artifact，说明已完成
-  // - 只有正在流式生成 boltArtifact 时才显示"生成中"
+  // 简化状态判断
   const generating = isCodingMessage && !messageArtifact;
   const completed = !!messageArtifact;
   const needsModify = needsModification(message.content, reviewResult.result);
@@ -139,6 +176,17 @@ export function MessageItem({ message, onCanvasExpand }: MessageItemProps) {
               {message.content}
             </div>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // AI 消息 - Architect 规划
+  if (isArchitectMessage && architectPlan) {
+    return (
+      <div className="flex justify-start">
+        <div className="w-full max-w-[85%]">
+          <ArchitectPlanCard plan={architectPlan} />
         </div>
       </div>
     );
@@ -179,6 +227,111 @@ export function MessageItem({ message, onCanvasExpand }: MessageItemProps) {
           rawContent={message.content}
         />
       </div>
+    </div>
+  );
+}
+
+// ============================================
+// Architect 规划卡片
+// ============================================
+function ArchitectPlanCard({ plan }: { plan: ArchitectPlan }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const isCreateMode = plan.mode === "create";
+  const files = isCreateMode
+    ? plan.files
+    : plan.target_files?.map((path) => ({ path, description: "" }));
+
+  return (
+    <div className="rounded-lg border border-purple-200 bg-purple-50/50 dark:border-purple-800 dark:bg-purple-900/10">
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="flex w-full items-center justify-between px-4 py-3"
+      >
+        <div className="flex items-center gap-3">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-100 dark:bg-purple-900/30">
+            <Code2 className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+          </div>
+          <div className="flex flex-col items-start">
+            <span className="font-medium text-purple-700 dark:text-purple-300">
+              {isCreateMode ? "架构设计完成" : "修改方案设计完成"}
+            </span>
+            <span className="text-xs text-purple-600 dark:text-purple-400">
+              {isCreateMode
+                ? `规划了 ${files?.length || 0} 个文件`
+                : `需要修改 ${files?.length || 0} 个文件`}
+            </span>
+          </div>
+        </div>
+        {isExpanded ? (
+          <ChevronDown className="h-4 w-4 text-purple-400" />
+        ) : (
+          <ChevronRight className="h-4 w-4 text-purple-400" />
+        )}
+      </button>
+
+      {isExpanded && (
+        <div className="space-y-3 border-t border-purple-100 px-4 py-3 dark:border-purple-800">
+          {/* 文件列表 */}
+          {files && files.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-purple-700 dark:text-purple-300">
+                📁 {isCreateMode ? "文件结构" : "修改文件"}
+              </div>
+              <div className="space-y-1">
+                {files.map((file, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-start gap-2 rounded bg-white/50 px-2 py-1.5 text-xs dark:bg-purple-950/20"
+                  >
+                    <FileCode className="mt-0.5 h-3.5 w-3.5 shrink-0 text-purple-500" />
+                    <div className="flex-1">
+                      <div className="font-mono text-purple-900 dark:text-purple-200">
+                        {file.path}
+                      </div>
+                      {file.description && (
+                        <div className="mt-0.5 text-purple-600 dark:text-purple-400">
+                          {file.description}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 依赖列表 */}
+          {plan.dependencies && plan.dependencies.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-purple-700 dark:text-purple-300">
+                📦 技术栈
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {plan.dependencies.map((dep, idx) => (
+                  <span
+                    key={idx}
+                    className="rounded bg-purple-100 px-2 py-0.5 text-xs text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
+                  >
+                    {dep}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 架构说明 */}
+          {plan.architecture_notes && (
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-purple-700 dark:text-purple-300">
+                💡 架构说明
+              </div>
+              <div className="rounded bg-white/50 px-3 py-2 text-xs text-purple-600 dark:bg-purple-950/20 dark:text-purple-400">
+                {plan.architecture_notes}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

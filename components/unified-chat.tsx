@@ -11,7 +11,7 @@ import { useCanvas } from "@/hooks/use-canvas";
 // Components
 import { type MCPConfig } from "@/components/mcp";
 import { MessageItem, InputBar } from "@/components/chat";
-import { CanvasPanel } from "@/components/canvas";
+import { CanvasPanel, FullscreenPreview } from "@/components/canvas";
 
 interface UnifiedChatProps {
   threadId?: string;
@@ -34,8 +34,81 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
   const [isSandboxReady, setIsSandboxReady] = useState(false);
   const [sandboxError, setSandboxError] = useState<string | null>(null);
 
+  // Fullscreen state
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
   // Canvas hook
   const canvas = useCanvas({ threadId });
+
+  // 全屏切换处理
+  const handleFullscreenToggle = useCallback(() => {
+    setIsFullscreen((prev) => {
+      const nextFullscreen = !prev;
+      // 进入全屏时，确保可以发送文件到沙箱
+      if (nextFullscreen) {
+        // 重置沙箱状态，因为全屏会使用新的 iframe
+        setIsSandboxReady(false);
+        canvas.setShouldSendToSandbox(true);
+        console.log("[全屏] 进入全屏模式，重置沙箱状态，等待就绪");
+      }
+      return nextFullscreen;
+    });
+  }, [canvas]);
+
+  const handleFullscreenClose = useCallback(() => {
+    setIsFullscreen(false);
+  }, []);
+
+  // 处理沙箱重置（刷新时调用）
+  const handleSandboxReset = useCallback(() => {
+    console.log("[沙箱重置] 重置沙箱状态");
+    setIsSandboxReady(false);
+    canvas.setShouldSendToSandbox(true);
+  }, [canvas]);
+
+  // 全屏时监听沙箱就绪并发送文件
+  useEffect(() => {
+    console.log("[全屏-监听] 状态变化:", {
+      isFullscreen,
+      isSandboxReady,
+      hasArtifact: !!canvas.artifact,
+      hasIframe: !!iframeRef.current,
+      shouldSend: canvas.shouldSendToSandbox,
+    });
+
+    // 必须确保沙箱已就绪才发送
+    if (!isSandboxReady) {
+      console.log("[全屏-监听] 沙箱未就绪，等待中...");
+      return;
+    }
+
+    if (
+      isFullscreen &&
+      canvas.artifact &&
+      iframeRef.current &&
+      canvas.shouldSendToSandbox
+    ) {
+      console.log("[全屏] 所有条件满足，发送文件到沙箱");
+      canvas.sendFilesToSandbox(iframeRef);
+    }
+  }, [
+    isFullscreen,
+    isSandboxReady,
+    canvas.artifact,
+    canvas.shouldSendToSandbox,
+    canvas.sendFilesToSandbox,
+  ]);
+
+  // ESC 键退出全屏
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isFullscreen) {
+        setIsFullscreen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isFullscreen]);
 
   // Chat hook with artifact detection
   const chat = useChat({
@@ -56,24 +129,12 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
       canvas.setShouldSendToSandbox(false);
     },
     onStreamComplete: (content: string) => {
-      // 流式响应完成，检查是否审查通过
-      const hasReviewApproval = (() => {
-        const match = content.match(
-          /<reviewer_result>([\s\S]*?)<\/reviewer_result>/
-        );
-        if (match) {
-          const result = match[1].trim();
-          return result.toUpperCase().startsWith("APPROVE");
-        }
-        return content.includes("APPROVE");
-      })();
-
-      if (hasReviewApproval) {
-        console.log("[UnifiedChat] 代码生成完成且审查通过，允许发送到沙箱");
+      // 流式响应完成，如果有 artifact 则允许发送到沙箱渲染
+      if (canvas.artifact && canvas.artifact.files.length > 0) {
+        console.log("[UnifiedChat] 代码生成完成，允许发送到沙箱渲染");
         canvas.setShouldSendToSandbox(true);
       } else {
-        console.log("[UnifiedChat] 代码生成完成但未通过审查，不发送到沙箱");
-        canvas.setShouldSendToSandbox(false);
+        console.log("[UnifiedChat] 代码生成完成但没有 artifact");
       }
     },
     onSaved: async () => {
@@ -206,8 +267,20 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
             iframeRef={iframeRef}
             isSandboxReady={isSandboxReady}
             sandboxError={sandboxError}
+            onFullscreenToggle={handleFullscreenToggle}
+            onSandboxReset={handleSandboxReset}
           />
         </div>
+      )}
+
+      {/* Fullscreen Preview */}
+      {isFullscreen && (
+        <FullscreenPreview
+          ref={iframeRef}
+          isSandboxReady={isSandboxReady}
+          sandboxError={sandboxError}
+          onClose={handleFullscreenClose}
+        />
       )}
     </div>
   );

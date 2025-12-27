@@ -361,20 +361,6 @@ export function useCanvas({
     }
   }, [artifact]);
 
-  // 当activeTab切换到preview且有artifact时，确保shouldSendToSandbox为true（适用于历史版本或已审查通过的内容）
-  useEffect(() => {
-    if (
-      activeTab === "preview" &&
-      artifact &&
-      artifact.files.length > 0 &&
-      !shouldSendToSandbox
-    ) {
-      // 检查这是否是一个已存在的完整版本（有artifact说明已经审查通过或者是历史版本）
-      console.log("[activeTab切换] 切换到preview且有artifact，允许渲染");
-      setShouldSendToSandbox(true);
-    }
-  }, [activeTab, artifact, shouldSendToSandbox]);
-
   // 复制到剪贴板
   const copyToClipboard = useCallback(
     async (content: string, fileName: string) => {

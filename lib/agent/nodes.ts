@@ -6,7 +6,7 @@ import {
 } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
 import type { AgentState } from "./state";
-import { ARCHITECT_PROMPT, CODER_PROMPT, REVIEWER_PROMPT } from "./prompts";
+import { ARCHITECT_PROMPT, CODER_PROMPT } from "./prompts";
 
 // JSON解析工具函数
 function extractJSONFromResponse(response: string): string {
@@ -81,8 +81,16 @@ export async function architect(
         response.content.toString()
       );
       const plan = JSON.parse(cleanedContent);
+
+      // 用标签包裹 JSON，方便前端识别和解析
+      const wrappedContent = `<architectPlan>\n${JSON.stringify(
+        plan,
+        null,
+        2
+      )}\n</architectPlan>`;
+
       return {
-        messages: [response], // 只返回新的AI响应
+        messages: [new AIMessage(wrappedContent)], // 返回包裹后的消息
         plan,
       };
     } catch (parseError) {
@@ -103,31 +111,53 @@ export async function architect(
           retryResponse.content.toString()
         );
         const plan = JSON.parse(cleanedRetryContent);
+
+        // 用标签包裹
+        const wrappedContent = `<architectPlan>\n${JSON.stringify(
+          plan,
+          null,
+          2
+        )}\n</architectPlan>`;
+
         return {
-          messages: [retryResponse], // 只返回新的AI响应
+          messages: [new AIMessage(wrappedContent)],
           plan,
         };
       } catch {
+        const defaultPlan = {
+          files: [{ path: "/App.tsx", description: "主应用组件" }],
+          dependencies: [],
+          architecture_notes: "解析失败，使用默认方案",
+        };
+        const wrappedContent = `<architectPlan>\n${JSON.stringify(
+          defaultPlan,
+          null,
+          2
+        )}\n</architectPlan>`;
+
         return {
-          messages: [response], // 只返回新的AI响应
-          plan: {
-            files: [{ path: "/App.tsx", description: "主应用组件" }],
-            dependencies: [],
-            architecture_notes: "解析失败，使用默认方案",
-          },
+          messages: [new AIMessage(wrappedContent)],
+          plan: defaultPlan,
         };
       }
     }
   } catch (networkError) {
     console.error("Network error in architect:", networkError);
     // 网络错误时返回默认计划
+    const defaultPlan = {
+      files: [{ path: "/App.tsx", description: "主应用组件" }],
+      dependencies: [],
+      architecture_notes: "网络错误，使用默认方案",
+    };
+    const wrappedContent = `<architectPlan>\n${JSON.stringify(
+      defaultPlan,
+      null,
+      2
+    )}\n</architectPlan>`;
+
     return {
-      messages: [new AIMessage("网络连接错误，使用默认架构方案")], // 只返回新的AI消息
-      plan: {
-        files: [{ path: "/App.tsx", description: "主应用组件" }],
-        dependencies: [],
-        architecture_notes: "网络错误，使用默认方案",
-      },
+      messages: [new AIMessage(wrappedContent)],
+      plan: defaultPlan,
     };
   }
 }
@@ -167,7 +197,6 @@ ${JSON.stringify(state.plan, null, 2)}
     return {
       messages: [response], // 只返回新的AI消息
       generatedArtifact: response.content.toString(),
-      iterationCount: (state.iterationCount || 0) + 1,
     };
   } catch (networkError) {
     console.error("Network error in coder:", networkError);
@@ -175,76 +204,6 @@ ${JSON.stringify(state.plan, null, 2)}
     return {
       messages: [new AIMessage("网络连接错误，无法生成代码")], // 只返回新的错误消息
       generatedArtifact: "网络连接错误，请检查网络设置后重试。",
-      iterationCount: (state.iterationCount || 0) + 1,
     };
   }
-}
-
-// Reviewer Node: 代码审查
-export async function reviewer(
-  state: AgentState
-): Promise<Partial<AgentState>> {
-  const llm = new ChatOpenAI({
-    ...baseModelConfig,
-    temperature: 0.1,
-    timeout: 15000, // 15秒超时，避免长时间等待
-  });
-
-  const messages = [
-    new SystemMessage(REVIEWER_PROMPT),
-    new HumanMessage(`
-请审查以下生成的代码：
-
-${state.generatedArtifact}
-    `),
-  ];
-
-  try {
-    const response = await llm.invoke(messages);
-    const feedback = response.content.toString().trim();
-
-    return {
-      messages: [response], // 只返回新的AI消息
-      reviewFeedback: feedback,
-    };
-  } catch (error) {
-    console.error("Reviewer error:", error);
-    // 审查失败时，默认通过，避免阻塞流程
-    return {
-      messages: [new AIMessage("APPROVE (审查服务暂时不可用，自动通过)")],
-      reviewFeedback: "APPROVE",
-    };
-  }
-}
-
-// 条件路由函数
-export function shouldContinueToReviewer(state: AgentState): string {
-  // 如果已经迭代太多次，强制结束
-  if ((state.iterationCount || 0) >= 3) {
-    return "end";
-  }
-
-  // 如果有生成的代码，继续到审查
-  if (state.generatedArtifact) {
-    return "reviewer";
-  }
-
-  return "end";
-}
-
-export function shouldRetryOrFinish(state: AgentState): string {
-  const feedback = state.reviewFeedback?.toLowerCase() || "";
-
-  // 如果审查通过，结束
-  if (feedback.includes("approve")) {
-    return "end";
-  }
-
-  // 如果被拒绝且迭代次数未超限，重新编码
-  if (feedback.includes("reject") && (state.iterationCount || 0) < 3) {
-    return "coder";
-  }
-
-  // 否则结束（可能是解析错误或达到最大迭代次数）
-  return "end";
 }

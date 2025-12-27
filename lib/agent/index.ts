@@ -10,13 +10,7 @@ import { z } from "zod";
 
 // Import our new multi-agent components
 import { StateAnnotations, type AgentState } from "./state";
-import {
-  architect,
-  coder,
-  reviewer,
-  shouldContinueToReviewer,
-  shouldRetryOrFinish,
-} from "./nodes";
+import { architect, coder } from "./nodes";
 import { SUPERVISOR_PROMPT } from "./prompts";
 import { StructuredToolInterface } from "@langchain/core/tools";
 
@@ -146,22 +140,13 @@ function createChatSubgraph() {
   return chatWorkflow.compile();
 }
 
-// 创建编程 subgraph (新的多智能体系统)
+// 创建编程 subgraph (简化版：Architect → Coder)
 function createCodingSubgraph() {
   const codingWorkflow = new StateGraph(StateAnnotations)
     .addNode("architect", architect)
     .addNode("coder", coder)
-    .addNode("reviewer", reviewer)
     .addEdge(START, "architect")
-    .addEdge("architect", "coder")
-    .addConditionalEdges("coder", shouldContinueToReviewer, {
-      reviewer: "reviewer",
-      end: "__end__",
-    })
-    .addConditionalEdges("reviewer", shouldRetryOrFinish, {
-      coder: "coder",
-      end: "__end__",
-    });
+    .addEdge("architect", "coder");
 
   return codingWorkflow.compile();
 }

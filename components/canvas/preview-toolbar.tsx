@@ -14,7 +14,6 @@ import type { DeviceType, ArtifactVersion } from "./types";
 interface PreviewToolbarProps {
   selectedDevice: DeviceType;
   onDeviceChange: (device: DeviceType) => void;
-  isFullscreen: boolean;
   onToggleFullscreen: () => void;
   onRefresh: () => void;
   isRefreshing?: boolean;
@@ -27,7 +26,6 @@ interface PreviewToolbarProps {
 export function PreviewToolbar({
   selectedDevice,
   onDeviceChange,
-  isFullscreen,
   onToggleFullscreen,
   onRefresh,
   isRefreshing = false,
@@ -98,13 +96,9 @@ export function PreviewToolbar({
         <button
           onClick={onToggleFullscreen}
           className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
-          title={isFullscreen ? "退出全屏" : "全屏"}
+          title="全屏"
         >
-          {isFullscreen ? (
-            <Minimize2 className="h-4 w-4" />
-          ) : (
-            <Maximize2 className="h-4 w-4" />
-          )}
+          <Maximize2 className="h-4 w-4" />
         </button>
       </div>
     </div>

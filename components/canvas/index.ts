@@ -7,6 +7,7 @@ export { CodePanel } from "./code-panel";
 export { PreviewPanel } from "./preview-panel";
 export { PreviewToolbar } from "./preview-toolbar";
 export { FileIcon } from "./file-icon";
+export { FullscreenPreview } from "./fullscreen-preview";
 
 // Types
 export type {
