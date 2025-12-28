@@ -5,11 +5,7 @@ import { NextRequest } from "next/server";
 import { HumanMessage } from "@langchain/core/messages";
 import { createGraphForMcpUrl } from "@/lib/agent";
 import prisma from "@/lib/database/pirsma";
-import {
-  formatCodeContext,
-  parseXmlToMap,
-  mergeFiles,
-} from "@/lib/agent/utils";
+import { formatCodeContext } from "@/lib/agent/utils";
 
 export async function POST(request: NextRequest) {
   try {
@@ -90,7 +86,6 @@ export async function POST(request: NextRequest) {
 
     // 创建可读流
     const encoder = new TextEncoder();
-    let finalArtifact = ""; // 收集完整的生成内容
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -142,8 +137,6 @@ export async function POST(request: NextRequest) {
               // 注意：Architect 消息已经用 <architectPlan> 标签包裹
               // 不再需要过滤，前端会优雅地渲染为卡片
 
-              finalArtifact += content; // 累积内容
-
               const chunk = encoder.encode(
                 `data: ${JSON.stringify({
                   type: "content",
@@ -156,16 +149,12 @@ export async function POST(request: NextRequest) {
 
             // 处理工具调用开始
             if (event.event === "on_tool_start") {
-              const toolName = event.name;
-              const runId = event.run_id;
-              const toolInput = event.data?.input || {};
               const chunk = encoder.encode(
                 `data: ${JSON.stringify({
                   type: "tool_start",
-                  tool_call_id: runId,
-                  tool_name: toolName,
-                  tool: toolName,
-                  args: toolInput,
+                  tool_call_id: event.run_id,
+                  tool_name: event.name,
+                  args: event.data?.input || {},
                   threadId: finalThreadId,
                 })}\n\n`
               );
@@ -174,19 +163,16 @@ export async function POST(request: NextRequest) {
 
             // 处理工具调用结束
             if (event.event === "on_tool_end") {
-              const toolName = event.name;
-              const runId = event.run_id;
               const output = event.data?.output;
               const chunk = encoder.encode(
                 `data: ${JSON.stringify({
                   type: "tool_end",
-                  tool_call_id: runId,
-                  tool: toolName,
+                  tool_call_id: event.run_id,
+                  tool_name: event.name,
                   result:
                     typeof output === "string"
                       ? output
                       : JSON.stringify(output),
-                  output,
                   threadId: finalThreadId,
                 })}\n\n`
               );
@@ -195,95 +181,10 @@ export async function POST(request: NextRequest) {
           }
 
           // ==========================================
-          // 4. 后处理：保存新版本 (Post-computation)
+          // 5. 流式响应结束
           // ==========================================
-
-          // 检查是否有生成的代码需要保存
-          if (finalArtifact.includes("<boltArtifact")) {
-            try {
-              const generatedFilesMap = parseXmlToMap(finalArtifact);
-
-              if (generatedFilesMap.size > 0) {
-                console.log(
-                  "Parsed files:",
-                  Array.from(generatedFilesMap.keys())
-                );
-
-                if (!artifact) {
-                  // 创建新的 Artifact 和第一个版本
-                  const newArtifact = await prisma.artifact.create({
-                    data: {
-                      threadId: finalThreadId,
-                      versions: {
-                        create: {
-                          versionNumber: 1,
-                          description: "初始版本",
-                          files: {
-                            create: Array.from(generatedFilesMap.entries()).map(
-                              ([path, content]) => ({
-                                path,
-                                content,
-                              })
-                            ),
-                          },
-                        },
-                      },
-                    },
-                  });
-                  console.log("Created new artifact:", newArtifact.id);
-                } else {
-                  // 合并逻辑：旧文件 + 新修改 = 新快照
-                  const nextFiles = mergeFiles(currentFiles, generatedFilesMap);
-
-                  // 重新查询最新版本号，避免并发问题
-                  const latestVersion = await prisma.artifactVersion.findFirst({
-                    where: { artifactId: artifact.id },
-                    orderBy: { versionNumber: "desc" },
-                    select: { versionNumber: true },
-                  });
-                  const nextVersionNumber =
-                    (latestVersion?.versionNumber || 0) + 1;
-
-                  const newVersion = await prisma.artifactVersion.create({
-                    data: {
-                      artifactId: artifact.id,
-                      versionNumber: nextVersionNumber,
-                      description: `更新于 ${new Date().toLocaleString()}`,
-                      files: {
-                        create: nextFiles,
-                      },
-                    },
-                  });
-                  console.log(
-                    "Created new version:",
-                    newVersion.id,
-                    "versionNumber:",
-                    nextVersionNumber
-                  );
-                }
-
-                // 发送保存完成信号
-                const saveChunk = encoder.encode(
-                  `data: ${JSON.stringify({
-                    type: "saved",
-                    message: "代码已保存",
-                    threadId: finalThreadId,
-                  })}\n\n`
-                );
-                controller.enqueue(saveChunk);
-              }
-            } catch (saveError) {
-              console.error("Failed to save artifact:", saveError);
-              const errorChunk = encoder.encode(
-                `data: ${JSON.stringify({
-                  type: "error",
-                  message: "保存代码时出错",
-                  threadId: finalThreadId,
-                })}\n\n`
-              );
-              controller.enqueue(errorChunk);
-            }
-          }
+          // 注意：artifact 解析和保存已移到前端处理
+          // 前端会在流式完成后调用 /api/artifact/save
 
           // 发送结束信号
           const endChunk = encoder.encode(

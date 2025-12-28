@@ -13,6 +13,14 @@ function extractJSONFromResponse(response: string): string {
   // 移除markdown代码块标记
   let cleaned = response.trim();
 
+  // 先检查是否有 XML 标签包裹
+  const xmlMatch = cleaned.match(
+    /<architectPlan>\s*([\s\S]*?)\s*<\/architectPlan>/
+  );
+  if (xmlMatch) {
+    cleaned = xmlMatch[1].trim();
+  }
+
   // 检查是否有```json...```格式
   const jsonBlockMatch = cleaned.match(/```json\s*([\s\S]*?)\s*```/);
   if (jsonBlockMatch) {
@@ -75,22 +83,19 @@ export async function architect(
 
   try {
     const response = await llm.invoke(messages);
+    const rawResponse = response.content.toString();
 
     try {
-      const cleanedContent = extractJSONFromResponse(
-        response.content.toString()
-      );
+      const cleanedContent = extractJSONFromResponse(rawResponse);
       const plan = JSON.parse(cleanedContent);
 
-      // 用标签包裹 JSON，方便前端识别和解析
-      const wrappedContent = `<architectPlan>\n${JSON.stringify(
-        plan,
-        null,
-        2
-      )}\n</architectPlan>`;
+      // LLM 应该已经包裹了标签，如果没有则添加（fallback）
+      const finalContent = rawResponse.includes("<architectPlan>")
+        ? rawResponse
+        : `<architectPlan>\n${JSON.stringify(plan, null, 2)}\n</architectPlan>`;
 
       return {
-        messages: [new AIMessage(wrappedContent)], // 返回包裹后的消息
+        messages: [new AIMessage(finalContent)],
         plan,
       };
     } catch (parseError) {
@@ -107,20 +112,21 @@ export async function architect(
 
       try {
         const retryResponse = await llm.invoke(retryMessages);
-        const cleanedRetryContent = extractJSONFromResponse(
-          retryResponse.content.toString()
-        );
+        const rawRetryResponse = retryResponse.content.toString();
+        const cleanedRetryContent = extractJSONFromResponse(rawRetryResponse);
         const plan = JSON.parse(cleanedRetryContent);
 
-        // 用标签包裹
-        const wrappedContent = `<architectPlan>\n${JSON.stringify(
-          plan,
-          null,
-          2
-        )}\n</architectPlan>`;
+        // LLM 应该已经包裹了标签，如果没有则添加（fallback）
+        const finalContent = rawRetryResponse.includes("<architectPlan>")
+          ? rawRetryResponse
+          : `<architectPlan>\n${JSON.stringify(
+              plan,
+              null,
+              2
+            )}\n</architectPlan>`;
 
         return {
-          messages: [new AIMessage(wrappedContent)],
+          messages: [new AIMessage(finalContent)],
           plan,
         };
       } catch {

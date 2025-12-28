@@ -1,7 +1,7 @@
 // components/chat/message-item.tsx
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
   Loader2,
   CheckCircle2,
@@ -12,159 +12,70 @@ import {
   FileCode,
 } from "lucide-react";
 import type { Message } from "@/hooks/use-chat";
+import { CanvasCard } from "@/components/canvas";
+import type { Artifact } from "@/components/canvas";
 import {
-  CanvasCard,
-  type Artifact,
-  type ParsedFile,
-} from "@/components/canvas";
+  useMessageParser,
+  parseArtifactFromContent,
+  cleanContent,
+  type ArchitectPlan,
+  type ReviewResult,
+} from "@/hooks/use-message-parser";
 
-interface MessageItemProps {
-  message: Message;
-  onCanvasExpand?: () => void;
-}
+// 辅助函数：查找前一条 artifact 消息
+function findPreviousArtifact(
+  messages: Message[] | undefined,
+  currentMessageId: string
+): Artifact | null {
+  if (!messages) return null;
 
-// 解析审查结果
-type ReviewResult = "approve" | "reject" | null;
+  const currentIndex = messages.findIndex((m) => m.id === currentMessageId);
+  if (currentIndex <= 0) return null;
 
-function parseReviewResult(content: string): {
-  result: ReviewResult;
-  reason?: string;
-} {
-  const match = content.match(/<reviewer_result>([\s\S]*?)<\/reviewer_result>/);
-  if (match) {
-    const result = match[1].trim();
-    if (result.toUpperCase().startsWith("APPROVE")) {
-      return { result: "approve" };
-    } else if (result.toUpperCase().startsWith("REJECT")) {
-      return { result: "reject", reason: result.replace(/^REJECT:\s*/i, "") };
-    }
-  }
-  if (content.includes("APPROVE")) return { result: "approve" };
-  const rejectMatch = content.match(/REJECT:\s*(.+)/);
-  if (rejectMatch) return { result: "reject", reason: rejectMatch[1] };
-  return { result: null };
-}
-
-// 从消息内容中解析 artifact
-function parseArtifactFromContent(content: string): Artifact | null {
-  if (!content.includes("<boltArtifact")) return null;
-
-  let id = "unknown";
-  let title = "Generated Code";
-
-  const match1 = content.match(
-    /<boltArtifact[^>]*id="([^"]*)"[^>]*title="([^"]*)"[^>]*>/
-  );
-  const match2 = content.match(
-    /<boltArtifact[^>]*title="([^"]*)"[^>]*id="([^"]*)"[^>]*>/
-  );
-
-  if (match1) {
-    id = match1[1];
-    title = match1[2];
-  } else if (match2) {
-    id = match2[2];
-    title = match2[1];
-  }
-
-  const files: ParsedFile[] = [];
-  const fileRegex =
-    /<boltAction[^>]*type="file"[^>]*filePath="([^"]+)"[^>]*>([\s\S]*?)<\/boltAction>/g;
-  const languageMap: Record<string, string> = {
-    ts: "typescript",
-    tsx: "typescript",
-    js: "javascript",
-    jsx: "javascript",
-    css: "css",
-    json: "json",
-    html: "html",
-  };
-
-  let match;
-  while ((match = fileRegex.exec(content)) !== null) {
-    const filePath = match[1];
-    const ext = filePath.split(".").pop() || "";
-    files.push({
-      path: filePath,
-      content: match[2].trim(),
-      language: languageMap[ext] || "text",
-    });
-  }
-
-  if (files.length === 0) return null;
-  return { id, title, files };
-}
-
-// 解析 Architect 规划消息
-interface ArchitectPlan {
-  mode: "create" | "modify";
-  files?: Array<{ path: string; description: string }>;
-  target_files?: string[];
-  dependencies?: string[];
-  architecture_notes?: string;
-}
-
-function parseArchitectPlan(content: string): ArchitectPlan | null {
-  try {
-    // 通过标签提取 JSON（更简单可靠）
-    const match = content.match(
-      /<architectPlan>\s*([\s\S]*?)\s*<\/architectPlan>/
-    );
-    if (!match) return null;
-
-    const jsonStr = match[1].trim();
-    const plan = JSON.parse(jsonStr);
-
-    // 验证是否是有效的 Architect 规划
+  // 从当前消息往前查找最近的一条包含 artifact 的消息
+  for (let i = currentIndex - 1; i >= 0; i--) {
+    const prevMsg = messages[i];
     if (
-      plan.mode === "create" ||
-      plan.mode === "modify" ||
-      (plan.files && Array.isArray(plan.files))
+      prevMsg.role === "assistant" &&
+      prevMsg.content.includes("<boltArtifact")
     ) {
-      return plan;
+      return parseArtifactFromContent(prevMsg.content);
     }
-  } catch {
-    // 解析失败
   }
   return null;
 }
 
-// 检查是否需要修改（审查未通过）
-function needsModification(
-  content: string,
-  reviewResult: ReviewResult
-): boolean {
-  if (reviewResult === "reject") return true;
-  return content.includes("REJECT:") || content.includes("需要修改");
+interface MessageItemProps {
+  message: Message;
+  messages?: Message[]; // 用于查找历史 artifact
+  onCanvasExpand?: () => void;
 }
 
-export function MessageItem({ message, onCanvasExpand }: MessageItemProps) {
+export function MessageItem({
+  message,
+  messages,
+  onCanvasExpand,
+}: MessageItemProps) {
   const isUser = message.role === "user";
 
-  const messageArtifact = useMemo(() => {
-    if (isUser || !message.hasArtifact) return null;
-    return parseArtifactFromContent(message.content);
-  }, [message.content, message.hasArtifact, isUser]);
+  // 获取前一条消息的 artifact（用于乐观更新）
+  const previousArtifact = isUser
+    ? null
+    : findPreviousArtifact(messages, message.id);
 
-  const architectPlan = useMemo(() => {
-    if (isUser) return null;
-    return parseArchitectPlan(message.content);
-  }, [message.content, isUser]);
-
-  const reviewResult = useMemo(() => {
-    if (isUser) return { result: null };
-    return parseReviewResult(message.content);
-  }, [message.content, isUser]);
-
-  // 判断消息类型
-  const isArchitectMessage = !!architectPlan;
-  const isCodingMessage =
-    message.hasArtifact || message.content.includes("<boltArtifact");
+  // 使用 hook 解析消息内容，传入历史 artifact
+  const {
+    artifact,
+    architectPlan,
+    reviewResult,
+    isArchitectMessage,
+    isCodingMessage,
+    needsModification: needsModify,
+  } = useMessageParser(message.content, isUser, previousArtifact);
 
   // 简化状态判断
-  const generating = isCodingMessage && !messageArtifact;
-  const completed = !!messageArtifact;
-  const needsModify = needsModification(message.content, reviewResult.result);
+  const generating = isCodingMessage && !artifact;
+  const completed = !!artifact;
 
   // 用户消息
   if (isUser) {
@@ -208,7 +119,7 @@ export function MessageItem({ message, onCanvasExpand }: MessageItemProps) {
   }
 
   // AI 消息 - 代码生成相关
-  if (!message.content && !messageArtifact) {
+  if (!message.content && !artifact) {
     return null;
   }
 
@@ -217,7 +128,7 @@ export function MessageItem({ message, onCanvasExpand }: MessageItemProps) {
       <div className="w-full max-w-[85%] space-y-3">
         {/* 主卡片：生成状态 + 代码预览 */}
         <GenerationCard
-          artifact={messageArtifact}
+          artifact={artifact}
           isGenerating={generating}
           isCompleted={completed}
           needsModification={needsModify}
@@ -238,8 +149,8 @@ function ArchitectPlanCard({ plan }: { plan: ArchitectPlan }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const isCreateMode = plan.mode === "create";
   const files = isCreateMode
-    ? plan.files
-    : plan.target_files?.map((path) => ({ path, description: "" }));
+    ? plan.files || []
+    : plan.target_files?.map((path) => ({ path, description: "" })) || [];
 
   return (
     <div className="rounded-lg border border-purple-200 bg-purple-50/50 dark:border-purple-800 dark:bg-purple-900/10">
@@ -416,8 +327,8 @@ function GenerationCard({
   if (artifact) {
     return (
       <div className="space-y-2">
-        {/* 只在有审查拒绝信息时显示状态指示器 */}
-        {(needsModification || reviewResult === "reject") && (
+        {/* 状态指示器 */}
+        {needsModification || reviewResult === "reject" ? (
           <div
             className={`flex items-center gap-2 rounded-lg border px-3 py-2 border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-900/10`}
           >
@@ -430,6 +341,15 @@ function GenerationCard({
                 - {reviewReason}
               </span>
             )}
+          </div>
+        ) : (
+          <div
+            className={`flex items-center gap-2 rounded-lg border px-3 py-2 border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-900/10`}
+          >
+            <CheckCircle2 className="h-4 w-4 text-green-500" />
+            <span className="text-sm font-medium text-green-600 dark:text-green-400">
+              生成完成
+            </span>
           </div>
         )}
 
@@ -514,24 +434,4 @@ function CollapsibleRawOutput({ content }: { content: string }) {
       )}
     </div>
   );
-}
-
-// 清理内容，移除内部标签
-function cleanContent(content: string): string {
-  let cleaned = content;
-  cleaned = cleaned.replace(/<boltArtifact[\s\S]*?<\/boltArtifact>/g, "");
-  cleaned = cleaned.replace(/<architect_plan>[\s\S]*?<\/architect_plan>/g, "");
-  cleaned = cleaned.replace(
-    /<reviewer_result>[\s\S]*?<\/reviewer_result>/g,
-    ""
-  );
-  cleaned = cleaned.replace(/^路由决策:.*$/gm, "");
-  cleaned = cleaned.replace(/^网络连接错误.*$/gm, "");
-  cleaned = cleaned.replace(
-    /^\s*\{[\s\S]*?"mode"[\s\S]*?"files"[\s\S]*?\}\s*$/gm,
-    ""
-  );
-  cleaned = cleaned.replace(/^APPROVE\s*$/gm, "");
-  cleaned = cleaned.replace(/^REJECT:.*$/gm, "");
-  return cleaned.trim();
 }

@@ -128,21 +128,44 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
       // 只有生成完成且审查通过后才发送
       canvas.setShouldSendToSandbox(false);
     },
-    onStreamComplete: (content: string) => {
-      // 流式响应完成，如果有 artifact 则允许发送到沙箱渲染
+    onStreamComplete: async (content: string) => {
+      // 流式响应完成
       if (canvas.artifact && canvas.artifact.files.length > 0) {
-        console.log("[UnifiedChat] 代码生成完成，允许发送到沙箱渲染");
-        canvas.setShouldSendToSandbox(true);
+        console.log("[UnifiedChat] 代码生成完成，保存到后端");
+
+        // 调用保存接口
+        try {
+          const response = await fetch("/api/artifact/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              threadId,
+              files: canvas.artifact.files.map((f) => ({
+                path: f.path,
+                content: f.content,
+              })),
+            }),
+          });
+
+          if (response.ok) {
+            const result = await response.json();
+            console.log("[UnifiedChat] 保存成功:", result);
+
+            // 刷新版本列表
+            await canvas.refreshVersionList();
+            console.log("[UnifiedChat] 版本列表刷新完成");
+
+            // 允许发送到沙箱渲染
+            canvas.setShouldSendToSandbox(true);
+          } else {
+            console.error("[UnifiedChat] 保存失败:", await response.text());
+          }
+        } catch (error) {
+          console.error("[UnifiedChat] 保存出错:", error);
+        }
       } else {
         console.log("[UnifiedChat] 代码生成完成但没有 artifact");
       }
-    },
-    onSaved: async () => {
-      // 后端保存成功后，刷新版本列表
-      // refreshVersionList 会自动设置 selectedVersion 为最新版本
-      console.log("[UnifiedChat] 收到 saved 事件，刷新版本列表");
-      await canvas.refreshVersionList();
-      console.log("[UnifiedChat] 版本列表刷新完成，已自动选中最新版本");
     },
   });
 
@@ -225,6 +248,7 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
             <MessageItem
               key={message.id}
               message={message}
+              messages={chat.messages}
               onCanvasExpand={handleCanvasExpand}
             />
           ))}

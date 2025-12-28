@@ -24,13 +24,27 @@ export const ARCHITECT_PROMPT = `
    - **宽度占满**：所有组件默认使用 w-full 占满父容器宽度，确保充分利用屏幕空间
 
 **输出格式**：
-直接输出纯 JSON 格式，不需要任何标签包裹。
+必须使用 <architectPlan> 标签包裹 JSON 输出，格式如下：
+<architectPlan>
+{
+  "mode": "create",
+  "files": [...],
+  "dependencies": [...],
+  "architecture_notes": "..."
+}
+</architectPlan>
+
+**重要**：
+- 必须严格使用 <architectPlan></architectPlan> 标签包裹
+- 标签内部是格式化的 JSON（带缩进）
+- 不要添加其他任何文本或markdown标记
 
 **文件路径规范**：为了沙箱兼容性，所有文件都应该在根目录下，不要使用子目录结构。
 
 **重要**：入口文件必须是React组件文件（.tsx），不能是Hook文件（.ts）！
 
 新建模式示例：
+<architectPlan>
 {
   "mode": "create",
   "files": [
@@ -41,14 +55,17 @@ export const ARCHITECT_PROMPT = `
   "dependencies": ["@/components/ui/button", "@/components/ui/input", "lucide-react"],
   "architecture_notes": "采用 Headless 架构，逻辑与视图分离。"
 }
+</architectPlan>
 
 修改模式示例（只列出需要修改的文件）：
+<architectPlan>
 {
   "mode": "modify",
   "target_files": ["App.tsx", "useTodo.ts"],
   "dependencies": [],
   "architecture_notes": "在现有 Hook 中添加 deleteTodo action"
 }
+</architectPlan>
 
 ### 现有代码上下文
 {codeContext}
