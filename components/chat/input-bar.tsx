@@ -1,18 +1,37 @@
 // components/chat/input-bar.tsx
 "use client";
 
-import { KeyboardEvent, useState, useRef, useEffect } from "react";
+import { KeyboardEvent, useRef, useEffect, ChangeEvent, useState } from "react";
+import Image from "next/image";
 import {
-  Send,
   Loader2,
-  Code2,
-  Settings,
-  ChevronDown,
   Plus,
-  Trash2,
-  Edit,
+  Settings2,
+  ChevronDown,
+  ArrowUp,
+  X,
+  Cpu,
 } from "lucide-react";
-import type { MCPConfig } from "@/components/mcp";
+import { type MCPConfig } from "@/components/mcp";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { MCPConfigPanel } from "@/components/mcp/config-panel";
+
+interface ImageItem {
+  dataUrl: string;
+  mime_type: string;
+}
 
 interface InputBarProps {
   value: string;
@@ -21,17 +40,137 @@ interface InputBarProps {
   isLoading: boolean;
   isCanvasMode?: boolean;
   placeholder?: string;
-  mcpConfigs: MCPConfig[];
-  selectedMcpId: string | null;
-  isMcpLoading: boolean;
-  onMcpSelect: (id: string | null) => void;
-  onMcpRefresh: () => void;
+  images?: ImageItem[];
+  onImagesChange?: (images: ImageItem[]) => void;
+
+  // MCP 相关的 Props
+  mcpConfigs?: MCPConfig[];
+  selectedMcpId?: string | null;
+  isMcpLoading?: boolean;
+  onMcpSelect?: (id: string | null) => void;
+  onMcpRefresh?: () => void;
 }
 
-interface MCPFormData {
-  name: string;
-  url: string;
-  description: string;
+function FileUploadButton({
+  onFileSelect,
+}: {
+  onFileSelect: (item: ImageItem) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (!file.type.startsWith("image/")) {
+        alert("Please upload an image file.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const dataUrl = event.target?.result as string;
+
+        onFileSelect({ dataUrl, mime_type: file.type });
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  return (
+    <>
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        accept="image/*"
+        className="hidden"
+      />
+      <button
+        onClick={() => fileInputRef.current?.click()}
+        className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+      >
+        <Plus className="h-5 w-5" />
+      </button>
+    </>
+  );
+}
+
+function SettingsButton({
+  mcpConfigs = [],
+  selectedMcpId,
+  isMcpLoading = false,
+  onMcpSelect,
+  onMcpRefresh,
+}: {
+  mcpConfigs?: MCPConfig[];
+  selectedMcpId?: string | null;
+  isMcpLoading?: boolean;
+  onMcpSelect?: (id: string | null) => void;
+  onMcpRefresh?: () => void;
+}) {
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
+            <Settings2 className="h-5 w-5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-56">
+          <DropdownMenuItem
+            className="cursor-pointer"
+            onSelect={(e) => {
+              e.preventDefault();
+              setIsDialogOpen(true);
+            }}
+          >
+            <Cpu className="mr-2 h-4 w-4" />
+            <span>MCP Servers Settings</span>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem className="text-gray-400 cursor-not-allowed">
+            More settings coming soon...
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>MCP Servers Configuration</DialogTitle>
+          </DialogHeader>
+          <div className="mt-4">
+            <MCPConfigPanel
+              configs={mcpConfigs}
+              selectedId={selectedMcpId ?? null}
+              isLoading={isMcpLoading}
+              onSelect={(id) => {
+                onMcpSelect?.(id);
+                setIsDialogOpen(false);
+              }}
+              onRefresh={onMcpRefresh || (() => {})}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function ModelSelector() {
+  return (
+    <div className="flex items-center gap-1 px-2 py-1.5 ml-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer transition-colors group">
+      <span className="flex items-center justify-center w-5 h-5 rounded border border-gray-300 dark:border-gray-700 text-[10px] font-bold text-gray-500">
+        G
+      </span>
+      <span className="text-sm font-medium text-gray-600 dark:text-gray-400">
+        v0 Pro
+      </span>
+      <ChevronDown className="h-4 w-4 text-gray-400 group-hover:text-gray-600" />
+    </div>
+  );
 }
 
 export function InputBar({
@@ -39,310 +178,121 @@ export function InputBar({
   onChange,
   onSubmit,
   isLoading,
-  isCanvasMode = false,
   placeholder,
+  images = [],
+  onImagesChange,
   mcpConfigs,
   selectedMcpId,
   isMcpLoading,
   onMcpSelect,
   onMcpRefresh,
 }: InputBarProps) {
-  const [isConfigOpen, setIsConfigOpen] = useState(false);
-  const [isAdding, setIsAdding] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState<MCPFormData>({
-    name: "",
-    url: "",
-    description: "",
-  });
-  const [isSaving, setIsSaving] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // 点击外部关闭下拉菜单
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target as Node)
-      ) {
-        setIsConfigOpen(false);
-        setIsAdding(false);
-        setEditingId(null);
-      }
-    };
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "inherit";
+      const scrollHeight = textareaRef.current.scrollHeight;
+      textareaRef.current.style.height = `${Math.min(scrollHeight, 200)}px`;
+    }
+  }, [value]);
 
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, []);
-
-  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && !e.shiftKey && !isLoading && value.trim()) {
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      e.key === "Enter" &&
+      !e.shiftKey &&
+      !isLoading &&
+      (value.trim() || images.length > 0)
+    ) {
       e.preventDefault();
       onSubmit();
     }
   };
 
-  const resetForm = () => {
-    setFormData({ name: "", url: "", description: "" });
-    setIsAdding(false);
-    setEditingId(null);
-  };
-
-  const handleAdd = () => {
-    setIsAdding(true);
-    setEditingId(null);
-    setFormData({ name: "", url: "", description: "" });
-  };
-
-  const handleEdit = (config: MCPConfig) => {
-    setEditingId(config.id);
-    setIsAdding(false);
-    setFormData({
-      name: config.name,
-      url: config.url,
-      description: config.description || "",
-    });
-  };
-
-  const handleSave = async () => {
-    if (!formData.name.trim() || !formData.url.trim()) {
-      return;
-    }
-
-    setIsSaving(true);
-    try {
-      const method = editingId ? "PUT" : "POST";
-      const url = editingId
-        ? `/api/mcp/configs/${editingId}`
-        : "/api/mcp/configs";
-
-      const response = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      });
-
-      if (response.ok) {
-        resetForm();
-        onMcpRefresh();
-      }
-    } catch (error) {
-      console.error("Save failed:", error);
-    } finally {
-      setIsSaving(false);
+  const handleFileSelect = (item: ImageItem) => {
+    if (onImagesChange) {
+      onImagesChange([...(images || []), item]);
     }
   };
 
-  const handleDelete = async (id: string) => {
-    try {
-      const response = await fetch(`/api/mcp/configs/${id}`, {
-        method: "DELETE",
-      });
-      if (response.ok) {
-        if (selectedMcpId === id) {
-          onMcpSelect(null);
-        }
-        onMcpRefresh();
-      }
-    } catch (error) {
-      console.error("Delete failed:", error);
+  const removeImage = (index: number) => {
+    if (onImagesChange) {
+      onImagesChange(images.filter((_, i) => i !== index));
     }
   };
-
-  const selectedConfig = mcpConfigs.find((c) => c.id === selectedMcpId);
-  const defaultPlaceholder = isCanvasMode
-    ? "继续编辑或提出新需求..."
-    : "输入消息...";
 
   return (
-    <div className="border-t border-gray-200 p-4 dark:border-gray-700">
-      <div className="flex items-center gap-2">
-        {/* Canvas 模式前缀标签 */}
-        {isCanvasMode && (
-          <div className="flex items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 shrink-0">
-            <Code2 className="h-4 w-4" />
-            <span>Canvas</span>
+    <div className="p-4 bg-white dark:bg-gray-900">
+      <div className="relative flex flex-col w-full max-w-4xl mx-auto border border-gray-200 dark:border-gray-800 rounded-2xl bg-white dark:bg-gray-900 shadow-sm transition-all focus-within:shadow-md focus-within:border-gray-300 dark:focus-within:border-gray-700">
+        {/* 图片预览区域 */}
+        {images.length > 0 && (
+          <div className="flex flex-wrap gap-2 px-4 pt-4">
+            {images.map((img, index) => (
+              <div key={index} className="relative group w-16 h-16">
+                <Image
+                  src={img.dataUrl}
+                  alt={`upload-${index}`}
+                  fill
+                  className="object-cover rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-90"
+                  onClick={() => window.open(img.dataUrl, "_blank")}
+                  unoptimized={img.dataUrl.startsWith("data:")}
+                />
+                <button
+                  onClick={() => removeImage(index)}
+                  className="absolute -top-1.5 -right-1.5 bg-gray-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
           </div>
         )}
 
-        {/* MCP 配置按钮 */}
-        <div className="relative" ref={dropdownRef}>
-          <button
-            onClick={() => setIsConfigOpen(!isConfigOpen)}
-            className="flex items-center gap-1.5 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 shrink-0"
-          >
-            <Settings className="h-4 w-4" />
-            <span>{selectedConfig ? selectedConfig.name : "选择 MCP"}</span>
-            <ChevronDown className="h-4 w-4" />
-          </button>
-
-          {/* MCP 配置下拉菜单 */}
-          {isConfigOpen && (
-            <div className="absolute bottom-full left-0 mb-2 w-80 rounded-lg border bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800 z-50">
-              <div className="p-3">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    MCP 配置
-                  </h3>
-                  <button
-                    onClick={handleAdd}
-                    className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400"
-                  >
-                    <Plus className="h-3 w-3" />
-                    添加
-                  </button>
-                </div>
-
-                {/* 配置列表 */}
-                {isMcpLoading ? (
-                  <div className="flex items-center justify-center py-4">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  </div>
-                ) : (
-                  <div className="space-y-1 max-h-40 overflow-y-auto">
-                    <button
-                      onClick={() => onMcpSelect(null)}
-                      className={`w-full text-left px-2 py-1.5 text-xs rounded ${
-                        !selectedMcpId
-                          ? "bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400"
-                          : "hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
-                      }`}
-                    >
-                      无 MCP
-                    </button>
-
-                    {mcpConfigs.map((config) => (
-                      <div
-                        key={config.id}
-                        className={`flex items-center justify-between px-2 py-1.5 rounded ${
-                          config.id === selectedMcpId
-                            ? "bg-blue-50 dark:bg-blue-900/30"
-                            : "hover:bg-gray-50 dark:hover:bg-gray-700"
-                        }`}
-                      >
-                        <button
-                          onClick={() => {
-                            onMcpSelect(config.id);
-                            setIsConfigOpen(false);
-                          }}
-                          className="flex-1 text-left"
-                        >
-                          <div className="text-xs font-medium text-gray-900 dark:text-gray-100">
-                            {config.name}
-                          </div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                            {config.url}
-                          </div>
-                        </button>
-                        <div className="flex items-center gap-1 ml-2">
-                          <button
-                            onClick={() => handleEdit(config)}
-                            className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                          >
-                            <Edit className="h-3 w-3" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(config.id)}
-                            className="p-1 text-gray-400 hover:text-red-500"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* 添加/编辑表单 */}
-                {(isAdding || editingId) && (
-                  <div className="mt-3 pt-3 border-t dark:border-gray-600 space-y-2">
-                    <input
-                      type="text"
-                      placeholder="配置名称"
-                      value={formData.name}
-                      onChange={(e) =>
-                        setFormData({ ...formData, name: e.target.value })
-                      }
-                      className="w-full px-2 py-1 text-xs border rounded dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                    />
-                    <input
-                      type="text"
-                      placeholder="MCP URL"
-                      value={formData.url}
-                      onChange={(e) =>
-                        setFormData({ ...formData, url: e.target.value })
-                      }
-                      className="w-full px-2 py-1 text-xs border rounded dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                    />
-                    <input
-                      type="text"
-                      placeholder="描述（可选）"
-                      value={formData.description}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          description: e.target.value,
-                        })
-                      }
-                      className="w-full px-2 py-1 text-xs border rounded dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                    />
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={handleSave}
-                        disabled={
-                          !formData.name.trim() ||
-                          !formData.url.trim() ||
-                          isSaving
-                        }
-                        className="flex-1 px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
-                      >
-                        {isSaving ? "保存中..." : editingId ? "更新" : "添加"}
-                      </button>
-                      <button
-                        onClick={resetForm}
-                        className="px-2 py-1 text-xs border rounded dark:border-gray-600 text-gray-600 dark:text-gray-400"
-                      >
-                        取消
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+        {/* 输入框区域 */}
+        <div className="px-4 pt-4 pb-2">
+          <textarea
+            ref={textareaRef}
+            rows={1}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder || "Ask a follow-up..."}
+            disabled={isLoading}
+            className="w-full bg-transparent border-none outline-none text-gray-700 dark:text-gray-200 placeholder-gray-400 text-sm py-1 resize-none min-h-[24px] max-h-[200px] overflow-y-auto"
+          />
         </div>
 
-        {/* 输入框 */}
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder || defaultPlaceholder}
-          disabled={isLoading}
-          className="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
-        />
+        {/* 底部工具栏 */}
+        <div className="flex items-center justify-between px-3 py-3 mt-1">
+          <div className="flex items-center gap-1">
+            <FileUploadButton onFileSelect={handleFileSelect} />
+            <SettingsButton
+              mcpConfigs={mcpConfigs}
+              selectedMcpId={selectedMcpId}
+              isMcpLoading={isMcpLoading}
+              onMcpSelect={onMcpSelect}
+              onMcpRefresh={onMcpRefresh}
+            />
+            <ModelSelector />
+          </div>
 
-        {/* 发送按钮 */}
-        <button
-          onClick={onSubmit}
-          disabled={!value.trim() || isLoading}
-          className="flex items-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-white transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {isLoading ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="hidden sm:inline">发送中...</span>
-            </>
-          ) : (
-            <>
-              <Send className="h-4 w-4" />
-              <span className="hidden sm:inline">发送</span>
-            </>
-          )}
-        </button>
+          <button
+            onClick={onSubmit}
+            disabled={(!value.trim() && images.length === 0) || isLoading}
+            className={`flex items-center justify-center w-8 h-8 rounded-lg transition-all ${
+              (!value.trim() && images.length === 0) || isLoading
+                ? "bg-gray-100 dark:bg-gray-800 text-gray-300"
+                : "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-gray-700"
+            }`}
+          >
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+            ) : (
+              <ArrowUp className="h-5 w-5 stroke-[2.5px]" />
+            )}
+            <span className="sr-only">Send</span>
+          </button>
+        </div>
       </div>
     </div>
   );

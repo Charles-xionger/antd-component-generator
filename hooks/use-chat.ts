@@ -56,6 +56,9 @@ export function useChat(options: UseChatOptions = {}) {
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const [images, setImages] = useState<
+    Array<{ dataUrl: string; mime_type: string }>
+  >([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -123,7 +126,7 @@ export function useChat(options: UseChatOptions = {}) {
 
   /** 发送消息 */
   const sendMessage = useCallback(async () => {
-    if (!input.trim() || isLoading) return;
+    if ((!input.trim() && images.length === 0) || isLoading) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -133,6 +136,8 @@ export function useChat(options: UseChatOptions = {}) {
 
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
+    const currentImages = [...images];
+    setImages([]);
     setIsLoading(true);
     setError(null);
 
@@ -147,12 +152,30 @@ export function useChat(options: UseChatOptions = {}) {
     }
     abortControllerRef.current = new AbortController();
 
+    // Helper: read File to base64 (without prefix)
+    async function readFileAsBase64(file: File): Promise<string> {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          const base64Data = result.split(",")[1] || "";
+          resolve(base64Data);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // Build payloadMessage: 始终发送字符串格式给后端
+    const payloadMessage: string = userMessage.content;
+
     try {
       const response = await fetch(api, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: userMessage.content,
+          message: payloadMessage,
+          images: currentImages,
           threadId,
           mcpConfigId,
         }),
@@ -351,12 +374,14 @@ export function useChat(options: UseChatOptions = {}) {
     // 状态
     messages,
     input,
+    images,
     isLoading,
     error,
     threadId,
 
     // 输入控制
     setInput,
+    setImages,
     handleSubmit,
 
     // 消息操作

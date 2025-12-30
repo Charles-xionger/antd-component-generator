@@ -3,16 +3,19 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest } from "next/server";
 import { HumanMessage } from "@langchain/core/messages";
-import { createGraphForMcpUrl } from "@/lib/agent";
+import { createGraph } from "@/lib/agent";
 import prisma from "@/lib/database/pirsma";
 import { formatCodeContext } from "@/lib/agent/utils";
 
 export async function POST(request: NextRequest) {
   try {
-    const { message, threadId, mcpConfigId } = await request.json();
+    const { message, images, threadId } = await request.json();
 
-    if (!message) {
-      return Response.json({ error: "Message is required" }, { status: 400 });
+    if (!message && (!images || images.length === 0)) {
+      return Response.json(
+        { error: "Message or images are required" },
+        { status: 400 }
+      );
     }
 
     // 使用 threadId 作为会话标识，支持多轮对话
@@ -54,35 +57,29 @@ export async function POST(request: NextRequest) {
     });
 
     if (!thread) {
+      // 确保 message 是字符串后再截取
+      const messageText =
+        typeof message === "string"
+          ? message
+          : Array.isArray(message)
+          ? message.find((m) => m.type === "text")?.text || "New Chat"
+          : "New Chat";
+
       thread = await prisma.thread.create({
         data: {
           id: finalThreadId,
-          title: message.slice(0, 50) + (message.length > 50 ? "..." : ""),
+          title:
+            messageText.slice(0, 50) + (messageText.length > 50 ? "..." : ""),
         },
       });
     }
 
     // ==========================================
-    // 3. 获取 MCP 配置（如果提供了 mcpConfigId）
+    // 3. 创建 Graph
     // ==========================================
 
-    let mcpUrl: string | undefined;
-    if (mcpConfigId) {
-      const mcpConfig = await prisma.mCPConfig.findUnique({
-        where: { id: mcpConfigId, enabled: true },
-      });
-      if (mcpConfig) {
-        mcpUrl = mcpConfig.url;
-        console.log("使用 MCP 配置:", mcpConfig.name, mcpUrl);
-      }
-    }
-
-    // ==========================================
-    // 4. 创建 Graph 并注入上下文
-    // ==========================================
-
-    // 创建图（支持 MCP 功能）
-    const graph = await createGraphForMcpUrl(codeContext, mcpUrl);
+    // 创建图
+    const graph = await createGraph();
 
     // 创建可读流
     const encoder = new TextEncoder();
@@ -90,9 +87,54 @@ export async function POST(request: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         try {
+          // 构建多模态消息内容（只包含用户输入，不注入 codeContext）
+          // codeContext 通过 state.codeContext 传递给 agent，避免污染用户消息
+          let messageContent:
+            | string
+            | Array<{
+                type: string;
+                text?: string;
+                image_url?: { url: string };
+                source_type?: string;
+                data?: string;
+                mime_type?: string;
+              }> = message;
+
+          if (images && images.length > 0) {
+            const imageBlocks = [];
+
+            // 只添加用户的文本消息
+            imageBlocks.push({ type: "text", text: message });
+
+            // images 是 {dataUrl, mime_type} 对象数组
+            for (const img of images) {
+              // 提取 base64 数据（剔除 data:image/xxx;base64, 前缀）
+              const imageData = (
+                img as { dataUrl: string; mime_type: string }
+              ).dataUrl.replace(/^data:image\/\w+;base64,/, "");
+              const mimeType = (img as { dataUrl: string; mime_type: string })
+                .mime_type;
+
+              imageBlocks.push({
+                type: "image",
+                source_type: "base64",
+                data: imageData,
+                mime_type: mimeType,
+              });
+            }
+
+            messageContent = imageBlocks;
+          }
+
+          const inputMessage = new HumanMessage({ content: messageContent });
+
           // 使用 streamEvents 获取流式响应
+          // codeContext 通过 state 传递，在 nodes.ts 的 SystemMessage 中注入
           const eventStream = graph.streamEvents(
-            { messages: [new HumanMessage(message)] },
+            {
+              messages: [inputMessage],
+              codeContext: codeContext ? codeContext.trim() : "",
+            },
             { ...config, version: "v2" }
           );
 

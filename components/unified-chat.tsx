@@ -274,6 +274,8 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
           onSubmit={chat.sendMessage}
           isLoading={chat.isLoading}
           isCanvasMode={canvas.isExpanded}
+          images={chat.images}
+          onImagesChange={chat.setImages}
           mcpConfigs={mcpConfigs}
           selectedMcpId={selectedMcpId}
           isMcpLoading={isMcpLoading}

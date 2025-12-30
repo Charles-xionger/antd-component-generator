@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import prisma from "@/lib/database/pirsma";
-import { createGraphForMcpUrl } from "@/lib/agent";
+import { createGraph } from "@/lib/agent";
 import { BaseMessage } from "@langchain/core/messages";
 
 // 获取单个会话的消息历史和代码文件
@@ -22,7 +22,7 @@ export async function GET(
       },
     };
 
-    const graph = await createGraphForMcpUrl();
+    const graph = await createGraph();
     const state = await graph.getState(config);
 
     // 格式化消息，提取需要的字段
