@@ -420,7 +420,7 @@ export function useCanvas({
           type: "artifacts",
           payload: { files, entryFile: entryFileName },
         },
-        "*"
+        "http://localhost:5174/sandbox.html"
       );
 
       console.log(
