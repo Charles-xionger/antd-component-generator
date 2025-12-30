@@ -97,17 +97,17 @@ export function useCanvas({
   const { artifact, selectedFile, selectFile } =
     useArtifactParser(generatedCode);
 
-  // 展开/收起
+  // 展开/收起（保留接口但不再使用）
   const expand = useCallback(() => {
-    setIsExpanded(true);
+    // 固定布局模式下不需要展开逻辑
     // 展开时如果有 artifact 则允许渲染
     if (artifact && artifact.files.length > 0) {
       setShouldSendToSandbox(true);
-      console.log("[expand] 展开 Canvas，允许渲染");
+      console.log("[expand] 允许渲染");
     }
   }, [artifact]);
-  const collapse = useCallback(() => setIsExpanded(false), []);
-  const toggle = useCallback(() => setIsExpanded((prev) => !prev), []);
+  const collapse = useCallback(() => {}, []);
+  const toggle = useCallback(() => {}, []);
 
   // 获取当前 thread 的版本缓存
   const getThreadCache = useCallback(() => {
@@ -275,8 +275,7 @@ export function useCanvas({
         const versionXml = `<boltArtifact id="version-${versionNumber}" title="Version ${versionNumber}">\n${filesXml}\n</boltArtifact>`;
         setGeneratedCode(versionXml);
 
-        // 切换版本时自动展开，根据参数决定是否允许渲染
-        setIsExpanded(true);
+        // 根据参数决定是否允许渲染
         setShouldSendToSandbox(allowSandboxUpdate);
 
         console.log(
@@ -309,8 +308,7 @@ export function useCanvas({
         const versionXml = `<boltArtifact id="version-${versionNumber}" title="Version ${versionNumber}">\n${filesXml}\n</boltArtifact>`;
         setGeneratedCode(versionXml);
 
-        // 切换版本时自动展开，根据参数决定是否允许渲染
-        setIsExpanded(true);
+        // 根据参数决定是否允许渲染
         setShouldSendToSandbox(allowSandboxUpdate);
 
         console.log(
@@ -333,7 +331,6 @@ export function useCanvas({
 
     // 设置为新版本，但不允许沙箱渲染
     setSelectedVersion(nextVersionNumber);
-    setIsExpanded(true);
     setShouldSendToSandbox(false);
 
     console.log("创建乐观版本:", nextVersionNumber, "，展示代码生成但暂不渲染");

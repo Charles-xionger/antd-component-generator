@@ -1,16 +1,19 @@
 // hooks/use-artifact-parser.ts
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 
 export interface ParsedFile {
   path: string;
   content: string;
   language: string; // 文件语言类型，用于语法高亮
+  isComplete: boolean; // 文件是否完全生成
+  isGenerating: boolean; // 文件是否正在生成
 }
 
 export interface ArtifactData {
   id: string;
   title: string;
   files: ParsedFile[];
+  currentGeneratingFile: string | null; // 当前正在生成的文件路径
 }
 
 /**
@@ -70,10 +73,168 @@ class ArtifactParserBuffer {
       return null; // 连基本信息都没有
     }
 
-    // 提取所有文件
-    const files = this.extractFiles(content);
+    // 提取所有文件（增强版：跟踪生成状态）
+    const { files, currentGeneratingFile } =
+      this.extractFilesWithState(content);
 
-    return { id, title, files };
+    return { id, title, files, currentGeneratingFile };
+  }
+
+  /**
+   * 提取文件列表（增强版：跟踪生成状态）
+   */
+  private extractFilesWithState(content: string): {
+    files: ParsedFile[];
+    currentGeneratingFile: string | null;
+  } {
+    const files: ParsedFile[] = [];
+    const processedPaths = new Set<string>();
+    let currentGeneratingFile: string | null = null;
+
+    // 阶段 1: 完整闭合的文件（已完成）
+    this.extractClosedFilesWithState(content, files, processedPaths);
+
+    // 阶段 2: 标签完整但内容未完成的文件（正在生成）
+    const generatingFiles = this.extractPartialFilesWithState(
+      content,
+      files,
+      processedPaths
+    );
+    if (generatingFiles.length > 0) {
+      currentGeneratingFile = generatingFiles[generatingFiles.length - 1];
+    }
+
+    // 阶段 3: 标签本身还在生成的文件（等待中）
+    this.extractIncompleteFilesWithState(content, files, processedPaths);
+
+    return { files, currentGeneratingFile };
+  }
+
+  /**
+   * 阶段 1: 提取完整闭合的文件（已完成）
+   */
+  private extractClosedFilesWithState(
+    content: string,
+    files: ParsedFile[],
+    processedPaths: Set<string>
+  ): void {
+    const regex =
+      /<boltAction[^>]*type="file"[^>]*filePath="([^"]+)"[^>]*>([\s\S]*?)<\/boltAction>/g;
+
+    let match;
+    while ((match = regex.exec(content)) !== null) {
+      const filePath = match[1];
+      if (processedPaths.has(filePath)) continue;
+
+      const cleanContent = this.cleanCodeBlock(match[2]);
+      files.push({
+        path: filePath,
+        content: cleanContent,
+        language: this.getLanguageFromPath(filePath),
+        isComplete: true,
+        isGenerating: false,
+      });
+      processedPaths.add(filePath);
+    }
+  }
+
+  /**
+   * 阶段 2: 提取标签完整但内容未完成的文件（正在生成）
+   */
+  private extractPartialFilesWithState(
+    content: string,
+    files: ParsedFile[],
+    processedPaths: Set<string>
+  ): string[] {
+    const generatingFiles: string[] = [];
+    const regex = /<boltAction[^>]*type="file"[^>]*filePath="([^"]+)"[^>]*>/g;
+
+    let match;
+    while ((match = regex.exec(content)) !== null) {
+      const filePath = match[1];
+      if (processedPaths.has(filePath)) continue;
+
+      const startIndex = match.index! + match[0].length;
+      const endIndex = content.indexOf("</boltAction>", startIndex);
+
+      const fileContent =
+        endIndex !== -1
+          ? content.substring(startIndex, endIndex)
+          : content.substring(startIndex);
+
+      const cleanContent = this.cleanCodeBlock(fileContent);
+      if (cleanContent || endIndex === -1) {
+        files.push({
+          path: filePath,
+          content: cleanContent,
+          language: this.getLanguageFromPath(filePath),
+          isComplete: endIndex !== -1,
+          isGenerating: endIndex === -1, // 没有结束标签表示正在生成
+        });
+        processedPaths.add(filePath);
+
+        if (endIndex === -1) {
+          generatingFiles.push(filePath);
+        }
+      }
+    }
+
+    return generatingFiles;
+  }
+
+  /**
+   * 阶段 3: 提取标签不完整的文件（等待中）
+   */
+  private extractIncompleteFilesWithState(
+    content: string,
+    files: ParsedFile[],
+    processedPaths: Set<string>
+  ): void {
+    const patterns = [
+      /<boltAction[^>]*type="file"[^>]*filePath="([^"]+)"/g,
+      /<boltAction[^>]*type="file"[^>]*filePath="([^">]+)/g,
+    ];
+
+    for (const regex of patterns) {
+      let match;
+      while ((match = regex.exec(content)) !== null) {
+        const filePath = match[1];
+        if (processedPaths.has(filePath)) continue;
+
+        const tagStart = match.index!;
+        const tagEnd = content.indexOf(">", tagStart);
+
+        if (tagEnd === -1) {
+          files.push({
+            path: filePath,
+            content: "",
+            language: this.getLanguageFromPath(filePath),
+            isComplete: false,
+            isGenerating: false, // 标签未完成，还未开始生成内容
+          });
+        } else {
+          const contentStart = tagEnd + 1;
+          const contentEnd = content.indexOf("</boltAction>", contentStart);
+
+          const fileContent =
+            contentEnd !== -1
+              ? content.substring(contentStart, contentEnd)
+              : content.substring(contentStart);
+
+          const cleanContent = this.cleanCodeBlock(fileContent);
+          if (cleanContent) {
+            files.push({
+              path: filePath,
+              content: cleanContent,
+              language: this.getLanguageFromPath(filePath),
+              isComplete: contentEnd !== -1,
+              isGenerating: contentEnd === -1,
+            });
+          }
+        }
+        processedPaths.add(filePath);
+      }
+    }
   }
 
   /**
@@ -116,6 +277,8 @@ class ArtifactParserBuffer {
         path: filePath,
         content: cleanContent,
         language: this.getLanguageFromPath(filePath),
+        isComplete: true,
+        isGenerating: false,
       });
       processedPaths.add(filePath);
     }
@@ -150,6 +313,8 @@ class ArtifactParserBuffer {
           path: filePath,
           content: cleanContent,
           language: this.getLanguageFromPath(filePath),
+          isComplete: endIndex !== -1,
+          isGenerating: endIndex === -1,
         });
         processedPaths.add(filePath);
       }
@@ -254,6 +419,9 @@ const parserBuffer = new ArtifactParserBuffer();
 
 export function useArtifactParser(rawContent: string) {
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
+  const [lastGeneratingFile, setLastGeneratingFile] = useState<string | null>(
+    null
+  );
 
   // 使用缓冲器解析 artifact 数据
   const artifact = useMemo(() => {
@@ -263,24 +431,49 @@ export function useArtifactParser(rawContent: string) {
     return parserBuffer.parse(rawContent);
   }, [rawContent]);
 
+  // 自动切换到正在生成的文件
+  useEffect(() => {
+    if (!artifact || !artifact.currentGeneratingFile) {
+      return;
+    }
+
+    // 如果检测到新的正在生成的文件，自动切换过去
+    if (artifact.currentGeneratingFile !== lastGeneratingFile) {
+      console.log(
+        "[Artifact Parser] 检测到新文件生成:",
+        artifact.currentGeneratingFile
+      );
+      setSelectedFilePath(artifact.currentGeneratingFile);
+      setLastGeneratingFile(artifact.currentGeneratingFile);
+    }
+  }, [artifact?.currentGeneratingFile, lastGeneratingFile]);
+
   // 派生选中的文件
   const selectedFile = useMemo(() => {
     if (!artifact || !artifact.files.length) {
       return null;
     }
 
-    // 如果没有选中路径，或者选中的路径不存在，默认选择第一个文件
-    if (
-      !selectedFilePath ||
-      !artifact.files.find((f) => f.path === selectedFilePath)
-    ) {
-      return artifact.files[0];
+    // 优先选择用户手动选择的文件
+    if (selectedFilePath) {
+      const found = artifact.files.find((f) => f.path === selectedFilePath);
+      if (found) {
+        return found;
+      }
     }
 
-    return (
-      artifact.files.find((f) => f.path === selectedFilePath) ||
-      artifact.files[0]
-    );
+    // 如果用户没有选择，默认选择正在生成的文件
+    if (artifact.currentGeneratingFile) {
+      const generating = artifact.files.find(
+        (f) => f.path === artifact.currentGeneratingFile
+      );
+      if (generating) {
+        return generating;
+      }
+    }
+
+    // 兜底：选择第一个文件
+    return artifact.files[0];
   }, [artifact, selectedFilePath]);
 
   const selectFile = useCallback((file: ParsedFile) => {

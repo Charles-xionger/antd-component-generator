@@ -222,24 +222,10 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
     fetchMcpConfigs();
   }, [fetchMcpConfigs]);
 
-  // Handle canvas expand
-  const handleCanvasExpand = useCallback(() => {
-    canvas.expand();
-  }, [canvas]);
-
-  // Handle canvas close
-  const handleCanvasClose = useCallback(() => {
-    canvas.collapse();
-  }, [canvas]);
-
   return (
     <div className="flex h-full bg-white dark:bg-gray-900">
-      {/* Main Chat Area */}
-      <div
-        className={`flex flex-col transition-all duration-300 ${
-          canvas.isExpanded ? "w-[35%] border-r dark:border-gray-700" : "w-full"
-        }`}
-      >
+      {/* Left: Chat Area */}
+      <div className="flex w-[40%] flex-col border-r dark:border-gray-700">
         {/* Messages */}
         <div className="flex-1 space-y-4 overflow-y-auto p-4">
           {chat.messages.length === 0 && <EmptyState />}
@@ -249,7 +235,6 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
               key={message.id}
               message={message}
               messages={chat.messages}
-              onCanvasExpand={handleCanvasExpand}
             />
           ))}
 
@@ -273,7 +258,7 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
           onChange={chat.setInput}
           onSubmit={chat.sendMessage}
           isLoading={chat.isLoading}
-          isCanvasMode={canvas.isExpanded}
+          isCanvasMode={true}
           images={chat.images}
           onImagesChange={chat.setImages}
           mcpConfigs={mcpConfigs}
@@ -284,20 +269,18 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
         />
       </div>
 
-      {/* Canvas Panel (豆包风格：点击卡片展开) */}
-      {canvas.isExpanded && (
-        <div className="w-[65%] animate-slide-in-right">
-          <CanvasPanel
-            canvas={canvas}
-            onClose={handleCanvasClose}
-            iframeRef={iframeRef}
-            isSandboxReady={isSandboxReady}
-            sandboxError={sandboxError}
-            onFullscreenToggle={handleFullscreenToggle}
-            onSandboxReset={handleSandboxReset}
-          />
-        </div>
-      )}
+      {/* Right: Canvas Panel (Always visible) */}
+      <div className="flex w-[60%] flex-col">
+        <CanvasPanel
+          canvas={canvas}
+          onClose={() => {}}
+          iframeRef={iframeRef}
+          isSandboxReady={isSandboxReady}
+          sandboxError={sandboxError}
+          onFullscreenToggle={handleFullscreenToggle}
+          onSandboxReset={handleSandboxReset}
+        />
+      </div>
 
       {/* Fullscreen Preview */}
       {isFullscreen && (

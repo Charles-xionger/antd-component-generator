@@ -64,14 +64,25 @@ export function CodePanel({
                 <button
                   key={file.path}
                   onClick={() => onSelectFile(file)}
-                  className={`w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 transition-colors ${
+                  className={`w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 transition-colors relative ${
                     isSelected
                       ? "bg-gray-700 text-white"
                       : "text-gray-400 hover:bg-gray-800 hover:text-gray-200"
                   }`}
                 >
                   <FileIcon language={file.language} />
-                  <span className="truncate font-mono text-xs">{fileName}</span>
+                  <span className="truncate font-mono text-xs flex-1">
+                    {fileName}
+                  </span>
+                  {/* 生成状态指示器 */}
+                  {file.isGenerating && (
+                    <span className="flex items-center gap-1 text-blue-400 text-xs">
+                      <span className="animate-pulse">●</span>
+                    </span>
+                  )}
+                  {file.isComplete && !file.isGenerating && (
+                    <span className="text-green-500 text-xs">✓</span>
+                  )}
                 </button>
               );
             })

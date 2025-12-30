@@ -59,14 +59,45 @@ export async function architect(
     const response = await llm.invoke(messages);
     const content = response.content.toString();
 
-    // 解析计划
+    // 解析计划（新格式：从文本中提取文件信息）
     let plan: AgentPlan | undefined;
     const planMatch = content.match(
       /<architectPlan>([\s\S]*?)<\/architectPlan>/
     );
     if (planMatch?.[1]) {
       try {
-        plan = JSON.parse(planMatch[1].trim());
+        // 从文本内容中提取文件列表
+        const planText = planMatch[1].trim();
+        const files: Array<{ path: string; description: string }> = [];
+
+        // 匹配文件结构部分（## 📁 文件结构）
+        const filesMatch = planText.match(
+          /##\s*📁\s*文件结构([\s\S]*?)(?=##|$)/
+        );
+        if (filesMatch) {
+          const filesText = filesMatch[1];
+          // 匹配格式：1. **App.tsx** - 描述
+          const fileRegex = /\d+\.\s*\*\*(.+?)\*\*\s*-\s*(.+)/g;
+          let match;
+          while ((match = fileRegex.exec(filesText)) !== null) {
+            files.push({
+              path: match[1].trim(),
+              description: match[2].trim(),
+            });
+          }
+        }
+
+        plan = {
+          files,
+          dependencies: [
+            "antd",
+            "@tanstack/react-query",
+            "react-i18next",
+            "i18next",
+            "@ant-design/icons",
+          ],
+          architecture_notes: planText,
+        };
       } catch (e) {
         console.error("Failed to parse architect plan:", e);
       }

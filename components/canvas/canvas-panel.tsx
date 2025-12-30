@@ -182,14 +182,16 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
             </div>
           )}
 
-          {/* Close Button */}
-          <button
-            onClick={isFullscreen ? () => setIsFullscreen(false) : onClose}
-            className="rounded p-1 transition-colors hover:bg-gray-700"
-            title={isFullscreen ? "退出全屏" : "关闭 Canvas"}
-          >
-            <X className="h-4 w-4" />
-          </button>
+          {/* 全屏模式下显示退出按钮 */}
+          {isFullscreen && (
+            <button
+              onClick={() => setIsFullscreen(false)}
+              className="rounded p-1 transition-colors hover:bg-gray-700"
+              title="退出全屏"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
         {/* Preview Toolbar - 只在 Preview 模式显示 */}

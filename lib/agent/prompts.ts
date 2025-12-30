@@ -44,33 +44,48 @@ export const ARCHITECT_PROMPT = `
    - 所有文件路径必须在根目录（平级结构）
 
 **输出格式**：
-必须使用 <architectPlan> 标签包裹 JSON 输出，格式如下：
+必须使用 <architectPlan> 标签包裹易读的文本输出（**不是 JSON**），格式如下：
+
 <architectPlan>
-{
-  "mode": "create",
-  "requirements": {
-    "description": "用户需求的详细描述（如果有图片，描述图片中的 UI 结构和交互）",
-    "ui_components": ["Button", "Table", "Form", "Modal"],
-    "style_guide": {
-      "layout": "布局描述（如：左侧导航+右侧内容区）",
-      "colors": "配色方案（如：主色蓝色、辅助色灰色）",
-      "spacing": "间距风格（如：紧凑型、宽松型）",
-      "additional_notes": "其他样式细节（如：圆角按钮、阴影卡片）"
-    }
-  },
-  "files": [
-    { "path": "App.tsx", "description": "应用主入口" },
-    { "path": "[Component].tsx", "description": "核心业务组件" }
-  ],
-  "dependencies": ["antd", "@tanstack/react-query", "react-i18next", "i18next", "@ant-design/icons"],
-  "architecture_notes": "架构设计说明"
-}
+## 📋 需求分析
+
+[详细描述用户要实现什么功能，如果有图片，描述图片中的 UI 结构、布局、颜色和交互元素]
+
+## 🎨 设计要点
+
+### UI 组件
+- Button（按钮）
+- Table（表格）
+- Form（表单）
+- Modal（弹窗）
+
+### 样式风格
+- **布局**：左侧导航 + 右侧内容区
+- **配色**：主色蓝色、辅助色灰色
+- **间距**：紧凑型布局
+- **细节**：圆角按钮、阴影卡片
+
+## 📁 文件结构
+
+1. **App.tsx** - 应用主入口，负责布局和渲染业务组件
+2. **[Component].tsx** - 核心业务组件，处理主要功能
+3. **interface.ts** - TypeScript 类型定义
+4. **helpers.ts** - 工具函数和 Mock 数据
+5. **i18n.ts** - 国际化配置
+
+## 📦 依赖项
+- antd
+- @tanstack/react-query
+- react-i18next
+- i18next
+- @ant-design/icons
+
+## 💡 架构说明
+
+[架构设计的关键考虑和实现思路]
 </architectPlan>
 
-**重要**：
-- \`requirements.description\`：详细描述用户要实现什么功能，如果有图片则描述图片中的界面
-- \`requirements.ui_components\`：列出需要的 Ant Design 组件（Button、Table、Form、Input、Select、DatePicker 等）
-- \`requirements.style_guide\`：如果用户提供了图片，详细描述视觉风格，让 Coder 能够还原设计
+**重要**：输出必须是易读的 Markdown 格式文本，不要使用 JSON。让用户能够直观理解你的规划思路
 
 ### 现有代码上下文
 {codeContext}

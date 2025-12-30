@@ -137,86 +137,32 @@ export function parseArtifactFromContent(content: string): Artifact | null {
 }
 
 /**
- * 解析 Architect 规划（支持流式）
+ * 解析 Architect 规划（支持流式，新格式：文本而非 JSON）
  */
 function parseArchitectPlan(content: string): ArchitectPlan | null {
   try {
-    // 阶段 1: 尝试完整的标签匹配
-    const fullMatch = content.match(
-      /<architectPlan>\s*([\s\S]*?)\s*<\/architectPlan>/
-    );
-
-    if (fullMatch) {
-      const jsonStr = fullMatch[1].trim();
-      const plan = JSON.parse(jsonStr);
-
-      if (plan.mode && (plan.mode === "create" || plan.mode === "modify")) {
-        return plan;
-      }
+    // 检查是否包含 architectPlan 标签
+    if (!content.includes("<architectPlan")) {
+      return null;
     }
 
-    // 阶段 2: 如果没有闭合标签，尝试解析未完成的内容（流式展示）
-    const partialMatch = content.match(/<architectPlan>\s*([\s\S]*?)$/);
-    if (partialMatch) {
-      try {
-        // 尝试解析不完整的 JSON（可能缺少闭合括号）
-        const jsonStr = partialMatch[1].trim();
+    // 新格式：文本内容，不再解析 JSON
+    // 只需要检测标签存在即可，内容会由 ThinkingCard 组件渲染
+    const hasOpenTag = content.includes("<architectPlan>");
+    const hasCloseTag = content.includes("</architectPlan>");
 
-        // 如果 JSON 不完整，尝试补全
-        if (jsonStr && !jsonStr.endsWith("}")) {
-          // 尝试多种补全策略
-          const attempts = [
-            jsonStr, // 原样
-            jsonStr + '"}', // 补全字符串引号和对象
-            jsonStr + "}", // 补全对象
-            jsonStr + '"]', // 补全数组
-            jsonStr + "]", // 补全数组后的对象
-          ];
-
-          for (const attempt of attempts) {
-            try {
-              const plan = JSON.parse(attempt);
-              if (plan.mode) {
-                console.log("[ArchitectPlan] 流式解析成功（不完整）");
-                return plan;
-              }
-            } catch {
-              continue;
-            }
-          }
-        } else {
-          // JSON 看起来完整，直接解析
-          const plan = JSON.parse(jsonStr);
-          if (plan.mode) {
-            return plan;
-          }
-        }
-      } catch {
-        // 流式解析失败是正常的，等待更多内容
-        console.log("[ArchitectPlan] 等待更多内容...");
-      }
-    }
-
-    // 阶段 3: Fallback - 直接解析整个内容（如果是纯 JSON）
-    if (content.trim().startsWith("{") && content.trim().includes('"mode"')) {
-      try {
-        const plan = JSON.parse(content.trim());
-        if (plan.mode && (plan.mode === "create" || plan.mode === "modify")) {
-          console.warn("[ArchitectPlan] 缺少标签包裹，但成功解析");
-          return plan;
-        }
-      } catch {
-        // 忽略 fallback 失败
-      }
+    if (hasOpenTag) {
+      // 返回一个标记对象，表示这是 architect 消息
+      return {
+        mode: "create", // 默认模式，实际不再使用
+        files: [], // 不再解析文件列表
+        architecture_notes: "architect plan detected",
+      };
     }
 
     return null;
   } catch (error) {
-    // 只在非预期错误时输出
-    if (!(error instanceof SyntaxError)) {
-      console.error("[ArchitectPlan] 解析失败:", error);
-      console.error("原始内容:", content.substring(0, 200));
-    }
+    console.error("[ArchitectPlan] 解析失败:", error);
     return null;
   }
 }
