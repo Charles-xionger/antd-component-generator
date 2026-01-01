@@ -31,12 +31,12 @@ export const PreviewPanel = forwardRef<HTMLIFrameElement, PreviewPanelProps>(
 
     return (
       <div
-        className={`absolute inset-0 flex items-center justify-center bg-gray-800 transition-opacity duration-200 p-4 ${
+        className={`absolute inset-0 flex items-center justify-center bg-muted/50 transition-opacity duration-200 p-4 ${
           isVisible ? "opacity-100 z-10" : "opacity-0 z-0 pointer-events-none"
         }`}
       >
         <div
-          className="bg-white rounded-lg shadow-2xl overflow-hidden transition-all duration-300 relative"
+          className="bg-background rounded-lg shadow-2xl overflow-hidden transition-all duration-300 relative"
           style={{
             width: deviceSize.width,
             height: deviceSize.height,
@@ -45,20 +45,20 @@ export const PreviewPanel = forwardRef<HTMLIFrameElement, PreviewPanelProps>(
           }}
         >
           {sandboxError && (
-            <div className="absolute top-0 left-0 right-0 bg-red-100 border-b border-red-400 text-red-700 px-3 py-2 text-xs z-10">
+            <div className="absolute top-0 left-0 right-0 bg-destructive/10 border-b border-destructive/50 text-destructive px-3 py-2 text-xs z-10">
               <div className="font-semibold">渲染错误:</div>
               <div>{sandboxError}</div>
             </div>
           )}
           {!isSandboxReady && (
-            <div className="absolute inset-0 flex items-center justify-center bg-linear-to-br from-gray-50 to-gray-100 z-10">
+            <div className="absolute inset-0 flex items-center justify-center bg-background z-10">
               <div className="text-center">
                 {/* 加载动画 */}
                 <div className="relative w-16 h-16 mx-auto mb-4">
-                  <div className="absolute inset-0 border-4 border-blue-200 rounded-full"></div>
-                  <div className="absolute inset-0 border-4 border-transparent border-t-blue-500 rounded-full animate-spin"></div>
+                  <div className="absolute inset-0 border-4 border-primary/20 rounded-full"></div>
+                  <div className="absolute inset-0 border-4 border-transparent border-t-primary rounded-full animate-spin"></div>
                   <div
-                    className="absolute inset-2 border-4 border-transparent border-t-blue-400 rounded-full animate-spin"
+                    className="absolute inset-2 border-4 border-transparent border-t-primary/70 rounded-full animate-spin"
                     style={{
                       animationDirection: "reverse",
                       animationDuration: "0.8s",
@@ -66,24 +66,24 @@ export const PreviewPanel = forwardRef<HTMLIFrameElement, PreviewPanelProps>(
                   ></div>
                 </div>
                 {/* 文字提示 */}
-                <div className="text-gray-700 font-medium text-base mb-2">
+                <div className="text-foreground font-medium text-base mb-2">
                   沙箱环境准备中
                 </div>
-                <div className="text-gray-500 text-sm">
+                <div className="text-muted-foreground text-sm">
                   正在初始化 React 渲染环境...
                 </div>
                 {/* 进度点 */}
                 <div className="flex items-center justify-center gap-1 mt-4">
                   <div
-                    className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"
+                    className="w-2 h-2 bg-primary/70 rounded-full animate-pulse"
                     style={{ animationDelay: "0ms" }}
                   ></div>
                   <div
-                    className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"
+                    className="w-2 h-2 bg-primary/70 rounded-full animate-pulse"
                     style={{ animationDelay: "150ms" }}
                   ></div>
                   <div
-                    className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"
+                    className="w-2 h-2 bg-primary/70 rounded-full animate-pulse"
                     style={{ animationDelay: "300ms" }}
                   ></div>
                 </div>
