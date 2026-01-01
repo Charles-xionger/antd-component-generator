@@ -110,20 +110,36 @@ export function MessageItem({ message, messages }: MessageItemProps) {
   }
 
   // AI 消息 - 代码生成相关
-  if (!message.content && !artifact) {
+  // 修复：只要是 coding 消息，就应该显示代码生成卡片，即使 artifact 还未完全解析
+  if (isCodingMessage) {
+    // 检查是否还在流式生成中
+    const isStreaming =
+      message.content.includes("<boltArtifact") &&
+      !message.content.includes("</boltArtifact>");
+
+    return (
+      <div className="flex justify-start">
+        <div className="w-full max-w-[85%] space-y-3">
+          {/* 代码生成卡片 */}
+          <CodeGenerationCard artifact={artifact} isStreaming={isStreaming} />
+        </div>
+      </div>
+    );
+  }
+
+  // AI 消息 - 普通聊天回复（兜底）
+  if (!message.content) {
     return null;
   }
 
-  // 检查是否还在流式生成中
-  const isStreaming =
-    message.content.includes("<boltArtifact") &&
-    !message.content.includes("</boltArtifact>");
-
   return (
     <div className="flex justify-start">
-      <div className="w-full max-w-[85%] space-y-3">
-        {/* 代码生成卡片 */}
-        <CodeGenerationCard artifact={artifact} isStreaming={isStreaming} />
+      <div className="max-w-[85%]">
+        <div className="rounded-lg bg-gray-100 px-4 py-2 dark:bg-gray-800">
+          <div className="whitespace-pre-wrap text-gray-900 dark:text-gray-100">
+            {message.content}
+          </div>
+        </div>
       </div>
     </div>
   );

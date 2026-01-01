@@ -66,7 +66,11 @@ export function CodePanel({
                   onClick={() => onSelectFile(file)}
                   className={`w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 transition-colors relative ${
                     isSelected
-                      ? "bg-gray-700 text-white"
+                      ? file.isGenerating
+                        ? "bg-blue-900/30 text-blue-200 border-l-2 border-blue-500"
+                        : "bg-gray-700 text-white"
+                      : file.isGenerating
+                      ? "text-blue-400 hover:bg-gray-800"
                       : "text-gray-400 hover:bg-gray-800 hover:text-gray-200"
                   }`}
                 >
@@ -77,11 +81,12 @@ export function CodePanel({
                   {/* 生成状态指示器 */}
                   {file.isGenerating && (
                     <span className="flex items-center gap-1 text-blue-400 text-xs">
-                      <span className="animate-pulse">●</span>
+                      <span className="animate-pulse text-blue-500">●</span>
+                      <span className="text-[10px]">生成中</span>
                     </span>
                   )}
                   {file.isComplete && !file.isGenerating && (
-                    <span className="text-green-500 text-xs">✓</span>
+                    <span className="text-green-400 text-xs font-bold">✓</span>
                   )}
                 </button>
               );

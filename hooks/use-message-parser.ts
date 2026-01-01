@@ -123,10 +123,11 @@ export function parseArtifactFromContent(content: string): Artifact | null {
 
   if (files.length === 0) {
     console.warn(
-      "[parseArtifact] 未找到文件，内容片段:",
+      "[parseArtifact] 未找到文件，但保留 artifact 结构，内容片段:",
       content.substring(0, 200)
     );
-    return null;
+    // 即使文件列表为空，也返回 artifact 结构，避免消息渲染异常
+    return { id, title, files: [] };
   }
 
   console.log(

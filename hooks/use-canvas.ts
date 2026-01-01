@@ -71,8 +71,8 @@ export function useCanvas({
   threadId,
   initialCode = "",
 }: UseCanvasOptions = {}): UseCanvasReturn {
-  // 展开状态
-  const [isExpanded, setIsExpanded] = useState(false);
+  // 展开状态（已废弃，保留用于兼容）
+  const [isExpanded] = useState(false);
 
   // 代码内容
   const [generatedCode, setGeneratedCode] = useState(initialCode);
@@ -411,20 +411,13 @@ export function useCanvas({
         return "App.tsx";
       })();
 
-      // 发送文件到 sandbox（与 use-canvas-chat.ts 格式一致）
+      // 发送文件到 sandbox
       iframe.contentWindow.postMessage(
         {
           type: "artifacts",
           payload: { files, entryFile: entryFileName },
         },
         "http://localhost:5174/sandbox.html"
-      );
-
-      console.log(
-        "Files sent to sandbox:",
-        Object.keys(files),
-        "Entry:",
-        entryFileName
       );
     },
     [artifact]

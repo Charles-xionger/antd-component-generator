@@ -163,19 +163,28 @@ class ArtifactParserBuffer {
           : content.substring(startIndex);
 
       const cleanContent = this.cleanCodeBlock(fileContent);
-      if (cleanContent || endIndex === -1) {
+
+      // 修复：无论内容是否为空，只要标签完整且没有结束标签，就认为是正在生成
+      if (endIndex === -1) {
         files.push({
           path: filePath,
           content: cleanContent,
           language: this.getLanguageFromPath(filePath),
-          isComplete: endIndex !== -1,
-          isGenerating: endIndex === -1, // 没有结束标签表示正在生成
+          isComplete: false,
+          isGenerating: true,
         });
         processedPaths.add(filePath);
-
-        if (endIndex === -1) {
-          generatingFiles.push(filePath);
-        }
+        generatingFiles.push(filePath);
+      } else if (cleanContent) {
+        // 有结束标签但内容不为空，说明生成完成
+        files.push({
+          path: filePath,
+          content: cleanContent,
+          language: this.getLanguageFromPath(filePath),
+          isComplete: true,
+          isGenerating: false,
+        });
+        processedPaths.add(filePath);
       }
     }
 
@@ -441,7 +450,8 @@ export function useArtifactParser(rawContent: string) {
     if (artifact.currentGeneratingFile !== lastGeneratingFile) {
       console.log(
         "[Artifact Parser] 检测到新文件生成:",
-        artifact.currentGeneratingFile
+        artifact.currentGeneratingFile,
+        "自动切换文件"
       );
       setSelectedFilePath(artifact.currentGeneratingFile);
       setLastGeneratingFile(artifact.currentGeneratingFile);

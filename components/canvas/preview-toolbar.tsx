@@ -21,6 +21,8 @@ interface PreviewToolbarProps {
   selectedVersion: number | null;
   onSelectVersion: (versionNumber: number) => void;
   isLoadingVersions?: boolean;
+  onLanguageChange: (language: "zh" | "en") => void;
+  currentLanguage: "zh" | "en";
 }
 
 export function PreviewToolbar({
@@ -33,6 +35,8 @@ export function PreviewToolbar({
   selectedVersion,
   onSelectVersion,
   isLoadingVersions = false,
+  onLanguageChange,
+  currentLanguage,
 }: PreviewToolbarProps) {
   const devices: { type: DeviceType; icon: typeof Monitor; label: string }[] = [
     { type: "desktop", icon: Monitor, label: "桌面" },
@@ -81,8 +85,19 @@ export function PreviewToolbar({
         ))}
       </div>
 
-      {/* 右侧：刷新和全屏 */}
+      {/* 右侧：语言切换、刷新和全屏 */}
       <div className="flex items-center gap-2">
+        <button
+          onClick={() =>
+            onLanguageChange(currentLanguage === "zh" ? "en" : "zh")
+          }
+          className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-700 transition-colors flex items-center gap-1"
+          title={currentLanguage === "zh" ? "切换到英文" : "切换到中文"}
+        >
+          <span className="text-xs font-medium">
+            {currentLanguage === "zh" ? "EN" : "中"}
+          </span>
+        </button>
         <button
           onClick={onRefresh}
           disabled={isRefreshing}

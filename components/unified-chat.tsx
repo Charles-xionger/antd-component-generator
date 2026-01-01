@@ -21,6 +21,8 @@ interface UnifiedChatProps {
 export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const [isUserScrolling, setIsUserScrolling] = useState(false);
 
   // 保留 onThreadUpdate 参数以供将来使用
   void onThreadUpdate;
@@ -197,10 +199,34 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
     return () => window.removeEventListener("message", handleMessage);
   }, []);
 
-  // Scroll to bottom when messages change
+  // Scroll to bottom when messages change (only if user is not scrolling)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chat.messages]);
+    if (!isUserScrolling) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [chat.messages, isUserScrolling]);
+
+  // Detect user scrolling
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+
+      // If user scrolls to bottom, resume auto-scroll
+      if (isAtBottom) {
+        setIsUserScrolling(false);
+      } else if (scrollTop < scrollHeight - clientHeight - 50) {
+        // User scrolled up
+        setIsUserScrolling(true);
+      }
+    };
+
+    container.addEventListener("scroll", handleScroll);
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, []);
 
   // Fetch MCP configurations
   const fetchMcpConfigs = useCallback(async () => {
@@ -227,7 +253,10 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
       {/* Left: Chat Area */}
       <div className="flex w-[40%] flex-col border-r dark:border-gray-700">
         {/* Messages */}
-        <div className="flex-1 space-y-4 overflow-y-auto p-4">
+        <div
+          ref={messagesContainerRef}
+          className="flex-1 space-y-4 overflow-y-auto p-4"
+        >
           {chat.messages.length === 0 && <EmptyState />}
 
           {chat.messages.map((message) => (

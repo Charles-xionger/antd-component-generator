@@ -34,6 +34,8 @@ export interface ParsedFile {
   path: string;
   content: string;
   language: string;
+  isComplete: boolean; // 文件是否完全生成
+  isGenerating: boolean; // 文件是否正在生成
 }
 
 export interface Artifact {

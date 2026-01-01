@@ -16,12 +16,13 @@ export function CodeGenerationCard({
 }: CodeGenerationCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  if (!artifact) {
+  // 修复：即使 artifact 为 null，如果正在生成中，也应该显示卡片
+  if (!artifact && !isStreaming) {
     return null;
   }
 
-  const fileCount = artifact.files.length;
-  const title = artifact.title || "代码生成";
+  const fileCount = artifact?.files.length || 0;
+  const title = artifact?.title || "代码生成";
 
   return (
     <div className="my-3 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 shadow-sm">
@@ -59,27 +60,33 @@ export function CodeGenerationCard({
       {/* Content */}
       {isExpanded && (
         <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-          <div className="space-y-2">
-            <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-              📁 生成的文件：
+          {artifact && artifact.files.length > 0 ? (
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                📁 生成的文件：
+              </div>
+              <div className="space-y-1">
+                {artifact.files.map((file, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700"
+                  >
+                    <FileCode className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                    <span className="text-xs font-mono text-gray-700 dark:text-gray-300 flex-1">
+                      {file.path}
+                    </span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      {file.content.split("\n").length} 行
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="space-y-1">
-              {artifact.files.map((file, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700"
-                >
-                  <FileCode className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                  <span className="text-xs font-mono text-gray-700 dark:text-gray-300 flex-1">
-                    {file.path}
-                  </span>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">
-                    {file.content.split("\n").length} 行
-                  </span>
-                </div>
-              ))}
+          ) : (
+            <div className="text-xs text-gray-500 dark:text-gray-400 text-center py-2">
+              {isStreaming ? "正在生成文件..." : "暂无文件"}
             </div>
-          </div>
+          )}
         </div>
       )}
     </div>

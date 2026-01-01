@@ -23,7 +23,6 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
   function CanvasPanel(
     {
       canvas,
-      onClose,
       iframeRef,
       isSandboxReady = false,
       sandboxError = null,
@@ -54,6 +53,7 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
     // 全屏状态
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [currentLanguage, setCurrentLanguage] = useState<"zh" | "en">("zh");
 
     // 切换全屏 - 调用父组件回调
     const toggleFullscreen = useCallback(() => {
@@ -101,6 +101,24 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
         setIsRefreshing(false);
       }, 5000);
     }, [artifact, iframeRef, onSandboxReset]);
+
+    // 处理语言切换
+    const handleLanguageChange = useCallback(
+      (language: "zh" | "en") => {
+        if (iframeRef?.current?.contentWindow) {
+          iframeRef.current.contentWindow.postMessage(
+            {
+              type: "CHANGE_LANGUAGE",
+              lng: language,
+            },
+            "*"
+          );
+          setCurrentLanguage(language);
+          console.log(`语言已切换到: ${language === "zh" ? "中文" : "英文"}`);
+        }
+      },
+      [iframeRef]
+    );
 
     // 沙箱就绪且应该发送文件时才发送（审查通过后）
     useEffect(() => {
@@ -206,6 +224,8 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
             selectedVersion={selectedVersion}
             onSelectVersion={selectVersion}
             isLoadingVersions={isLoadingVersions}
+            onLanguageChange={handleLanguageChange}
+            currentLanguage={currentLanguage}
           />
         )}
 
