@@ -9,6 +9,15 @@ import {
   Tablet,
   Smartphone,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { DeviceType, ArtifactVersion } from "./types";
 
 interface PreviewToolbarProps {
@@ -38,83 +47,88 @@ export function PreviewToolbar({
   onLanguageChange,
   currentLanguage,
 }: PreviewToolbarProps) {
-  const devices: { type: DeviceType; icon: typeof Monitor; label: string }[] = [
-    { type: "desktop", icon: Monitor, label: "桌面" },
-    { type: "tablet", icon: Tablet, label: "平板" },
-    { type: "mobile", icon: Smartphone, label: "手机" },
-  ];
-
   return (
-    <div className="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
+    <div className="flex items-center justify-between px-4 py-2 bg-background border-b">
       {/* 左侧：版本选择 */}
       <div className="flex items-center gap-2">
         {versions.length > 0 && (
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-400">版本:</span>
-            <select
-              value={selectedVersion || ""}
-              onChange={(e) => onSelectVersion(Number(e.target.value))}
+            <span className="text-xs text-muted-foreground">版本:</span>
+            <Select
+              value={selectedVersion?.toString() || ""}
+              onValueChange={(value) => onSelectVersion(Number(value))}
               disabled={isLoadingVersions}
-              className="bg-gray-700 text-gray-200 text-xs px-2 py-1 rounded border border-gray-600 focus:outline-none focus:border-blue-500 disabled:opacity-50"
             >
-              {versions.map((version) => (
-                <option key={version.id} value={version.versionNumber}>
-                  v{version.versionNumber} - {version.description || "无描述"}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="h-8 w-45 text-xs">
+                <SelectValue placeholder="选择版本" />
+              </SelectTrigger>
+              <SelectContent>
+                {versions.map((version) => (
+                  <SelectItem
+                    key={version.id}
+                    value={version.versionNumber.toString()}
+                  >
+                    v{version.versionNumber} - {version.description || "无描述"}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
       </div>
 
       {/* 中间：设备选择 */}
-      <div className="flex items-center gap-1 bg-gray-700 rounded-lg p-1">
-        {devices.map(({ type, icon: Icon, label }) => (
-          <button
-            key={type}
-            onClick={() => onDeviceChange(type)}
-            className={`p-1.5 rounded transition-colors ${
-              selectedDevice === type
-                ? "bg-blue-600 text-white"
-                : "text-gray-400 hover:text-white hover:bg-gray-600"
-            }`}
-            title={label}
-          >
-            <Icon className="h-4 w-4" />
-          </button>
-        ))}
-      </div>
+      <ToggleGroup
+        type="single"
+        value={selectedDevice}
+        onValueChange={(value) => value && onDeviceChange(value as DeviceType)}
+      >
+        <ToggleGroupItem value="desktop" aria-label="桌面视图" size="sm">
+          <Monitor className="h-4 w-4" />
+        </ToggleGroupItem>
+        <ToggleGroupItem value="tablet" aria-label="平板视图" size="sm">
+          <Tablet className="h-4 w-4" />
+        </ToggleGroupItem>
+        <ToggleGroupItem value="mobile" aria-label="手机视图" size="sm">
+          <Smartphone className="h-4 w-4" />
+        </ToggleGroupItem>
+      </ToggleGroup>
 
       {/* 右侧：语言切换、刷新和全屏 */}
       <div className="flex items-center gap-2">
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() =>
             onLanguageChange(currentLanguage === "zh" ? "en" : "zh")
           }
-          className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-700 transition-colors flex items-center gap-1"
           title={currentLanguage === "zh" ? "切换到英文" : "切换到中文"}
         >
           <span className="text-xs font-medium">
             {currentLanguage === "zh" ? "EN" : "中"}
           </span>
-        </button>
-        <button
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={onRefresh}
           disabled={isRefreshing}
-          className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-700 transition-colors disabled:opacity-50"
           title="刷新预览"
         >
           <RefreshCw
             className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`}
           />
-        </button>
-        <button
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={onToggleFullscreen}
-          className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
           title="全屏"
         >
           <Maximize2 className="h-4 w-4" />
-        </button>
+        </Button>
       </div>
     </div>
   );

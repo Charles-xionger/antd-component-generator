@@ -4,6 +4,8 @@
 import { forwardRef, useEffect, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 import { CodePanel } from "./code-panel";
 import { PreviewPanel } from "./preview-panel";
 import { PreviewToolbar } from "./preview-toolbar";
@@ -160,56 +162,46 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
     const panelContent = (
       <div
         ref={isFullscreen ? undefined : ref}
-        className={`flex flex-col bg-gray-50 dark:bg-gray-900 transition-all duration-300 ${
-          isFullscreen ? "fixed inset-0 z-9999 bg-gray-900" : "h-full"
+        className={`flex flex-col bg-background transition-all duration-300 ${
+          isFullscreen ? "fixed inset-0 z-9999" : "h-full"
         }`}
       >
         {/* Canvas Header */}
-        <div className="flex items-center justify-between border-b border-gray-700 bg-gray-900 px-4 py-2 text-white">
-          <div className="flex items-center gap-4">
-            {/* Tab Switcher */}
-            <button
-              onClick={() => setActiveTab("preview")}
-              className={`rounded px-3 py-1 text-sm transition-colors ${
-                activeTab === "preview"
-                  ? "bg-gray-700 text-white"
-                  : "text-gray-400 hover:text-white"
-              }`}
-            >
-              Preview
-            </button>
-            <button
-              onClick={() => setActiveTab("code")}
-              className={`rounded px-3 py-1 text-sm transition-colors ${
-                activeTab === "code"
-                  ? "bg-gray-700 text-white"
-                  : "text-gray-400 hover:text-white"
-              }`}
-            >
-              Code
-            </button>
-          </div>
+        <div className="flex items-center justify-between border-b px-4 py-2">
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => setActiveTab(value as "preview" | "code")}
+            className="flex-1"
+          >
+            <div className="flex items-center justify-between">
+              <TabsList>
+                <TabsTrigger value="preview">Preview</TabsTrigger>
+                <TabsTrigger value="code">Code</TabsTrigger>
+              </TabsList>
 
-          {/* Artifact Title */}
-          {artifact && (
-            <div className="text-sm text-gray-400">
-              {artifact.title}
-              {selectedVersion && (
-                <span className="ml-2 text-xs">v{selectedVersion}</span>
+              {/* Artifact Title */}
+              {artifact && (
+                <div className="text-sm text-muted-foreground">
+                  {artifact.title}
+                  {selectedVersion && (
+                    <span className="ml-2 text-xs">v{selectedVersion}</span>
+                  )}
+                </div>
+              )}
+
+              {/* 全屏模式下显示退出按钮 */}
+              {isFullscreen && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsFullscreen(false)}
+                  title="退出全屏"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
               )}
             </div>
-          )}
-
-          {/* 全屏模式下显示退出按钮 */}
-          {isFullscreen && (
-            <button
-              onClick={() => setIsFullscreen(false)}
-              className="rounded p-1 transition-colors hover:bg-gray-700"
-              title="退出全屏"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
+          </Tabs>
         </div>
 
         {/* Preview Toolbar - 只在 Preview 模式显示 */}
