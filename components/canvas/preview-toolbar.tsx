@@ -4,7 +4,6 @@
 import {
   RefreshCw,
   Maximize2,
-  Minimize2,
   Monitor,
   Tablet,
   Smartphone,
