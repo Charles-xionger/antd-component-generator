@@ -122,14 +122,25 @@ export async function PATCH(
   try {
     const { threadId } = await params;
     const body = await request.json().catch(() => ({})); // 允许空 body
-    const { title } = body;
+    const { title, favorite } = body;
 
     if (!threadId) {
       return Response.json({ error: "Thread ID is required" }, { status: 400 });
     }
 
-    // 如果有 title 则更新 title，否则只更新 updatedAt
-    const updateData = title ? { title } : { updatedAt: new Date() };
+    // 构建更新数据：支持 title 和 favorite
+    const updateData: { title?: string; favorite?: boolean; updatedAt: Date } =
+      {
+        updatedAt: new Date(),
+      };
+
+    if (title !== undefined) {
+      updateData.title = title;
+    }
+
+    if (favorite !== undefined) {
+      updateData.favorite = favorite;
+    }
 
     const thread = await prisma.thread.update({
       where: { id: threadId },

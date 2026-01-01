@@ -96,6 +96,8 @@ export function parseArtifactFromContent(content: string): Artifact | null {
       path: filePath,
       content: match[2].trim(),
       language: languageMap[ext] || "text",
+      isComplete: false,
+      isGenerating: false,
     });
   }
 
@@ -116,6 +118,8 @@ export function parseArtifactFromContent(content: string): Artifact | null {
           path: filePath,
           content: partialContent,
           language: languageMap[ext] || "text",
+          isComplete: false,
+          isGenerating: false,
         });
       }
     }

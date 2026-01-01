@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { UnifiedChat } from "@/components/unified-chat";
+import { ChatSidebar } from "@/components/chat";
 import {
   Dialog,
   DialogContent,
@@ -16,6 +17,7 @@ import { useToast } from "@/components/ui/toast";
 interface Thread {
   id: string;
   title: string;
+  favorite?: boolean;
   createdAt: string;
   updatedAt: string;
   artifact?: {
@@ -41,13 +43,7 @@ export default function Home() {
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [threadToDelete, setThreadToDelete] = useState<string | null>(null);
-  const [mounted, setMounted] = useState(false);
   const { showToast } = useToast();
-
-  // 修复 hydration 错误：标记组件已挂载
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   // 保存选中的会话到 localStorage
   useEffect(() => {
@@ -149,145 +145,85 @@ export default function Home() {
     }
   };
 
+  // 重命名会话
+  const renameThread = async (threadId: string, newTitle: string) => {
+    try {
+      const response = await fetch(`/api/agent/history/${threadId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ title: newTitle }),
+      });
+
+      if (response.ok) {
+        // 更新列表中的thread
+        setThreads((prev) =>
+          prev.map((thread) =>
+            thread.id === threadId ? { ...thread, title: newTitle } : thread
+          )
+        );
+        showToast("重命名成功", "success");
+      } else {
+        throw new Error("重命名失败");
+      }
+    } catch (error) {
+      console.error("重命名会话失败:", error);
+      showToast("重命名失败，请稍后重试", "error");
+    }
+  };
+
+  // 切换收藏状态
+  const toggleFavorite = async (threadId: string, favorite: boolean) => {
+    try {
+      const response = await fetch(`/api/agent/history/${threadId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ favorite }),
+      });
+
+      if (response.ok) {
+        // 更新列表中的thread
+        setThreads((prev) =>
+          prev.map((thread) =>
+            thread.id === threadId ? { ...thread, favorite } : thread
+          )
+        );
+        showToast(favorite ? "已收藏" : "已取消收藏", "success");
+      } else {
+        throw new Error("操作失败");
+      }
+    } catch (error) {
+      console.error("收藏操作失败:", error);
+      showToast("操作失败，请稍后重试", "error");
+    }
+  };
+
   useEffect(() => {
     fetchThreads();
   }, [fetchThreads]);
-
-  const formatDate = (dateString: string) => {
-    // 避免 hydration 错误：只在客户端挂载后格式化日期
-    if (!mounted) return "";
-
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-    if (diffDays === 0) {
-      return date.toLocaleTimeString("zh-CN", {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-    } else if (diffDays === 1) {
-      return "昨天";
-    } else if (diffDays < 7) {
-      return `${diffDays}天前`;
-    } else {
-      return date.toLocaleDateString("zh-CN");
-    }
-  };
 
   return (
     <div className="h-screen flex bg-gray-50 overflow-hidden">
       {/* 左侧边栏 */}
       <div
-        className={`bg-white border-r border-gray-200 transition-all duration-300 ${
+        className={`transition-all duration-300 ${
           sidebarOpen ? "w-80" : "w-0"
         } overflow-hidden flex flex-col absolute md:static z-20 h-full md:h-auto`}
       >
-        {/* 顶部操作栏 */}
-        <div className="p-4 border-b border-gray-100">
-          <button
-            onClick={createNewThread}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 4v16m8-8H4"
-              />
-            </svg>
-            新建会话
-          </button>
-        </div>
-
-        {/* 会话列表 */}
-        <div className="flex-1 overflow-y-auto">
-          {isLoading ? (
-            <div className="p-4 text-center text-gray-500">加载中...</div>
-          ) : threads.length === 0 ? (
-            <div className="p-4 text-center text-gray-500">
-              <div className="mb-2">暂无会话</div>
-              <div className="text-sm">点击上方按钮创建新会话</div>
-            </div>
-          ) : (
-            <div className="p-2">
-              {threads.map((thread) => (
-                <div
-                  key={thread.id}
-                  className={`p-3 mb-1 rounded-lg transition-all duration-200 group relative ${
-                    selectedThreadId === thread.id
-                      ? "bg-blue-50 border border-blue-200"
-                      : "hover:bg-gray-50 border border-transparent"
-                  }`}
-                >
-                  <div
-                    onClick={() => setSelectedThreadId(thread.id)}
-                    className="cursor-pointer"
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="font-medium text-gray-900 truncate flex-1 mr-2">
-                        {thread.title}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {thread.artifact?._count?.versions &&
-                          thread.artifact._count.versions > 0 && (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                              {thread.artifact._count.versions} 个版本
-                            </span>
-                          )}
-                        {/* 删除按钮 */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openDeleteDialog(thread.id);
-                          }}
-                          disabled={deletingThreadId === thread.id}
-                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-100 rounded text-red-500 hover:text-red-700 transition-all duration-200 disabled:opacity-50"
-                          title="删除会话"
-                        >
-                          {deletingThreadId === thread.id ? (
-                            <div className="w-4 h-4 border-2 border-red-300 border-t-red-600 rounded-full animate-spin"></div>
-                          ) : (
-                            <svg
-                              className="w-4 h-4"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                              />
-                            </svg>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="text-sm text-gray-500">
-                        {formatDate(thread.updatedAt)}
-                      </div>
-                      {thread.artifact ? (
-                        <span className="text-xs text-blue-600">有代码</span>
-                      ) : (
-                        <span className="text-xs text-gray-400">仅对话</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <ChatSidebar
+          threads={threads}
+          selectedThreadId={selectedThreadId}
+          isLoading={isLoading}
+          onThreadSelect={setSelectedThreadId}
+          onNewThread={createNewThread}
+          onDeleteThread={openDeleteDialog}
+          onRenameThread={renameThread}
+          onToggleFavorite={toggleFavorite}
+          deletingThreadId={deletingThreadId}
+        />
       </div>
 
       {/* 移动端遮罩层 */}
