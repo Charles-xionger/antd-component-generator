@@ -57,55 +57,11 @@ export async function architect(
 
   try {
     const response = await llm.invoke(messages);
-    const content = response.content.toString();
 
-    // 解析计划（新格式：从文本中提取文件信息）
-    let plan: AgentPlan | undefined;
-    const planMatch = content.match(
-      /<architectPlan>([\s\S]*?)<\/architectPlan>/
-    );
-    if (planMatch?.[1]) {
-      try {
-        // 从文本内容中提取文件列表
-        const planText = planMatch[1].trim();
-        const files: Array<{ path: string; description: string }> = [];
-
-        // 匹配文件结构部分（## 📁 文件结构）
-        const filesMatch = planText.match(
-          /##\s*📁\s*文件结构([\s\S]*?)(?=##|$)/
-        );
-        if (filesMatch) {
-          const filesText = filesMatch[1];
-          // 匹配格式：1. **App.tsx** - 描述
-          const fileRegex = /\d+\.\s*\*\*(.+?)\*\*\s*-\s*(.+)/g;
-          let match;
-          while ((match = fileRegex.exec(filesText)) !== null) {
-            files.push({
-              path: match[1].trim(),
-              description: match[2].trim(),
-            });
-          }
-        }
-
-        plan = {
-          files,
-          dependencies: [
-            "antd",
-            "@tanstack/react-query",
-            "react-i18next",
-            "i18next",
-            "@ant-design/icons",
-          ],
-          architecture_notes: planText,
-        };
-      } catch (e) {
-        console.error("Failed to parse architect plan:", e);
-      }
-    }
-
+    // 直接返回完整响应，不再解析和构建 plan 对象
+    // Coder 会直接使用完整的 architect 消息内容（包含开场白、<architectPlan>、结束语）
     return {
       messages: [response],
-      plan: plan,
     };
   } catch (err) {
     return {
@@ -129,21 +85,54 @@ export async function coder(state: AgentState): Promise<Partial<AgentState>> {
     state.codeContext || "这是一个新项目，没有现有代码。"
   );
 
-  // 只获取当前对话轮次的关键消息，避免 token 累积
-  const lastUserMessage = state.messages
-    .filter((m) => m._getType() === "human")
-    .slice(-1)[0]; // 完整的用户消息（包含图片）
+  // 找到上一个 coder 消息的位置（包含 <boltArtifact> 的 AI 消息）
+  let lastCoderIndex = -1;
+  for (let i = state.messages.length - 1; i >= 0; i--) {
+    const msg = state.messages[i];
+    if (
+      msg._getType() === "ai" &&
+      msg.content.toString().includes("<boltArtifact")
+    ) {
+      lastCoderIndex = i;
+      break;
+    }
+  }
 
-  const architectResponse = state.messages
-    .filter((m) => m._getType() === "ai")
-    .slice(-1)[0]; // architect 的规划响应（包含需求分析、组件列表、样式描述）
+  // 获取相关的对话上下文
+  let relevantMessages: typeof state.messages;
 
-  // Coder 同时接收：图片（视觉参考）+ Architect 的分析（结构化描述）
+  if (lastCoderIndex === -1) {
+    // 第一次生成代码：获取所有消息（包括第一条用户消息和所有 architect）
+    relevantMessages = state.messages;
+  } else {
+    // 不是第一次：只获取上一个 coder 之后的消息
+    relevantMessages = state.messages.slice(lastCoderIndex + 1);
+  }
+
+  // 确保包含第一条用户消息（含图片），作为视觉参考
+  const firstUserMessage = state.messages.find((m) => m._getType() === "human");
+  const hasFirstUserInRelevant = relevantMessages.some(
+    (m) => m === firstUserMessage
+  );
+
+  // 构建消息列表
   const messages = [
     new SystemMessage(promptWithContext),
-    lastUserMessage, // 用户的完整消息（含图片），提供视觉参考
-    architectResponse, // Architect 的规划（含需求分析、组件选择、样式指南）
+    // 如果相关消息中没有第一条用户消息，添加它（提供图片等视觉参考）
+    ...(hasFirstUserInRelevant
+      ? []
+      : firstUserMessage
+      ? [firstUserMessage]
+      : []),
+    ...relevantMessages, // 上一个 coder 之后的所有用户消息和 architect 消息
   ];
+
+  console.log("[Coder] 上下文消息数量:", {
+    total: messages.length,
+    lastCoderIndex,
+    relevantMessagesCount: relevantMessages.length,
+    includesFirstUserMessage: !!firstUserMessage,
+  });
 
   try {
     const response = await llm.invoke(messages);

@@ -33,6 +33,7 @@ export interface ParsedMessageData {
   // 三段式内容 - 架构规划
   architectOpeningText: string | null; // architect 开场白
   architectClosingText: string | null; // architect 结束语
+  architectPlanContent: string | null; // architect plan 标签内的内容（支持流式）
 }
 
 /**
@@ -109,6 +110,35 @@ export function extractArchitectClosingText(content: string): string | null {
 }
 
 /**
+ * 提取 architectPlan 标签内的内容（支持流式：未闭合的标签）
+ */
+export function extractArchitectPlanContent(content: string): string | null {
+  if (!content.includes("<architectPlan")) {
+    return null;
+  }
+
+  // 先尝试匹配完整的标签
+  const completeMatch = content.match(
+    /<architectPlan>([\s\S]*?)<\/architectPlan>/
+  );
+
+  if (completeMatch) {
+    return completeMatch[1].trim();
+  }
+
+  // 流式场景：匹配未闭合的标签
+  const isStreaming = !content.includes("</architectPlan>");
+  if (isStreaming) {
+    const partialMatch = content.match(/<architectPlan>([\s\S]*?)$/);
+    if (partialMatch) {
+      return partialMatch[1].trim();
+    }
+  }
+
+  return null;
+}
+
+/**
  * 解析审查结果
  */
 function parseReviewResult(content: string): ReviewResultData {
@@ -175,32 +205,35 @@ export function parseArtifactFromContent(content: string): Artifact | null {
       path: filePath,
       content: match[2].trim(),
       language: languageMap[ext] || "text",
-      isComplete: false,
+      isComplete: true,
       isGenerating: false,
     });
   }
 
-  // 流式支持：尝试匹配未闭合的 boltAction 标签
-  if (files.length === 0) {
-    const partialFileRegex =
-      /<boltAction[^>]*type="file"[^>]*filePath="([^"]+)"[^>]*>([\s\S]*?)$/;
-    const partialMatch = content.match(partialFileRegex);
+  // 流式支持：尝试匹配未闭合的 boltAction 标签（无论是否已有完整文件）
+  // 找到最后一个完整文件的结束位置
+  const lastCompleteMatch = content.lastIndexOf("</boltAction>");
+  const searchFrom = lastCompleteMatch !== -1 ? lastCompleteMatch + 14 : 0;
+  const remainingContent = content.substring(searchFrom);
 
-    if (partialMatch) {
-      const filePath = partialMatch[1];
-      const ext = filePath.split(".").pop() || "";
-      const partialContent = partialMatch[2].trim();
+  const partialFileRegex =
+    /<boltAction[^>]*type="file"[^>]*filePath="([^"]+)"[^>]*>([\s\S]*?)$/;
+  const partialMatch = remainingContent.match(partialFileRegex);
 
-      // 只有当有内容时才添加
-      if (partialContent) {
-        files.push({
-          path: filePath,
-          content: partialContent,
-          language: languageMap[ext] || "text",
-          isComplete: false,
-          isGenerating: false,
-        });
-      }
+  if (partialMatch) {
+    const filePath = partialMatch[1];
+    const ext = filePath.split(".").pop() || "";
+    const partialContent = partialMatch[2].trim();
+
+    // 只有当有内容时才添加
+    if (partialContent) {
+      files.push({
+        path: filePath,
+        content: partialContent,
+        language: languageMap[ext] || "text",
+        isComplete: false,
+        isGenerating: true,
+      });
     }
   }
 
@@ -344,6 +377,9 @@ export function useMessageParser(
       : null,
     architectClosingText: isArchitectMessage
       ? extractArchitectClosingText(content)
+      : null,
+    architectPlanContent: isArchitectMessage
+      ? extractArchitectPlanContent(content)
       : null,
   };
 }

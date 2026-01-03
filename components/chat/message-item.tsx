@@ -55,6 +55,7 @@ export function MessageItem({ message, messages }: MessageItemProps) {
     closingText,
     architectOpeningText,
     architectClosingText,
+    architectPlanContent,
   } = useMessageParser(message.content, isUser, previousArtifact);
 
   // AI 消息内容为空时，不渲染（流式响应刚开始的占位消息）
@@ -86,7 +87,72 @@ export function MessageItem({ message, messages }: MessageItemProps) {
     );
   }
 
-  // AI 消息 - 代码生成优先（如果同时包含 architect 和 coding，优先显示代码）
+  // AI 消息 - 同时包含 Architect 和 Coding（完整流程）
+  if (isArchitectMessage && isCodingMessage) {
+    const architectStreaming =
+      message.content.includes("<architectPlan") &&
+      !message.content.includes("</architectPlan>");
+    const codingStreaming =
+      message.content.includes("<boltArtifact") &&
+      !message.content.includes("</boltArtifact>");
+
+    return (
+      <div className="flex justify-start">
+        <div className="w-full max-w-[85%] space-y-3">
+          {/* Architect 开场白 */}
+          {architectOpeningText && (
+            <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
+              <div className="whitespace-pre-wrap text-sm">
+                {architectOpeningText}
+              </div>
+            </div>
+          )}
+
+          {/* Architect 规划卡片 */}
+          {message.content.includes("<architectPlan") && (
+            <ThinkingCard
+              content={architectPlanContent || ""}
+              duration={architectStreaming ? "规划中" : "规划完成"}
+              isStreaming={architectStreaming}
+            />
+          )}
+
+          {/* Architect 结束语 */}
+          {architectClosingText && !architectStreaming && (
+            <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
+              <div className="whitespace-pre-wrap text-sm">
+                {architectClosingText}
+              </div>
+            </div>
+          )}
+
+          {/* Coding 开场白 */}
+          {openingText && (
+            <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
+              <div className="whitespace-pre-wrap text-sm">{openingText}</div>
+            </div>
+          )}
+
+          {/* 代码生成卡片 */}
+          {message.content.includes("<boltArtifact") && (
+            <CodeGenerationCard
+              artifact={artifact}
+              isStreaming={codingStreaming}
+            />
+          )}
+
+          {/* Coding 结束语 */}
+          {closingText && !codingStreaming && (
+            <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
+              <div className="whitespace-pre-wrap text-sm">{closingText}</div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // AI 消息 - 仅代码生成（没有 architect）
   if (isCodingMessage || openingText) {
     // 检查是否还在流式生成中
     const isStreaming =
@@ -119,7 +185,7 @@ export function MessageItem({ message, messages }: MessageItemProps) {
     );
   }
 
-  // AI 消息 - Architect 规划（只在没有代码生成时显示）
+  // AI 消息 - 仅 Architect 规划（没有代码生成）
   if (isArchitectMessage && !isCodingMessage) {
     // 检查是否还在生成中（没有闭合标签）
     const isStreaming =
@@ -139,12 +205,6 @@ export function MessageItem({ message, messages }: MessageItemProps) {
       );
     }
 
-    // 提取 architectPlan 内容
-    const planMatch = message.content.match(
-      /<architectPlan>([\s\S]*?)<\/architectPlan>/
-    );
-    const planContent = planMatch ? planMatch[1].trim() : "";
-
     return (
       <div className="flex justify-start">
         <div className="w-full max-w-[85%] space-y-3">
@@ -157,14 +217,12 @@ export function MessageItem({ message, messages }: MessageItemProps) {
             </div>
           )}
 
-          {/* 规划方案卡片 */}
-          {planContent && (
-            <ThinkingCard
-              content={planContent}
-              duration={isStreaming ? "规划中" : "规划完成"}
-              isStreaming={isStreaming}
-            />
-          )}
+          {/* 规划方案卡片 - 使用解析好的内容，流式时即使为空也显示 */}
+          <ThinkingCard
+            content={architectPlanContent || ""}
+            duration={isStreaming ? "规划中" : "规划完成"}
+            isStreaming={isStreaming}
+          />
 
           {/* 结束语 */}
           {architectClosingText && !isStreaming && (
