@@ -150,7 +150,7 @@ export function CodePanel({
               </Button>
             </div>
             {/* Code Content */}
-            <div className="flex-1 overflow-auto bg-background">
+            <div className="flex-1 overflow-auto bg-muted/30">
               <pre className="p-4 text-sm whitespace-pre font-mono leading-relaxed">
                 <code>{selectedFile.content}</code>
               </pre>

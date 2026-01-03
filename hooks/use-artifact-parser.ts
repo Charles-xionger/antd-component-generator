@@ -363,6 +363,8 @@ class ArtifactParserBuffer {
             path: filePath,
             content: "",
             language: this.getLanguageFromPath(filePath),
+            isComplete: false,
+            isGenerating: true,
           });
         } else {
           // 标签已闭合，提取内容
@@ -378,6 +380,8 @@ class ArtifactParserBuffer {
             path: filePath,
             content: this.cleanCodeBlock(fileContent),
             language: this.getLanguageFromPath(filePath),
+            isComplete: contentEnd !== -1,
+            isGenerating: contentEnd === -1,
           });
         }
         processedPaths.add(filePath);
@@ -453,10 +457,13 @@ export function useArtifactParser(rawContent: string) {
         artifact.currentGeneratingFile,
         "自动切换文件"
       );
-      setSelectedFilePath(artifact.currentGeneratingFile);
-      setLastGeneratingFile(artifact.currentGeneratingFile);
+      // 使用 setTimeout 避免在渲染过程中直接更新状态
+      setTimeout(() => {
+        setSelectedFilePath(artifact.currentGeneratingFile!);
+        setLastGeneratingFile(artifact.currentGeneratingFile!);
+      }, 0);
     }
-  }, [artifact?.currentGeneratingFile, lastGeneratingFile]);
+  }, [artifact, lastGeneratingFile]);
 
   // 派生选中的文件
   const selectedFile = useMemo(() => {

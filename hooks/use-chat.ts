@@ -199,6 +199,9 @@ export function useChat(options: UseChatOptions = {}) {
 
       setMessages((prev) => [...prev, assistantMessage]);
 
+      // 流式响应开始，移除"思考中"状态
+      setIsLoading(false);
+
       // 创建消息缓冲器，处理流式传输时标签被拆分的问题
       const messageBuffer = new MessageBuffer();
 

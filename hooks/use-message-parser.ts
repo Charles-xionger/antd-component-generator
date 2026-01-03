@@ -27,6 +27,85 @@ export interface ParsedMessageData {
   isArchitectMessage: boolean;
   isCodingMessage: boolean;
   needsModification: boolean;
+  // 三段式内容 - 代码生成
+  openingText: string | null; // 开场白
+  closingText: string | null; // 结束语
+  // 三段式内容 - 架构规划
+  architectOpeningText: string | null; // architect 开场白
+  architectClosingText: string | null; // architect 结束语
+}
+
+/**
+ * 提取开场白（boltArtifact 之前的内容）
+ * 支持流式：即使标签未出现，也提取当前所有内容作为开场白
+ */
+export function extractOpeningText(content: string): string | null {
+  // 如果内容包含 <boltArtifact 标签，提取标签之前的内容
+  if (content.includes("<boltArtifact")) {
+    const match = content.match(/^([\s\S]*?)<boltArtifact/);
+    if (match && match[1].trim()) {
+      return match[1].trim();
+    }
+    return null;
+  }
+
+  // 流式场景：如果还没有出现标签，但内容不为空，说明可能是开场白
+  // 判断：如果内容不包含任何 XML 标签特征（包括不完整的标签），视为开场白
+  const trimmed = content.trim();
+  if (trimmed && !trimmed.includes("<")) {
+    // 不包含任何 < 字符，说明肯定不是标签，是纯文本开场白
+    return trimmed;
+  }
+
+  return null;
+}
+
+/**
+ * 提取结束语（boltArtifact 之后的内容）
+ * 只在标签完整闭合后提取
+ */
+export function extractClosingText(content: string): string | null {
+  // 必须有完整的闭合标签才提取结束语
+  if (!content.includes("</boltArtifact>")) {
+    return null;
+  }
+
+  const match = content.match(/<\/boltArtifact>([\s\S]*?)$/);
+  if (match && match[1].trim()) {
+    return match[1].trim();
+  }
+  return null;
+}
+
+/**
+ * 提取 architectPlan 的开场白（标签之前的内容）
+ */
+export function extractArchitectOpeningText(content: string): string | null {
+  if (!content.includes("<architectPlan")) {
+    return null;
+  }
+
+  const match = content.match(/^([\s\S]*?)<architectPlan/);
+  if (match && match[1].trim()) {
+    return match[1].trim();
+  }
+  return null;
+}
+
+/**
+ * 提取 architectPlan 的结束语（标签之后的内容）
+ */
+export function extractArchitectClosingText(content: string): string | null {
+  // 必须有完整的闭合标签才提取结束语
+  if (!content.includes("</architectPlan>")) {
+    return null;
+  }
+
+  const match = content.match(/<\/architectPlan>([\s\S]*?)$/);
+  if (match && match[1].trim()) {
+    return match[1].trim();
+  }
+  return null;
 }
 
 /**
@@ -245,7 +324,8 @@ export function useMessageParser(
 
   // 判断消息类型
   const isArchitectMessage = !!architectPlan;
-  const isCodingMessage = !!artifact || content.includes("<boltArtifact");
+  // 修复：只在真正包含 boltArtifact 标签时才认为是代码生成消息
+  const isCodingMessage = content.includes("<boltArtifact");
 
   // 判断是否需要修改
   const needsModify = needsModification(content, reviewResult.result);
@@ -257,6 +337,14 @@ export function useMessageParser(
     isArchitectMessage,
     isCodingMessage,
     needsModification: needsModify,
+    openingText: isCodingMessage ? extractOpeningText(content) : null,
+    closingText: isCodingMessage ? extractClosingText(content) : null,
+    architectOpeningText: isArchitectMessage
+      ? extractArchitectOpeningText(content)
+      : null,
+    architectClosingText: isArchitectMessage
+      ? extractArchitectClosingText(content)
+      : null,
   };
 }
 
