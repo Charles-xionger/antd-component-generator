@@ -58,7 +58,7 @@ export function MessageItem({ message, messages }: MessageItemProps) {
     return (
       <div className="flex justify-end">
         <div className="max-w-[85%]">
-          <div className="rounded-lg bg-blue-500 px-4 py-2 text-white">
+          <div className="rounded-lg bg-primary px-4 py-2 text-primary-foreground">
             <div className="whitespace-pre-wrap wrap-break-word">
               {message.content}
             </div>
@@ -99,10 +99,8 @@ export function MessageItem({ message, messages }: MessageItemProps) {
     return (
       <div className="flex justify-start">
         <div className="max-w-[85%]">
-          <div className="rounded-lg bg-gray-100 px-4 py-2 dark:bg-gray-800">
-            <div className="whitespace-pre-wrap text-gray-900 dark:text-gray-100">
-              {message.content}
-            </div>
+          <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
+            <div className="whitespace-pre-wrap">{message.content}</div>
           </div>
         </div>
       </div>
@@ -135,10 +133,8 @@ export function MessageItem({ message, messages }: MessageItemProps) {
   return (
     <div className="flex justify-start">
       <div className="max-w-[85%]">
-        <div className="rounded-lg bg-gray-100 px-4 py-2 dark:bg-gray-800">
-          <div className="whitespace-pre-wrap text-gray-900 dark:text-gray-100">
-            {message.content}
-          </div>
+        <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
+          <div className="whitespace-pre-wrap">{message.content}</div>
         </div>
       </div>
     </div>

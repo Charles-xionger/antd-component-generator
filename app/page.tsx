@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { UnifiedChat } from "@/components/unified-chat";
 import { ChatSidebar } from "@/components/chat";
+import { Header } from "@/components/header";
 import {
   Dialog,
   DialogContent,
@@ -236,59 +237,12 @@ export default function Home() {
 
       {/* 主聊天区域 */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* 顶部工具栏 */}
-        <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors md:hidden lg:block"
-            >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d={
-                    sidebarOpen
-                      ? "M11 19l-7-7 7-7M2 12h12"
-                      : "M4 6h16M4 12h16M4 18h16"
-                  }
-                />
-              </svg>
-            </button>
-            <h1 className="text-lg font-semibold text-gray-900">
-              {selectedThreadId
-                ? threads.find((t) => t.id === selectedThreadId)?.title ||
-                  "会话"
-                : "Next LangGraph Demo"}
-            </h1>
-          </div>
-
-          {/* 移动端菜单按钮 */}
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors md:hidden"
-          >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 6h16M4 12h16M4 18h16"
-              />
-            </svg>
-          </button>
-        </div>
+        <Header
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+          selectedThreadId={selectedThreadId}
+          threads={threads}
+        />
 
         {/* Unified Chat 区域 */}
         <div className="flex-1 overflow-hidden">

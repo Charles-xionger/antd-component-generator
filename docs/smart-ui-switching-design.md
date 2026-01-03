@@ -221,6 +221,7 @@ export function UnifiedChat({ threadId }: { threadId: string }) {
 
   // 处理 Canvas 卡片点击
   const handleCanvasClick = (artifact: Artifact) => {
+    console.log("Canvas card clicked:", artifact);
     setActiveArtifact(artifact);
     setIsCanvasExpanded(true);
   };

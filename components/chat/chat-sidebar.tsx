@@ -107,7 +107,7 @@ export function ChatSidebar({
           {/* Favorite Chats Section */}
           {favoriteThreads.length > 0 && (
             <Collapsible open={isFavoriteOpen} onOpenChange={setIsFavoriteOpen}>
-              <CollapsibleTrigger className="flex items-center gap-2 w-full p-2 hover:bg-accent rounded-md transition-colors">
+              <CollapsibleTrigger className="flex items-center gap-2 w-full p-2 hover:bg-accent hover:text-accent-foreground rounded-md transition-colors">
                 {isFavoriteOpen ? (
                   <ChevronDown className="h-4 w-4" />
                 ) : (
@@ -144,7 +144,7 @@ export function ChatSidebar({
 
           {/* Recent Chats Collapsible Section */}
           <Collapsible open={isRecentOpen} onOpenChange={setIsRecentOpen}>
-            <CollapsibleTrigger className="flex items-center gap-2 w-full p-2 hover:bg-accent rounded-md transition-colors">
+            <CollapsibleTrigger className="flex items-center gap-2 w-full p-2 hover:bg-accent hover:text-accent-foreground rounded-md transition-colors">
               {isRecentOpen ? (
                 <ChevronDown className="h-4 w-4" />
               ) : (
@@ -235,7 +235,9 @@ function ChatItem({
     <>
       <div
         className={`group relative rounded-md transition-colors ${
-          isSelected ? "bg-accent" : "hover:bg-accent/50"
+          isSelected
+            ? "bg-accent text-accent-foreground"
+            : "hover:bg-accent/50 hover:text-accent-foreground"
         }`}
       >
         <div

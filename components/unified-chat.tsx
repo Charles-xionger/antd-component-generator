@@ -20,7 +20,7 @@ interface UnifiedChatProps {
 
 export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
 
@@ -99,6 +99,7 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
     canvas.artifact,
     canvas.shouldSendToSandbox,
     canvas.sendFilesToSandbox,
+    canvas,
   ]);
 
   // ESC 键退出全屏
@@ -123,14 +124,17 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
         canvas.createOptimisticVersion();
       }
 
+      // 确保在更新代码前禁止沙箱渲染
+      canvas.setShouldSendToSandbox(false);
+
       // 使用合并逻辑，保留未修改的文件
       canvas.mergeAndSetGeneratedCode(content);
-
-      // 在代码生成过程中，暂时不发送到沙箱
-      // 只有生成完成且审查通过后才发送
+    },
+    onStreamStart: () => {
+      console.log("[UnifiedChat] 流式响应开始");
       canvas.setShouldSendToSandbox(false);
     },
-    onStreamComplete: async (content: string) => {
+    onStreamComplete: async () => {
       // 流式响应完成
       if (canvas.artifact && canvas.artifact.files.length > 0) {
         console.log("[UnifiedChat] 代码生成完成，保存到后端");
@@ -249,9 +253,9 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
   }, [fetchMcpConfigs]);
 
   return (
-    <div className="flex h-full bg-white dark:bg-gray-900">
+    <div className="flex h-full bg-background">
       {/* Left: Chat Area */}
-      <div className="flex w-[40%] flex-col border-r dark:border-gray-700">
+      <div className="flex w-[40%] flex-col border-r border-border">
         {/* Messages */}
         <div
           ref={messagesContainerRef}
@@ -302,7 +306,6 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
       <div className="flex w-[60%] flex-col">
         <CanvasPanel
           canvas={canvas}
-          onClose={() => {}}
           iframeRef={iframeRef}
           isSandboxReady={isSandboxReady}
           sandboxError={sandboxError}

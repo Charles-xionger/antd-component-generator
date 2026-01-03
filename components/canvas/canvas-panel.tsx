@@ -4,7 +4,7 @@
 import { forwardRef, useEffect, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { CodePanel } from "./code-panel";
 import { PreviewPanel } from "./preview-panel";
@@ -13,7 +13,7 @@ import type { UseCanvasReturn } from "@/hooks/use-canvas";
 
 interface CanvasPanelProps {
   canvas: UseCanvasReturn;
-  onClose: () => void;
+  onClose?: () => void;
   iframeRef?: React.RefObject<HTMLIFrameElement | null>;
   isSandboxReady?: boolean;
   sandboxError?: string | null;
@@ -129,13 +129,14 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
         activeTab === "preview" &&
         artifact &&
         iframeRef &&
-        shouldSendToSandbox
+        shouldSendToSandbox &&
+        !isRefreshing
       ) {
         // 添加小延迟确保沙箱完全初始化
         const timer = setTimeout(() => {
           console.log("审查通过，发送文件到沙箱");
           sendFilesToSandbox(iframeRef);
-        }, 100);
+        }, 200);
         return () => clearTimeout(timer);
       }
     }, [
@@ -145,6 +146,7 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
       iframeRef,
       sendFilesToSandbox,
       shouldSendToSandbox,
+      isRefreshing,
     ]);
 
     // ESC 键退出全屏
