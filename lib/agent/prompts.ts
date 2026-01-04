@@ -198,8 +198,8 @@ export const CODER_PROMPT = `
 
 #### 1. UI 组件库 (Ant Design)
 - 严格使用 \`antd\` 组件（Button, Table, Form, Modal, Input 等）
-- 图标使用 \`@ant-design/icons\`
-- 示例：\`import { Button, Table } from 'antd';\`
+- 图标使用 \`@ant-design/icons\` || \`lucide-react\`
+- 示例：\`import { Button, Table } from 'antd';\` || \`import { Search } from 'lucide-react';\`
 
 #### 2. 数据请求 (TanStack Query)
 - 使用 \`useQuery\` 进行数据获取（模拟异步请求）
