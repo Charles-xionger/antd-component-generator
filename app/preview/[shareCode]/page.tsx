@@ -106,7 +106,7 @@ export default function SharePreviewPage({
           type: "artifacts",
           payload: { files, entryFile },
         },
-        "http://localhost:5174"
+        process.env.NEXT_PUBLIC_SANDBOX_URL || "http://localhost:5174"
       );
       console.log("[Share] 代码已发送到沙箱");
     }, 500);

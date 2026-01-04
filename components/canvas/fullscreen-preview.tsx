@@ -76,7 +76,10 @@ export const FullscreenPreview = forwardRef<
           )}
           <iframe
             ref={ref}
-            src="http://localhost:5174/sandbox.html"
+            src={
+              process.env.NEXT_PUBLIC_SANDBOX_URL ||
+              "http://localhost:5174/sandbox.html"
+            }
             className="w-full h-full border-0"
             title="Code Sandbox Fullscreen"
           />

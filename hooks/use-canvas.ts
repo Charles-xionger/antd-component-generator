@@ -540,7 +540,7 @@ export function useCanvas({
           type: "artifacts",
           payload: { files, entryFile: entryFileName },
         },
-        "http://localhost:5174/sandbox.html"
+        process.env.NEXT_PUBLIC_SANDBOX_URL || "http://localhost:5174"
       );
     },
     [artifact]
