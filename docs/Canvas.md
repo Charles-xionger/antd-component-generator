@@ -221,7 +221,7 @@ Thread.id = "abc-123"  -- Links to LangGraph checkpoint
 **Simple Counter:**
 
 ```
-
+Build a simple counter application with increment and decrement buttons
 ```
 
 **Todo Application:**

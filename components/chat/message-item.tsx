@@ -91,14 +91,14 @@ export function MessageItem({ message, messages }: MessageItemProps) {
     return null;
   }
 
-  console.log("[MessageItem] 渲染消息:", {
-    id: message.id,
-    contentLength: message.content.length,
-    isArchitectMessage,
-    isCodingMessage,
-    hasArchitectTag: message.content.includes("<architectPlan"),
-    hasCodingTag: message.content.includes("<boltArtifact"),
-  });
+  // console.log("[MessageItem] 渲染消息:", {
+  //   id: message.id,
+  //   contentLength: message.content.length,
+  //   isArchitectMessage,
+  //   isCodingMessage,
+  //   hasArchitectTag: message.content.includes("<architectPlan"),
+  //   hasCodingTag: message.content.includes("<boltArtifact"),
+  // });
 
   // 用户消息
   if (isUser) {

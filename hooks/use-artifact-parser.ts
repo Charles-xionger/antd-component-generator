@@ -441,7 +441,19 @@ export function useArtifactParser(rawContent: string) {
     if (!rawContent) {
       return null;
     }
-    return parserBuffer.parse(rawContent);
+    const parsed = parserBuffer.parse(rawContent);
+    if (parsed) {
+      console.log("[useArtifactParser] 解析结果:", {
+        filesCount: parsed.files.length,
+        files: parsed.files.map((f) => ({
+          path: f.path,
+          isComplete: f.isComplete,
+          isGenerating: f.isGenerating,
+        })),
+        currentGeneratingFile: parsed.currentGeneratingFile,
+      });
+    }
+    return parsed;
   }, [rawContent]);
 
   // 自动切换到正在生成的文件

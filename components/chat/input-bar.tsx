@@ -256,7 +256,7 @@ export function InputBar({
             onKeyDown={handleKeyDown}
             placeholder={placeholder || "Ask a follow-up..."}
             disabled={isLoading}
-            className="w-full bg-transparent border-none outline-none text-foreground placeholder-muted-foreground text-sm py-1 resize-none min-h-[24px] max-h-[200px] overflow-y-auto"
+            className="w-full bg-transparent border-none outline-none text-foreground placeholder-muted-foreground text-sm py-1 resize-none min-h-6 max-h-50 overflow-y-auto"
           />
         </div>
 

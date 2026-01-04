@@ -138,6 +138,10 @@ export async function POST(request: NextRequest) {
             { ...config, version: "v2" }
           );
 
+          // 追踪 ARCHITECT 是否已完成
+          let hasArchitectCompleted = false;
+          let accumulatedContent = ""; // 累积内容用于检测标签闭合
+
           for await (const event of eventStream) {
             // 流式发送 AI 消息内容
             if (
@@ -179,6 +183,9 @@ export async function POST(request: NextRequest) {
               // 注意：Architect 消息已经用 <architectPlan> 标签包裹
               // 不再需要过滤，前端会优雅地渲染为卡片
 
+              // 累积内容用于检测标签闭合
+              accumulatedContent += content;
+
               const chunk = encoder.encode(
                 `data: ${JSON.stringify({
                   type: "content",
@@ -187,6 +194,24 @@ export async function POST(request: NextRequest) {
                 })}\n\n`
               );
               controller.enqueue(chunk);
+
+              // 检测 ARCHITECT 是否完成（标签闭合）
+              if (
+                !hasArchitectCompleted &&
+                accumulatedContent.includes("</architectPlan>")
+              ) {
+                hasArchitectCompleted = true;
+                console.log("[Stream] ARCHITECT 完成，发送分离事件");
+
+                // 发送 ARCHITECT 完成事件
+                const architectCompleteChunk = encoder.encode(
+                  `data: ${JSON.stringify({
+                    type: "architect_complete",
+                    threadId: finalThreadId,
+                  })}\n\n`
+                );
+                controller.enqueue(architectCompleteChunk);
+              }
             }
 
             // 处理工具调用开始

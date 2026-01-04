@@ -92,6 +92,7 @@ model ArtifactVersion {
   createdAt     DateTime @default(now())
   artifact      Artifact @relation(fields: [artifactId], references: [id], onDelete: Cascade)
   files         File[]
+  shares        Share[]  // 分享记录
 
   @@index([artifactId, versionNumber])
 }
@@ -104,6 +105,17 @@ model File {
   artifactVersion   ArtifactVersion @relation(fields: [artifactVersionId], references: [id], onDelete: Cascade)
 
   @@unique([artifactVersionId, path])
+}
+
+// 分享表
+model Share {
+  id                String          @id @default(uuid())
+  shareCode         String          @unique @default(uuid()) // 分享链接唯一码
+  artifactVersionId String
+  artifactVersion   ArtifactVersion @relation(fields: [artifactVersionId], references: [id], onDelete: Cascade)
+  createdAt         DateTime        @default(now())
+
+  @@index([shareCode])
 }
 
 /// MCP 服务器配置表

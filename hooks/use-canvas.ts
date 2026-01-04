@@ -3,6 +3,8 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useArtifactParser } from "./use-artifact-parser";
+import { parseArtifactFromContent } from "./use-message-parser";
+import type { Message } from "./use-chat";
 import type {
   ArtifactVersion,
   ParsedFile,
@@ -14,6 +16,8 @@ export interface UseCanvasOptions {
   threadId?: string;
   /** 初始代码内容 */
   initialCode?: string;
+  /** messages 列表，用于监听流式更新 */
+  messages?: Message[];
 }
 
 export interface UseCanvasReturn {
@@ -50,6 +54,8 @@ export interface UseCanvasReturn {
   /** 合并新代码和现有代码（保留未修改的文件） */
   mergeAndSetGeneratedCode: (newCode: string) => void;
   generatedCode: string;
+  /** 设置是否正在生成（控制 messages 监听） */
+  setIsGenerating: (isGenerating: boolean) => void;
 
   // Sandbox 通信
   sendFilesToSandbox: (
@@ -70,6 +76,7 @@ const versionCache = new Map<string, Map<number, ArtifactVersion>>();
 export function useCanvas({
   threadId,
   initialCode = "",
+  messages = [],
 }: UseCanvasOptions = {}): UseCanvasReturn {
   // 展开状态（已废弃，保留用于兼容）
   const [isExpanded] = useState(false);
@@ -93,9 +100,73 @@ export function useCanvas({
   // 沙箱控制状态
   const [shouldSendToSandbox, setShouldSendToSandbox] = useState(false);
 
+  // 标记是否正在生成代码（用于控制 messages 监听）
+  const isGeneratingRef = useRef(false);
+  // 标记是否正在切换版本（用于暂时禁用 messages 监听）
+  const isSelectingVersionRef = useRef(false);
+
   // 使用 artifact parser
   const { artifact, selectedFile, selectFile } =
     useArtifactParser(generatedCode);
+
+  // 监听 messages 变化，实时解析最新的 artifact
+  // 【关键】只在正在生成时启用，避免历史版本被 messages 覆盖
+  useEffect(() => {
+    // 如果正在切换版本，跳过 messages 更新
+    if (isSelectingVersionRef.current) {
+      console.log("[useCanvas] 正在切换版本，跳过 messages 更新");
+      return;
+    }
+
+    // 【关键修复】只在正在生成时才监听 messages
+    // 查看历史版本时不应该被 messages 覆盖
+    if (!isGeneratingRef.current) {
+      console.log("[useCanvas] 未在生成中，跳过 messages 更新（查看历史版本）");
+      return;
+    }
+
+    if (!messages || messages.length === 0) return;
+
+    // 查找最后一条包含 boltArtifact 的 assistant 消息
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role === "assistant" && msg.content.includes("<boltArtifact")) {
+        // 解析最新的 artifact
+        const latestArtifact = parseArtifactFromContent(msg.content);
+        if (latestArtifact && latestArtifact.files.length > 0) {
+          // 将 artifact 转换为 XML 格式更新 generatedCode
+          const filesXml = latestArtifact.files
+            .map(
+              (file) =>
+                `<boltAction type="file" filePath="${file.path}">\n${file.content}\n</boltAction>`
+            )
+            .join("\n");
+          const artifactXml = `<boltArtifact id="${latestArtifact.id}" title="${latestArtifact.title}">\n${filesXml}\n</boltArtifact>`;
+
+          // 只有当内容发生变化时才更新
+          if (artifactXml !== generatedCode) {
+            console.log("[useCanvas] 检测到 messages 变化，实时更新 artifact", {
+              filesCount: latestArtifact.files.length,
+              messageId: msg.id,
+            });
+            setGeneratedCode(artifactXml);
+
+            // 自动选择最新生成的文件
+            const latestFile =
+              latestArtifact.files[latestArtifact.files.length - 1];
+            if (latestFile) {
+              selectFile(latestFile);
+              console.log(
+                "[useCanvas] 自动选择最新生成的文件:",
+                latestFile.path
+              );
+            }
+          }
+        }
+        break; // 找到最新的就停止
+      }
+    }
+  }, [messages, generatedCode]);
 
   // 展开/收起（保留接口但不再使用）
   const expand = useCallback(() => {
@@ -163,7 +234,7 @@ export function useCanvas({
             const latestVersion = fetchedVersions[0];
             setSelectedVersion(latestVersion.versionNumber);
 
-            // 更新文件缓存
+            // 【关键】更新文件缓存为最新版本
             const filesMap = new Map<string, string>();
             latestVersion.files.forEach((file) => {
               filesMap.set(file.path, file.content);
@@ -174,7 +245,7 @@ export function useCanvas({
               "[fetchVersionHistory] 已缓存最新版本文件:",
               latestVersion.versionNumber,
               `文件数: ${filesMap.size}`,
-              `文件: ${Array.from(filesMap.keys()).join(", ")}`
+              `文件列表: ${Array.from(filesMap.keys()).join(", ")}`
             );
 
             const filesXml = latestVersion.files
@@ -186,8 +257,9 @@ export function useCanvas({
             const versionXml = `<boltArtifact id="version-${latestVersion.versionNumber}" title="Version ${latestVersion.versionNumber}">\n${filesXml}\n</boltArtifact>`;
             setGeneratedCode(versionXml);
 
-            // 加载历史版本时允许渲染
+            // 加载历史版本时允许渲染，但禁用 messages 监听
             setShouldSendToSandbox(true);
+            isGeneratingRef.current = false; // 查看历史，不是生成中
           }
         }
       }
@@ -221,7 +293,8 @@ export function useCanvas({
             const latestVersion = fetchedVersions[0];
             setSelectedVersion(latestVersion.versionNumber);
 
-            // 更新文件缓存为最新版本的文件
+            // 【关键修复】更新文件缓存为最新版本的文件
+            // 这个缓存会被下一次 mergeAndSetGeneratedCode 使用
             const filesMap = new Map<string, string>();
             latestVersion.files.forEach((file) => {
               filesMap.set(file.path, file.content);
@@ -238,10 +311,14 @@ export function useCanvas({
             const versionXml = `<boltArtifact id="version-${latestVersion.versionNumber}" title="Version ${latestVersion.versionNumber}">\n${filesXml}\n</boltArtifact>`;
             setGeneratedCode(versionXml);
 
+            // 刷新后显示最新版本，但不启用 messages 监听（避免被覆盖）
+            isGeneratingRef.current = false;
+
             console.log(
               "[refreshVersionList] 版本列表已更新，切换到最新版本:",
               latestVersion.versionNumber,
-              `文件数: ${filesMap.size}`
+              `文件数: ${filesMap.size}`,
+              `文件列表: ${Array.from(filesMap.keys()).join(", ")}`
             );
           }
         }
@@ -254,12 +331,26 @@ export function useCanvas({
   // 版本选择 - 使用缓存快速切换
   const selectVersion = useCallback(
     (versionNumber: number, allowSandboxUpdate: boolean = true) => {
+      console.log(
+        `[selectVersion] 切换到版本 ${versionNumber}，allowSandboxUpdate: ${allowSandboxUpdate}`,
+        `\n当前 versions 数组:`,
+        versions.map((v) => ({
+          versionNumber: v.versionNumber,
+          filesCount: v.files.length,
+        })),
+        `\n当前选中版本:`,
+        selectedVersion
+      );
+
+      // 设置标记，暂时禁用 messages 监听
+      isSelectingVersionRef.current = true;
+
       // 先尝试从缓存获取
       const cachedVersion = getCachedVersion(versionNumber);
       if (cachedVersion) {
         setSelectedVersion(versionNumber);
 
-        // 更新文件缓存
+        // 【关键】更新文件缓存，确保下次合并时有正确的基础
         const filesMap = new Map<string, string>();
         cachedVersion.files.forEach((file) => {
           filesMap.set(file.path, file.content);
@@ -273,16 +364,30 @@ export function useCanvas({
           )
           .join("\n");
         const versionXml = `<boltArtifact id="version-${versionNumber}" title="Version ${versionNumber}">\n${filesXml}\n</boltArtifact>`;
+        console.log(
+          `[selectVersion-cached] 设置 generatedCode，XML长度: ${versionXml.length}，包含 ${cachedVersion.files.length} 个文件`
+        );
         setGeneratedCode(versionXml);
+
+        // 切换历史版本，禁用 messages 监听
+        isGeneratingRef.current = false;
 
         // 根据参数决定是否允许渲染
         setShouldSendToSandbox(allowSandboxUpdate);
 
         console.log(
-          "从缓存加载版本:",
+          "[selectVersion] 从缓存加载版本:",
           versionNumber,
-          allowSandboxUpdate ? "，允许渲染" : "，暂不渲染"
+          `文件数: ${filesMap.size}`,
+          `文件列表: ${Array.from(filesMap.keys()).join(", ")}`,
+          allowSandboxUpdate ? "允许渲染" : "暂不渲染"
         );
+
+        // 延迟重置标记，确保 messages 监听不会立即触发
+        setTimeout(() => {
+          isSelectingVersionRef.current = false;
+          console.log("[selectVersion] 已重置版本切换标记（从缓存）");
+        }, 100);
         return;
       }
 
@@ -292,7 +397,7 @@ export function useCanvas({
         setSelectedVersion(versionNumber);
         cacheVersion(version); // 缓存版本
 
-        // 更新文件缓存
+        // 【关键】更新文件缓存
         const filesMap = new Map<string, string>();
         version.files.forEach((file) => {
           filesMap.set(file.path, file.content);
@@ -306,16 +411,34 @@ export function useCanvas({
           )
           .join("\n");
         const versionXml = `<boltArtifact id="version-${versionNumber}" title="Version ${versionNumber}">\n${filesXml}\n</boltArtifact>`;
+        console.log(
+          `[selectVersion-versions] 设置 generatedCode，XML长度: ${versionXml.length}，包含 ${version.files.length} 个文件`
+        );
         setGeneratedCode(versionXml);
+
+        // 切换历史版本，禁用 messages 监听
+        isGeneratingRef.current = false;
 
         // 根据参数决定是否允许渲染
         setShouldSendToSandbox(allowSandboxUpdate);
 
         console.log(
-          "加载版本:",
+          "[selectVersion] 加载版本:",
           versionNumber,
-          allowSandboxUpdate ? "，允许渲染" : "，暂不渲染"
+          `文件数: ${filesMap.size}`,
+          `文件列表: ${Array.from(filesMap.keys()).join(", ")}`,
+          allowSandboxUpdate ? "允许渲染" : "暂不渲染"
         );
+
+        // 延迟重置标记，确保 messages 监听不会立即触发
+        setTimeout(() => {
+          isSelectingVersionRef.current = false;
+          console.log("[selectVersion] 已重置版本切换标记（从 versions）");
+        }, 100);
+      } else {
+        console.warn(`[selectVersion] 未找到版本 ${versionNumber}`);
+        // 即使失败也要重置标记
+        isSelectingVersionRef.current = false;
       }
     },
     [versions, getCachedVersion, cacheVersion]
@@ -439,9 +562,13 @@ export function useCanvas({
       return;
     }
 
+    const currentCacheSize = currentVersionFilesRef.current.size;
+    const cachedFiles = Array.from(currentVersionFilesRef.current.keys());
+
     console.log(
-      "[mergeAndSetGeneratedCode] 开始合并:",
-      `缓存文件数: ${currentVersionFilesRef.current.size}`,
+      "[mergeAndSetGeneratedCode] 合并前状态:",
+      `缓存文件数: ${currentCacheSize}`,
+      `缓存文件: ${cachedFiles.join(", ")}`,
       `新文件数: ${newFiles.length}`,
       `新文件: ${newFiles.map((f) => f.path).join(", ")}`
     );
@@ -457,17 +584,24 @@ export function useCanvas({
       return;
     }
 
-    // 直接合并文件，保留未修改的文件
+    // 【关键】直接合并文件，保留未修改的文件
     const mergedFilesMap = new Map<string, string>();
 
     // 先添加所有旧文件（从缓存）
     currentVersionFilesRef.current.forEach((content, path) => {
       mergedFilesMap.set(path, content);
+      console.log(`[mergeAndSetGeneratedCode] 保留旧文件: ${path}`);
     });
 
-    // 用新文件覆盖
+    // 用新文件覆盖或新增
     newFiles.forEach((file) => {
+      const isNew = !mergedFilesMap.has(file.path);
       mergedFilesMap.set(file.path, file.content);
+      console.log(
+        `[mergeAndSetGeneratedCode] ${isNew ? "新增" : "更新"}文件: ${
+          file.path
+        }`
+      );
     });
 
     // 提取新代码的 id 和 title
@@ -485,15 +619,22 @@ export function useCanvas({
 
     console.log(
       "[mergeAndSetGeneratedCode] 合并完成:",
-      `旧文件 ${currentVersionFilesRef.current.size} 个`,
+      `旧文件 ${currentCacheSize} 个`,
       `新文件 ${newFiles.length} 个`,
-      `合并后 ${mergedFilesMap.size} 个`
+      `合并后 ${mergedFilesMap.size} 个`,
+      `最终文件列表: ${Array.from(mergedFilesMap.keys()).join(", ")}`
     );
 
     // 更新缓存
     currentVersionFilesRef.current = mergedFilesMap;
 
     setGeneratedCode(mergedCode);
+  }, []);
+
+  // 设置是否正在生成的方法
+  const setIsGenerating = useCallback((generating: boolean) => {
+    console.log(`[useCanvas] 设置生成状态: ${generating}`);
+    isGeneratingRef.current = generating;
   }, []);
 
   // 更新代码时，如果有 artifact 则自动展开
@@ -535,6 +676,7 @@ export function useCanvas({
     setGeneratedCode,
     mergeAndSetGeneratedCode,
     generatedCode,
+    setIsGenerating,
 
     // Sandbox 通信
     sendFilesToSandbox,

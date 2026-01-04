@@ -5,7 +5,7 @@ import {
   SystemMessage,
 } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
-import type { AgentState, AgentPlan } from "./state";
+import type { AgentState } from "./state";
 import { ARCHITECT_PROMPT, CODER_PROMPT } from "./prompts";
 
 const baseModelConfig = {
@@ -33,27 +33,74 @@ export async function architect(
     temperature: 0.3, // 更低的温度确保结构化输出
   });
 
-  const lastUserMessage = state.messages
-    .filter((m) => m._getType() === "human")
-    .slice(-1)[0];
-
-  // 提取用户消息内容（支持字符串或多模态数组）
-  const extractMessageContent = lastUserMessage.content;
-  console.log("🚀 ~ architect ~ extractMessageContent:", extractMessageContent);
-
   // 注入代码上下文到 architect prompt
-  // 如果 state.codeContext 不为空则进行替换，否则使用默认提示
-
   const promptWithContext = ARCHITECT_PROMPT.replace(
     "{codeContext}",
     state.codeContext || ""
   );
 
-  // 构建消息内容（文本 + 图片）
+  // 找到上一个 architect 消息的位置（包含 <architectPlan> 的 AI 消息）
+  let lastArchitectIndex = -1;
+  for (let i = state.messages.length - 1; i >= 0; i--) {
+    const msg = state.messages[i];
+    if (
+      msg._getType() === "ai" &&
+      msg.content.toString().includes("<architectPlan")
+    ) {
+      lastArchitectIndex = i;
+      break;
+    }
+  }
+
+  // 获取相关的对话上下文
+  let relevantMessages: typeof state.messages;
+
+  if (lastArchitectIndex === -1) {
+    // 第一次生成计划：获取所有消息，但排除 coder 生成的代码
+    relevantMessages = state.messages.filter(
+      (msg) =>
+        !(
+          msg._getType() === "ai" &&
+          msg.content.toString().includes("<boltArtifact")
+        )
+    );
+  } else {
+    // 不是第一次：只获取上一个 architect 之后的消息，但排除 coder 生成的代码
+    relevantMessages = state.messages
+      .slice(lastArchitectIndex + 1)
+      .filter(
+        (msg) =>
+          !(
+            msg._getType() === "ai" &&
+            msg.content.toString().includes("<boltArtifact")
+          )
+      );
+  }
+
+  // 确保包含第一条用户消息（含图片），作为视觉参考
+  const firstUserMessage = state.messages.find((m) => m._getType() === "human");
+  const hasFirstUserInRelevant = relevantMessages.some(
+    (m) => m === firstUserMessage
+  );
+
+  // 构建消息列表
   const messages = [
     new SystemMessage(promptWithContext),
-    new HumanMessage({ content: extractMessageContent }),
+    // 如果相关消息中没有第一条用户消息，添加它（提供图片等视觉参考）
+    ...(hasFirstUserInRelevant
+      ? []
+      : firstUserMessage
+      ? [firstUserMessage]
+      : []),
+    ...relevantMessages, // 上一个 architect 之后的所有消息（排除 coder 消息）
   ];
+
+  console.log("[Architect] 上下文消息数量:", {
+    total: messages.length,
+    lastArchitectIndex,
+    relevantMessagesCount: relevantMessages.length,
+    includesFirstUserMessage: !!firstUserMessage,
+  });
 
   try {
     const response = await llm.invoke(messages);

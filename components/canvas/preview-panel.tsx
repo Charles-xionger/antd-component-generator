@@ -8,6 +8,7 @@ interface PreviewPanelProps {
   isVisible: boolean;
   selectedDevice: DeviceType;
   isSandboxReady: boolean;
+  onSandboxReady?: () => void;
 }
 
 function getDeviceSize(device: DeviceType) {
@@ -22,7 +23,10 @@ function getDeviceSize(device: DeviceType) {
 }
 
 export const PreviewPanel = forwardRef<HTMLIFrameElement, PreviewPanelProps>(
-  function PreviewPanel({ isVisible, selectedDevice, isSandboxReady }, ref) {
+  function PreviewPanel(
+    { isVisible, selectedDevice, isSandboxReady, onSandboxReady },
+    ref
+  ) {
     const deviceSize = getDeviceSize(selectedDevice);
 
     return (
@@ -85,6 +89,7 @@ export const PreviewPanel = forwardRef<HTMLIFrameElement, PreviewPanelProps>(
             src="http://localhost:5174/sandbox.html"
             className="w-full h-full border-0"
             title="Code Sandbox"
+            onLoad={onSandboxReady}
           />
         </div>
       </div>

@@ -355,10 +355,7 @@ function ChatItem({
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => {
-                onDelete();
-                setDeleteDialogOpen(false);
-              }}
+              onClick={onDelete}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               确认删除

@@ -6,15 +6,6 @@ import { UnifiedChat } from "@/components/unified-chat";
 import { ChatSidebar } from "@/components/chat";
 import { HeaderClient } from "@/components/header-client";
 import { handleSignOut } from "@/app/actions/auth";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
 interface Thread {
@@ -52,8 +43,6 @@ export function HomeClient({ user }: HomeClientProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [threadToDelete, setThreadToDelete] = useState<string | null>(null);
 
   // 当 selectedThreadId 改变时，更新 URL
   useEffect(() => {
@@ -123,31 +112,20 @@ export function HomeClient({ user }: HomeClientProps) {
     }
   };
 
-  // 打开删除确认弹窗
-  const openDeleteDialog = (threadId: string) => {
-    setThreadToDelete(threadId);
-    setDeleteDialogOpen(true);
-  };
-
   // 删除会话
-  const deleteThread = async () => {
-    if (!threadToDelete) return;
-
-    setDeletingThreadId(threadToDelete);
-    setDeleteDialogOpen(false);
+  const deleteThread = async (threadId: string) => {
+    setDeletingThreadId(threadId);
     try {
-      const response = await fetch(`/api/agent/history/${threadToDelete}`, {
+      const response = await fetch(`/api/agent/history/${threadId}`, {
         method: "DELETE",
       });
 
       if (response.ok) {
         // 从列表中移除已删除的thread
-        setThreads((prev) =>
-          prev.filter((thread) => thread.id !== threadToDelete)
-        );
+        setThreads((prev) => prev.filter((thread) => thread.id !== threadId));
 
         // 如果删除的是当前选中的thread，清除选择
-        if (selectedThreadId === threadToDelete) {
+        if (selectedThreadId === threadId) {
           setSelectedThreadId(undefined);
         }
         // 显示成功消息
@@ -160,7 +138,6 @@ export function HomeClient({ user }: HomeClientProps) {
       toast.error("删除会话失败，请稍后重试");
     } finally {
       setDeletingThreadId(null);
-      setThreadToDelete(null);
     }
   };
 
@@ -242,7 +219,7 @@ export function HomeClient({ user }: HomeClientProps) {
           isLoading={isLoading}
           onThreadSelect={setSelectedThreadId}
           onNewThread={createNewThread}
-          onDeleteThread={openDeleteDialog}
+          onDeleteThread={deleteThread}
           onRenameThread={renameThread}
           onToggleFavorite={toggleFavorite}
           deletingThreadId={deletingThreadId}
@@ -288,41 +265,6 @@ export function HomeClient({ user }: HomeClientProps) {
           )}
         </div>
       </div>
-
-      {/* 删除确认弹窗 */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除会话</DialogTitle>
-            <DialogDescription>
-              确定要删除这个会话吗？删除后将无法恢复，包括所有聊天记录和生成的代码。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeleteDialogOpen(false)}
-              disabled={deletingThreadId !== null}
-            >
-              取消
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={deleteThread}
-              disabled={deletingThreadId !== null}
-            >
-              {deletingThreadId ? (
-                <>
-                  <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  删除中...
-                </>
-              ) : (
-                "确认删除"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

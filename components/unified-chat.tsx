@@ -41,8 +41,100 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
   // Fullscreen state
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Canvas hook
-  const canvas = useCanvas({ threadId });
+  // Chat hook - 先初始化，回调稍后通过 ref 设置
+  const chatCallbacksRef = useRef<{
+    onArtifactDetected?: (content: string) => void;
+    onStreamStart?: () => void;
+    onStreamComplete?: () => Promise<void>;
+  }>({});
+
+  const chat = useChat({
+    threadId,
+    mcpConfigId: selectedMcpId,
+    onArtifactDetected: (content) =>
+      chatCallbacksRef.current.onArtifactDetected?.(content),
+    onStreamStart: () => chatCallbacksRef.current.onStreamStart?.(),
+    onStreamComplete: () => chatCallbacksRef.current.onStreamComplete?.(),
+  });
+
+  // Canvas hook - 传入 messages 用于实时监听
+  const canvas = useCanvas({ threadId, messages: chat.messages });
+
+  // 设置 chat 回调（依赖 canvas）
+  useEffect(() => {
+    chatCallbacksRef.current = {
+      onArtifactDetected: (content: string) => {
+        // 首次检测到代码时，创建乐观版本用于展示代码生成过程
+        if (!canvas.selectedVersion || canvas.selectedVersion === 0) {
+          console.log("[UnifiedChat] 检测到代码生成，创建乐观版本");
+          canvas.createOptimisticVersion();
+        }
+
+        // 启用生成模式，允许 messages 监听
+        canvas.setIsGenerating(true);
+
+        // 确保在更新代码前禁止沙箱渲染
+        canvas.setShouldSendToSandbox(false);
+
+        // 使用合并逻辑，保留未修改的文件
+        canvas.mergeAndSetGeneratedCode(content);
+      },
+      onStreamStart: () => {
+        console.log("[UnifiedChat] 流式响应开始");
+        // 启用生成模式
+        canvas.setIsGenerating(true);
+        canvas.setShouldSendToSandbox(false);
+      },
+      onStreamComplete: async () => {
+        // 流式响应完成
+        if (canvas.artifact && canvas.artifact.files.length > 0) {
+          console.log("[UnifiedChat] 代码生成完成，保存到后端");
+
+          // 调用保存接口
+          try {
+            const response = await fetch("/api/artifact/save", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                threadId,
+                files: canvas.artifact.files.map((f) => ({
+                  path: f.path,
+                  content: f.content,
+                })),
+              }),
+            });
+
+            if (response.ok) {
+              const result = await response.json();
+              console.log("[UnifiedChat] 保存成功:", result);
+
+              // 刷新版本列表
+              await canvas.refreshVersionList();
+              console.log("[UnifiedChat] 版本列表刷新完成");
+
+              // 生成完成，禁用 messages 监听（切换为查看历史模式）
+              canvas.setIsGenerating(false);
+
+              // 允许发送到沙箱渲染
+              canvas.setShouldSendToSandbox(true);
+            } else {
+              console.error("[UnifiedChat] 保存失败:", await response.text());
+              // 失败也要禁用生成模式
+              canvas.setIsGenerating(false);
+            }
+          } catch (error) {
+            console.error("[UnifiedChat] 保存出错:", error);
+            // 错误也要禁用生成模式
+            canvas.setIsGenerating(false);
+          }
+        } else {
+          console.log("[UnifiedChat] 代码生成完成但没有 artifact");
+          // 没有 artifact 也要禁用生成模式
+          canvas.setIsGenerating(false);
+        }
+      },
+    };
+  }, [canvas, threadId]);
 
   // 全屏切换处理
   const handleFullscreenToggle = useCallback(() => {
@@ -114,68 +206,6 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isFullscreen]);
-
-  // Chat hook with artifact detection
-  const chat = useChat({
-    threadId,
-    mcpConfigId: selectedMcpId,
-    onArtifactDetected: (content: string) => {
-      // 首次检测到代码时，创建乐观版本用于展示代码生成过程
-      if (!canvas.selectedVersion || canvas.selectedVersion === 0) {
-        console.log("[UnifiedChat] 检测到代码生成，创建乐观版本");
-        canvas.createOptimisticVersion();
-      }
-
-      // 确保在更新代码前禁止沙箱渲染
-      canvas.setShouldSendToSandbox(false);
-
-      // 使用合并逻辑，保留未修改的文件
-      canvas.mergeAndSetGeneratedCode(content);
-    },
-    onStreamStart: () => {
-      console.log("[UnifiedChat] 流式响应开始");
-      canvas.setShouldSendToSandbox(false);
-    },
-    onStreamComplete: async () => {
-      // 流式响应完成
-      if (canvas.artifact && canvas.artifact.files.length > 0) {
-        console.log("[UnifiedChat] 代码生成完成，保存到后端");
-
-        // 调用保存接口
-        try {
-          const response = await fetch("/api/artifact/save", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              threadId,
-              files: canvas.artifact.files.map((f) => ({
-                path: f.path,
-                content: f.content,
-              })),
-            }),
-          });
-
-          if (response.ok) {
-            const result = await response.json();
-            console.log("[UnifiedChat] 保存成功:", result);
-
-            // 刷新版本列表
-            await canvas.refreshVersionList();
-            console.log("[UnifiedChat] 版本列表刷新完成");
-
-            // 允许发送到沙箱渲染
-            canvas.setShouldSendToSandbox(true);
-          } else {
-            console.error("[UnifiedChat] 保存失败:", await response.text());
-          }
-        } catch (error) {
-          console.error("[UnifiedChat] 保存出错:", error);
-        }
-      } else {
-        console.log("[UnifiedChat] 代码生成完成但没有 artifact");
-      }
-    },
-  });
 
   // Sandbox message listener
   useEffect(() => {

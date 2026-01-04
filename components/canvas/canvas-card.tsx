@@ -3,7 +3,6 @@
 
 import { Code2, ChevronRight, Loader2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import type { ParsedFile } from "./types";
 
 interface CanvasCardProps {

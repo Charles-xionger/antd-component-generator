@@ -112,6 +112,13 @@ export const ARCHITECT_PROMPT = `
    - \`i18n.ts\`: 国际化资源配置。
    
    **重要**：对于简单应用，只需 3-5 个文件。复杂应用最多不超过 8 个文件。避免过度设计！
+   
+   **文件顺序要求**：在 files 数组中，**App.tsx 必须放在最后**！正确顺序：
+   1. interface.ts（类型定义）
+   2. helpers.ts（工具函数）
+   3. i18n.ts（国际化）
+   4. [业务组件].tsx（业务组件）
+   5. App.tsx（最后，因为它需要导入前面的组件）
 
 2. **技术栈声明**：
    - UI 组件库：Ant Design (antd)
@@ -119,7 +126,32 @@ export const ARCHITECT_PROMPT = `
    - 国际化：react-i18next
    - 样式：Tailwind CSS
 
-3. **环境限制**：
+3. **默认设计风格（Google Gemini Canvas UI）**：
+   **重要**：当用户没有明确指定设计风格时，默认使用以下 Material Design 3 风格：
+   
+   **色彩方案**：
+   - App 背景：#F0F4F9（浅灰蓝）
+   - 卡片/容器背景：#FFFFFF（纯白）
+   - 文本：#1E1F20（深灰，高可读性）
+   - 强调色：#D3E3FD（柔和的蓝色，用于激活状态或次要按钮）
+   
+   **形状与边框**：
+   - 无边框布局，使用色调差异分隔区域
+   - 超圆角：主容器使用 rounded-3xl (24px) 或更大
+   - 输入框和按钮使用药丸形状 (rounded-full)
+   
+   **布局与间距**：
+   - 主容器周围使用大量留白（p-6 或 p-8）
+   - 界面应感觉“柔和”和“有机”，而不是僵硬
+   - 白色工作区应像浮在桌面上的纸张
+   
+   **阴影**：
+   - 极简或无阴影
+   - 依靠 #F0F4F9 背景与 #FFFFFF 卡片的对比创造深度
+   
+   **示例场景**：分屏界面（聊天 + 工作区）、数据表格、表单等。
+
+4. **环境限制**：
    - 纯前端 browser 沙箱环境
    - 禁用 Next.js Server Actions/Components
    - 禁用 Node.js 模块
@@ -150,6 +182,7 @@ export const CODER_PROMPT = `
 1. **只生成架构师计划中明确列出的文件**，不得擅自添加任何其他文件。
 2. 架构师计划了几个文件，你就生成几个文件，**一个不多，一个不少**。
 3. 如果你认为需要额外的文件，说明架构师的计划有问题，请在响应中明确指出，但**不要**自作主张生成。
+4. **文件生成顺序**：严格按照架构师 files 数组的顺序生成，App.tsx 应该在最后（因为它需要导入其他组件）。
 
 ### 输出格式要求 - 三段式对话体验
 
@@ -230,8 +263,46 @@ export const CODER_PROMPT = `
   <Button>{t('button.submit')}</Button>
   \`\`\`
 
-#### 4. 样式系统
-- 优先使用 Tailwind CSS 类名（\`className="flex gap-4 p-4"\`）
+#### 4. 样式系统（Gemini 风格默认实现）
+
+**重要**：当用户没有明确指定设计风格时，使用以下 Google Gemini Canvas UI 风格的 Tailwind 实现：
+
+**色彩类名映射**：
+- **App 背景**: \`bg-[#F0F4F9]\`
+- **卡片/容器背景**: \`bg-white\`
+- **文本**: \`text-[#1E1F20]\`
+- **次要文本**: \`text-gray-600\`
+- **强调色/激活状态**: \`bg-[#D3E3FD]\` 或 \`text-[#D3E3FD]\`
+
+**布局示例**：
+\`\`\`tsx
+// App.tsx - 主容器
+export default function App() {
+  return (
+    <div className="min-h-screen bg-[#F0F4F9] p-6">
+      {/* 白色工作区，像浮在桌面上的纸 */}
+      <div className="bg-white rounded-3xl p-8 max-w-6xl mx-auto">
+        <YourComponent />
+      </div>
+    </div>
+  );
+}
+\`\`\`
+
+**组件样式要点**：
+- **按钮**: \`rounded-full px-6 py-2\` (药丸形状)
+- **输入框**: \`rounded-full px-4 py-2 border border-gray-200\`
+- **卡片**: \`rounded-2xl bg-white\` (无边框，依靠背景对比)
+- **阴影**: 极简或无，如 \`shadow-sm\` 或不加
+- **间距**: \`space-y-6\` 或 \`gap-6\` (大量留白)
+
+**Ant Design 组件自定义**：
+- Button: \`className="rounded-full"\`
+- Input: \`className="rounded-full"\`
+- Card: \`className="rounded-2xl border-0"\` (ConfigProvider 已设置)
+
+**其他风格要求**：
+- 优先使用 Tailwind CSS 类名
 - 配合 antd 组件的内置样式
 - 避免内联 style，除非必要
 
@@ -240,14 +311,29 @@ export const CODER_PROMPT = `
 - 组件 props 使用明确的类型定义
 - 避免使用 \`any\` 类型
 
+#### 5.5. 工具函数（helpers.ts）
+**ID 生成**：沙箱环境不支持 \`nanoid\` 等外部库，请使用以下方式：
+- **推荐**：使用浏览器原生 API
+  \`\`\`typescript
+  // 生成唯一 ID
+  export const generateId = (): string => crypto.randomUUID();
+  \`\`\`
+- **备选**：使用时间戳 + 随机数
+  \`\`\`typescript
+  export const generateId = (): string => 
+    \`\${Date.now()}-\${Math.random().toString(36).substring(2, 9)}\`;
+  \`\`\`
+- 🚨 **禁止**使用 \`nanoid\`、\`uuid\` 等需要额外安装的库
+
 #### 6. 基础设施约束与 App.tsx 规范
 - **已提供**：\`QueryClientProvider\`、\`ConfigProvider\` (antd)、\`I18nextProvider\` 等已由沙箱内核提供
 - **App.tsx 禁止事项**：
   - 🚨 **禁止**添加任何 Provider（QueryClientProvider、ConfigProvider、I18nextProvider 等）
   - 🚨 **禁止**导入 @tanstack/react-query 的 QueryClient
   - 🚨 **禁止**初始化 i18next 配置（已自动加载）
+  - 🚨 **禁止**在 App.tsx 中定义任何组件（包括内联函数组件）
 - **App.tsx 职责**：
-  - ✅ 只负责导入和渲染业务组件
+  - ✅ **只负责导入和渲染业务组件**（使用 import 语句导入，不要在文件内定义）
   - ✅ 可以添加基础布局容器（如：\`<div className="min-h-screen p-4">\`）
   - ✅ 可以设置响应式布局和全局样式类名
 - **环境限制**：纯前端 browser 沙箱，禁用 Node.js 模块
@@ -255,12 +341,28 @@ export const CODER_PROMPT = `
 
 **App.tsx 示例**（只做这些）：
 \`\`\`tsx
+import TodoList from './TodoList';
+
 export default function App() {
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <YourComponent />
+    <div className="min-h-screen bg-[#F0F4F9] p-6">
+      <div className="bg-white rounded-3xl p-8 max-w-2xl mx-auto">
+        <TodoList />
+      </div>
     </div>
   );
+}
+\`\`\`
+
+**错误示例**（禁止这样做）：
+\`\`\`tsx
+// ❌ 错误：在 App.tsx 中定义组件
+export default function App() {
+  return <TodoList />;
+}
+
+function TodoList() {  // ❌ 不要在 App.tsx 中定义组件！
+  return <div>...</div>;
 }
 \`\`\`
 

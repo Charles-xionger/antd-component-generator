@@ -217,10 +217,10 @@ export function parseArtifactFromContent(content: string): Artifact | null {
     return { id, title, files: [] };
   }
 
-  console.log(
-    `[parseArtifact] 成功解析 ${files.length} 个文件:`,
-    files.map((f) => f.path)
-  );
+  // console.log(
+  //   `[parseArtifact] 成功解析 ${files.length} 个文件:`,
+  //   files.map((f) => f.path)
+  // );
   return { id, title, files };
 }
 

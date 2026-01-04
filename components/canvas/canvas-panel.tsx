@@ -3,9 +3,17 @@
 
 import { forwardRef, useEffect, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { X, Copy, Check } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { CodePanel } from "./code-panel";
 import { PreviewPanel } from "./preview-panel";
@@ -57,6 +65,12 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [currentLanguage, setCurrentLanguage] = useState<"zh" | "en">("zh");
+
+    // 分享对话框状态
+    const [shareDialogOpen, setShareDialogOpen] = useState(false);
+    const [shareUrl, setShareUrl] = useState("");
+    const [isCreatingShare, setIsCreatingShare] = useState(false);
+    const [copiedShareUrl, setCopiedShareUrl] = useState(false);
 
     // 切换全屏 - 调用父组件回调
     const toggleFullscreen = useCallback(() => {
@@ -122,6 +136,56 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
       },
       [iframeRef]
     );
+
+    // 处理分享
+    const handleShare = useCallback(async () => {
+      if (!selectedVersion || !versions.length) {
+        toast.error("请先生成代码");
+        return;
+      }
+
+      // 获取当前版本的 ID
+      const currentVersion = versions.find(
+        (v) => v.versionNumber === selectedVersion
+      );
+      if (!currentVersion) {
+        toast.error("版本不存在");
+        return;
+      }
+
+      setIsCreatingShare(true);
+      try {
+        const response = await fetch("/api/share", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            artifactVersionId: currentVersion.id,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error("创建分享失败");
+        }
+
+        const data = await response.json();
+        setShareUrl(data.shareUrl);
+        setShareDialogOpen(true);
+        toast.success("分享链接已生成");
+      } catch (error) {
+        console.error("Failed to create share:", error);
+        toast.error("创建分享失败，请稍后重试");
+      } finally {
+        setIsCreatingShare(false);
+      }
+    }, [selectedVersion, versions]);
+
+    // 复制分享链接
+    const copyShareUrl = useCallback(() => {
+      navigator.clipboard.writeText(shareUrl);
+      setCopiedShareUrl(true);
+      toast.success("链接已复制到剪贴板");
+      setTimeout(() => setCopiedShareUrl(false), 2000);
+    }, [shareUrl]);
 
     // 沙箱就绪且应该发送文件时才发送（审查通过后）
     useEffect(() => {
@@ -192,13 +256,10 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
                 <TabsTrigger value="code">Code</TabsTrigger>
               </TabsList>
 
-              {/* Artifact Title */}
-              {artifact && (
+              {/* Version Number */}
+              {selectedVersion && (
                 <div className="text-sm text-muted-foreground">
-                  {artifact.title}
-                  {selectedVersion && (
-                    <span className="ml-2 text-xs">v{selectedVersion}</span>
-                  )}
+                  v{selectedVersion}
                 </div>
               )}
 
@@ -231,6 +292,7 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
             isLoadingVersions={isLoadingVersions}
             onLanguageChange={handleLanguageChange}
             currentLanguage={currentLanguage}
+            onShare={handleShare}
           />
         )}
 
@@ -257,6 +319,34 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
             onCopyToClipboard={copyToClipboard}
           />
         </div>
+
+        {/* 分享对话框 */}
+        <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>分享预览链接</DialogTitle>
+              <DialogDescription>
+                复制此链接分享给其他人，他们无需登录即可查看预览效果
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex items-center gap-2 mt-4">
+              <Input value={shareUrl} readOnly className="flex-1" />
+              <Button size="sm" onClick={copyShareUrl} disabled={!shareUrl}>
+                {copiedShareUrl ? (
+                  <>
+                    <Check className="h-4 w-4 mr-1" />
+                    已复制
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-4 w-4 mr-1" />
+                    复制
+                  </>
+                )}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     );
 
