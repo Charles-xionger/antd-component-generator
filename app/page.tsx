@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { useToast } from "@/components/ui/toast";
+import { toast } from "sonner";
 
 interface Thread {
   id: string;
@@ -44,7 +44,6 @@ export default function Home() {
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [threadToDelete, setThreadToDelete] = useState<string | null>(null);
-  const { showToast } = useToast();
 
   // 保存选中的会话到 localStorage
   useEffect(() => {
@@ -75,11 +74,11 @@ export default function Home() {
       }
     } catch (error) {
       console.error("获取会话列表失败:", error);
-      showToast("获取会话列表失败，请稍后重试", "error");
+      toast.error("获取会话列表失败，请稍后重试");
     } finally {
       setIsLoading(false);
     }
-  }, [showToast]);
+  }, []);
 
   // 创建新会话
   const createNewThread = async () => {
@@ -95,13 +94,13 @@ export default function Home() {
       if (data.thread) {
         setThreads((prev) => [data.thread, ...prev]);
         setSelectedThreadId(data.thread.id);
-        showToast("新会话创建成功", "success");
+        toast.success("新会话创建成功");
       } else {
         throw new Error("创建会话响应异常");
       }
     } catch (error) {
       console.error("创建新会话失败:", error);
-      showToast("创建新会话失败，请稍后重试", "error");
+      toast.error("创建新会话失败，请稍后重试");
     }
   };
 
@@ -133,13 +132,13 @@ export default function Home() {
           setSelectedThreadId(undefined);
         }
         // 显示成功消息
-        showToast("会话删除成功", "success");
+        toast.success("会话删除成功");
       } else {
         throw new Error("删除失败");
       }
     } catch (error) {
       console.error("删除会话失败:", error);
-      showToast("删除会话失败，请稍后重试", "error");
+      toast.error("删除会话失败，请稍后重试");
     } finally {
       setDeletingThreadId(null);
       setThreadToDelete(null);
@@ -164,13 +163,13 @@ export default function Home() {
             thread.id === threadId ? { ...thread, title: newTitle } : thread
           )
         );
-        showToast("重命名成功", "success");
+        toast.success("重命名成功");
       } else {
         throw new Error("重命名失败");
       }
     } catch (error) {
       console.error("重命名会话失败:", error);
-      showToast("重命名失败，请稍后重试", "error");
+      toast.error("重命名失败，请稍后重试");
     }
   };
 
@@ -192,13 +191,13 @@ export default function Home() {
             thread.id === threadId ? { ...thread, favorite } : thread
           )
         );
-        showToast(favorite ? "已收藏" : "已取消收藏", "success");
+        toast.success(favorite ? "已收藏" : "已取消收藏");
       } else {
         throw new Error("操作失败");
       }
     } catch (error) {
       console.error("收藏操作失败:", error);
-      showToast("操作失败，请稍后重试", "error");
+      toast.error("操作失败，请稍后重试");
     }
   };
 

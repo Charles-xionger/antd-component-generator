@@ -3,6 +3,8 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Loader2 } from "lucide-react";
+import { SplitPane, Pane } from "react-split-pane";
+import "react-split-pane/styles.css";
 
 // Hooks
 import { useChat } from "@/hooks/use-chat";
@@ -253,66 +255,72 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
   }, [fetchMcpConfigs]);
 
   return (
-    <div className="flex h-full bg-background">
-      {/* Left: Chat Area */}
-      <div className="flex w-[40%] flex-col border-r border-border">
-        {/* Messages */}
-        <div
-          ref={messagesContainerRef}
-          className="flex-1 space-y-4 overflow-y-auto p-4"
-        >
-          {chat.messages.length === 0 && <EmptyState />}
+    <div className="h-full bg-background">
+      <SplitPane direction="horizontal">
+        {/* Left: Chat Area */}
+        <Pane defaultSize="40%" minSize="300px">
+          <div className="flex h-full flex-col border-r border-border">
+            {/* Messages */}
+            <div
+              ref={messagesContainerRef}
+              className="flex-1 space-y-4 overflow-y-auto p-4 custom-scrollbar"
+            >
+              {chat.messages.length === 0 && <EmptyState />}
 
-          {chat.messages.map((message) => (
-            <MessageItem
-              key={message.id}
-              message={message}
-              messages={chat.messages}
-            />
-          ))}
+              {chat.messages.map((message) => (
+                <MessageItem
+                  key={message.id}
+                  message={message}
+                  messages={chat.messages}
+                />
+              ))}
 
-          {chat.isLoading && (
-            <div className="flex justify-start">
-              <div className="flex items-center gap-2 rounded-lg bg-gray-100 px-4 py-2 dark:bg-gray-800">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span className="text-sm text-gray-600 dark:text-gray-400">
-                  思考中...
-                </span>
-              </div>
+              {chat.isLoading && (
+                <div className="flex justify-start">
+                  <div className="flex items-center gap-2 rounded-lg bg-gray-100 px-4 py-2 dark:bg-gray-800">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                      思考中...
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div ref={messagesEndRef} />
             </div>
-          )}
 
-          <div ref={messagesEndRef} />
-        </div>
+            {/* Input Bar */}
+            <InputBar
+              value={chat.input}
+              onChange={chat.setInput}
+              onSubmit={chat.sendMessage}
+              isLoading={chat.isLoading}
+              isCanvasMode={true}
+              images={chat.images}
+              onImagesChange={chat.setImages}
+              mcpConfigs={mcpConfigs}
+              selectedMcpId={selectedMcpId}
+              isMcpLoading={isMcpLoading}
+              onMcpSelect={setSelectedMcpId}
+              onMcpRefresh={fetchMcpConfigs}
+            />
+          </div>
+        </Pane>
 
-        {/* Input Bar */}
-        <InputBar
-          value={chat.input}
-          onChange={chat.setInput}
-          onSubmit={chat.sendMessage}
-          isLoading={chat.isLoading}
-          isCanvasMode={true}
-          images={chat.images}
-          onImagesChange={chat.setImages}
-          mcpConfigs={mcpConfigs}
-          selectedMcpId={selectedMcpId}
-          isMcpLoading={isMcpLoading}
-          onMcpSelect={setSelectedMcpId}
-          onMcpRefresh={fetchMcpConfigs}
-        />
-      </div>
-
-      {/* Right: Canvas Panel (Always visible) */}
-      <div className="flex w-[60%] flex-col">
-        <CanvasPanel
-          canvas={canvas}
-          iframeRef={iframeRef}
-          isSandboxReady={isSandboxReady}
-          sandboxError={sandboxError}
-          onFullscreenToggle={handleFullscreenToggle}
-          onSandboxReset={handleSandboxReset}
-        />
-      </div>
+        {/* Right: Canvas Panel (Always visible) */}
+        <Pane minSize="300px">
+          <div className="flex h-full flex-col">
+            <CanvasPanel
+              canvas={canvas}
+              iframeRef={iframeRef}
+              isSandboxReady={isSandboxReady}
+              sandboxError={sandboxError}
+              onFullscreenToggle={handleFullscreenToggle}
+              onSandboxReset={handleSandboxReset}
+            />
+          </div>
+        </Pane>
+      </SplitPane>
 
       {/* Fullscreen Preview */}
       {isFullscreen && (
