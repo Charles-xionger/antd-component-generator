@@ -18,17 +18,15 @@ export function ThinkingCard({
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
-    <div className="my-3 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 shadow-sm">
+    <div className="my-3 border rounded-lg overflow-hidden bg-card shadow-sm">
       {/* Header */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+        className="w-full px-4 py-3 flex items-center justify-between hover:bg-accent transition-colors"
       >
         <div className="flex items-center gap-2">
           <Lightbulb className="w-4 h-4 text-yellow-500" />
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
-            架构规划
-          </span>
+          <span className="text-sm font-medium">架构规划</span>
           {isStreaming && (
             <span className="flex items-center gap-1 text-xs text-blue-500">
               <span className="animate-pulse">●</span>
@@ -36,24 +34,22 @@ export function ThinkingCard({
             </span>
           )}
           {!isStreaming && (
-            <span className="text-xs text-gray-500 dark:text-gray-400">
-              {duration}
-            </span>
+            <span className="text-xs text-muted-foreground">{duration}</span>
           )}
         </div>
         {isExpanded ? (
-          <ChevronDown className="w-4 h-4 text-gray-500" />
+          <ChevronDown className="w-4 h-4 text-muted-foreground" />
         ) : (
-          <ChevronRight className="w-4 h-4 text-gray-500" />
+          <ChevronRight className="w-4 h-4 text-muted-foreground" />
         )}
       </button>
 
       {/* Content */}
       {isExpanded && (
-        <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+        <div className="px-4 py-3 border-t bg-muted">
           <div className="prose prose-sm dark:prose-invert max-w-none">
             <div
-              className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap"
+              className="text-sm whitespace-pre-wrap"
               dangerouslySetInnerHTML={{
                 __html: formatArchitectPlan(content),
               }}

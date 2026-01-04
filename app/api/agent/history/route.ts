@@ -1,10 +1,19 @@
 import { NextRequest } from "next/server";
 import prisma from "@/lib/database/pirsma";
+import { auth } from "@/lib/auth";
 
 // 获取所有会话列表
 export async function GET() {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const threads = await prisma.thread.findMany({
+      where: {
+        userId: session.user.id,
+      },
       orderBy: {
         updatedAt: "desc",
       },
@@ -31,11 +40,17 @@ export async function GET() {
 // 创建新会话
 export async function POST(request: NextRequest) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { title } = await request.json();
 
     const thread = await prisma.thread.create({
       data: {
         title: title || "新会话",
+        userId: session.user.id,
       },
     });
 

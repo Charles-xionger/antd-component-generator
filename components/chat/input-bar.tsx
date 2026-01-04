@@ -87,7 +87,7 @@ function FileUploadButton({
       />
       <button
         onClick={() => fileInputRef.current?.click()}
-        className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+        className="p-2 text-muted-foreground hover:text-foreground transition-colors"
       >
         <Plus className="h-5 w-5" />
       </button>
@@ -114,7 +114,7 @@ function SettingsButton({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
+          <button className="p-2 text-muted-foreground hover:text-foreground transition-colors">
             <Settings2 className="h-5 w-5" />
           </button>
         </DropdownMenuTrigger>
@@ -130,7 +130,7 @@ function SettingsButton({
             <span>MCP Servers Settings</span>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem className="text-gray-400 cursor-not-allowed">
+          <DropdownMenuItem className="text-muted-foreground cursor-not-allowed">
             More settings coming soon...
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -161,14 +161,12 @@ function SettingsButton({
 
 function ModelSelector() {
   return (
-    <div className="flex items-center gap-1 px-2 py-1.5 ml-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer transition-colors group">
-      <span className="flex items-center justify-center w-5 h-5 rounded border border-gray-300 dark:border-gray-700 text-[10px] font-bold text-gray-500">
+    <div className="flex items-center gap-1 px-2 py-1.5 ml-1 rounded-lg hover:bg-accent cursor-pointer transition-colors group">
+      <span className="flex items-center justify-center w-5 h-5 rounded border text-[10px] font-bold text-muted-foreground">
         G
       </span>
-      <span className="text-sm font-medium text-gray-600 dark:text-gray-400">
-        v0 Pro
-      </span>
-      <ChevronDown className="h-4 w-4 text-gray-400 group-hover:text-gray-600" />
+      <span className="text-sm font-medium text-muted-foreground">v0 Pro</span>
+      <ChevronDown className="h-4 w-4 text-muted-foreground group-hover:text-foreground" />
     </div>
   );
 }
@@ -222,8 +220,8 @@ export function InputBar({
   };
 
   return (
-    <div className="p-4 bg-white dark:bg-gray-900">
-      <div className="relative flex flex-col w-full max-w-4xl mx-auto border border-gray-200 dark:border-gray-800 rounded-2xl bg-white dark:bg-gray-900 shadow-sm transition-all focus-within:shadow-md focus-within:border-gray-300 dark:focus-within:border-gray-700">
+    <div className="p-4 bg-background">
+      <div className="relative flex flex-col w-full max-w-4xl mx-auto border rounded-2xl bg-card shadow-sm transition-all focus-within:shadow-md focus-within:border-ring">
         {/* 图片预览区域 */}
         {images.length > 0 && (
           <div className="flex flex-wrap gap-2 px-4 pt-4">
@@ -233,13 +231,13 @@ export function InputBar({
                   src={img.dataUrl}
                   alt={`upload-${index}`}
                   fill
-                  className="object-cover rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-90"
+                  className="object-cover rounded-lg border cursor-pointer hover:opacity-90"
                   onClick={() => window.open(img.dataUrl, "_blank")}
                   unoptimized={img.dataUrl.startsWith("data:")}
                 />
                 <button
                   onClick={() => removeImage(index)}
-                  className="absolute -top-1.5 -right-1.5 bg-gray-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="absolute -top-1.5 -right-1.5 bg-muted-foreground text-background rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -258,7 +256,7 @@ export function InputBar({
             onKeyDown={handleKeyDown}
             placeholder={placeholder || "Ask a follow-up..."}
             disabled={isLoading}
-            className="w-full bg-transparent border-none outline-none text-gray-700 dark:text-gray-200 placeholder-gray-400 text-sm py-1 resize-none min-h-[24px] max-h-[200px] overflow-y-auto"
+            className="w-full bg-transparent border-none outline-none text-foreground placeholder-muted-foreground text-sm py-1 resize-none min-h-[24px] max-h-[200px] overflow-y-auto"
           />
         </div>
 
@@ -281,8 +279,8 @@ export function InputBar({
             disabled={(!value.trim() && images.length === 0) || isLoading}
             className={`flex items-center justify-center w-8 h-8 rounded-lg transition-all ${
               (!value.trim() && images.length === 0) || isLoading
-                ? "bg-gray-100 dark:bg-gray-800 text-gray-300"
-                : "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-gray-700"
+                ? "bg-muted text-muted-foreground"
+                : "bg-muted text-foreground hover:bg-accent"
             }`}
           >
             {isLoading ? (

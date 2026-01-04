@@ -15,7 +15,7 @@ export const FullscreenPreview = forwardRef<
   FullscreenPreviewProps
 >(function FullscreenPreview({ isSandboxReady, sandboxError, onClose }, ref) {
   return (
-    <div className="fixed inset-0 z-9999 bg-gray-900 flex flex-col">
+    <div className="fixed inset-0 z-9999 bg-background flex flex-col">
       {/* 退出按钮 */}
       <button
         onClick={onClose}
@@ -26,7 +26,7 @@ export const FullscreenPreview = forwardRef<
       </button>
 
       {/* Preview 容器 */}
-      <div className="absolute inset-0 bg-gray-800">
+      <div className="absolute inset-0 bg-muted">
         <div className="w-full h-full bg-white relative">
           {sandboxError && (
             <div className="absolute top-0 left-0 right-0 bg-red-100 border-b border-red-400 text-red-700 px-3 py-2 text-xs z-10">

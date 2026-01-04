@@ -46,8 +46,8 @@ export function CodePanel({
       }`}
     >
       {/* File Explorer Sidebar */}
-      <div className="w-56 bg-muted border-r flex flex-col">
-        <div className="px-3 py-2 text-xs font-medium border-b flex items-center justify-between">
+      <div className="w-56 bg-secondary border-r flex flex-col">
+        <div className="px-3 py-2 text-xs font-medium text-secondary-foreground border-b flex items-center justify-between">
           <span>File explorer</span>
           {versions.length > 0 && (
             <Select
@@ -121,8 +121,8 @@ export function CodePanel({
         {selectedFile ? (
           <>
             {/* File Tab */}
-            <div className="bg-muted px-4 py-2 border-b flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm">
+            <div className="bg-secondary px-4 py-2 border-b flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm text-secondary-foreground">
                 <FileIcon language={selectedFile.language} />
                 <span className="font-mono">
                   {selectedFile.path.split("/").pop()}
@@ -150,8 +150,8 @@ export function CodePanel({
               </Button>
             </div>
             {/* Code Content */}
-            <div className="flex-1 overflow-auto bg-muted/30">
-              <pre className="p-4 text-sm whitespace-pre font-mono leading-relaxed">
+            <div className="flex-1 overflow-auto bg-secondary/30">
+              <pre className="p-4 text-sm whitespace-pre font-mono leading-relaxed text-foreground">
                 <code>{selectedFile.content}</code>
               </pre>
             </div>

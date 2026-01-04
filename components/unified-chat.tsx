@@ -277,7 +277,7 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
 
               {chat.isLoading && (
                 <div className="flex justify-start">
-                  <div className="flex items-center gap-2 rounded-lg bg-gray-100 px-4 py-2 dark:bg-gray-800">
+                  <div className="flex items-center gap-2 rounded-lg bg-muted px-4 py-2">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     <span className="text-sm text-gray-600 dark:text-gray-400">
                       思考中...

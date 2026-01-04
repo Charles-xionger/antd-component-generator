@@ -7,7 +7,6 @@ import type { DeviceType } from "./types";
 interface PreviewPanelProps {
   isVisible: boolean;
   selectedDevice: DeviceType;
-  sandboxError: string | null;
   isSandboxReady: boolean;
 }
 
@@ -23,10 +22,7 @@ function getDeviceSize(device: DeviceType) {
 }
 
 export const PreviewPanel = forwardRef<HTMLIFrameElement, PreviewPanelProps>(
-  function PreviewPanel(
-    { isVisible, selectedDevice, sandboxError, isSandboxReady },
-    ref
-  ) {
+  function PreviewPanel({ isVisible, selectedDevice, isSandboxReady }, ref) {
     const deviceSize = getDeviceSize(selectedDevice);
 
     return (
@@ -44,12 +40,6 @@ export const PreviewPanel = forwardRef<HTMLIFrameElement, PreviewPanelProps>(
             maxHeight: "100%",
           }}
         >
-          {sandboxError && (
-            <div className="absolute top-0 left-0 right-0 bg-destructive/10 border-b border-destructive/50 text-destructive px-3 py-2 text-xs z-10">
-              <div className="font-semibold">渲染错误:</div>
-              <div>{sandboxError}</div>
-            </div>
-          )}
           {!isSandboxReady && (
             <div className="absolute inset-0 flex items-center justify-center bg-background z-10">
               <div className="text-center">

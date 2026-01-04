@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import { CodePanel } from "./code-panel";
 import { PreviewPanel } from "./preview-panel";
 import { PreviewToolbar } from "./preview-toolbar";
@@ -160,6 +161,16 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
       return () => window.removeEventListener("keydown", handleKeyDown);
     }, [isFullscreen]);
 
+    // 监听沙箱错误并显示 toast
+    useEffect(() => {
+      if (sandboxError) {
+        toast.error("渲染错误", {
+          description: sandboxError,
+          duration: 5000,
+        });
+      }
+    }, [sandboxError]);
+
     // 渲染面板内容
     const panelContent = (
       <div
@@ -230,7 +241,6 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
             ref={iframeRef}
             isVisible={activeTab === "preview"}
             isSandboxReady={isSandboxReady}
-            sandboxError={sandboxError}
             selectedDevice={selectedDevice}
           />
           {/* Code Panel */}
@@ -255,7 +265,7 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
       return (
         <>
           {/* 保留原位置的占位符，避免布局跳动 */}
-          <div ref={ref} className="h-full bg-gray-900" />
+          <div ref={ref} className="h-full bg-background" />
           {createPortal(panelContent, document.body)}
         </>
       );

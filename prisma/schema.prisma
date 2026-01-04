@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client"
   output   = "../app/generated/prisma"
@@ -13,6 +7,57 @@ datasource db {
   provider = "postgresql"
 }
 
+// ===== Auth.js 认证表 =====
+model User {
+  id            String    @id @default(uuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+  threads       Thread[]  // 用户的所有会话
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ===== 应用业务表 =====
 model Thread {
   id        String   @id @default(uuid())
   title     String
@@ -20,64 +65,94 @@ model Thread {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // 关联用户
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   // 关联：一个对话对应一个项目工件
   artifact  Artifact?
+  
+  @@index([userId])
 }
 
-// 2. 项目工件 (Canvas 里的那个“项目”)
 model Artifact {
-  id        String   @id @default(uuid())
-  
-  // 外键关联 Thread
-  threadId  String   @unique // 保证 1对1 关系
-  thread    Thread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
-
-  // 版本历史
+  id        String            @id @default(uuid())
+  threadId  String            @unique
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  thread    Thread            @relation(fields: [threadId], references: [id], onDelete: Cascade)
   versions  ArtifactVersion[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 }
 
-// 3. 代码版本快照
 model ArtifactVersion {
-  id             String   @id @default(uuid())
-  
-  artifactId     String
-  artifact       Artifact @relation(fields: [artifactId], references: [id], onDelete: Cascade)
-  
-  versionNumber  Int      // 版本号：1, 2, 3...
-  description    String?  // Agent 的 commit message，如 "Added login page"
-  
-  files          File[]   // 该版本下的文件列表
+  id            String   @id @default(uuid())
+  artifactId    String
+  versionNumber Int
+  description   String?
+  createdAt     DateTime @default(now())
+  artifact      Artifact @relation(fields: [artifactId], references: [id], onDelete: Cascade)
+  files         File[]
 
-  createdAt      DateTime @default(now())
-  
-  // 索引优化：方便按项目查最新版本
   @@index([artifactId, versionNumber])
 }
 
-// 4. 具体文件内容
 model File {
   id                String          @id @default(uuid())
-  
   artifactVersionId String
+  path              String
+  content           String
   artifactVersion   ArtifactVersion @relation(fields: [artifactVersionId], references: [id], onDelete: Cascade)
-  
-  path              String          // 例如 "/app/page.tsx"
-  content           String          @db.Text // 代码内容
-  
-  @@unique([artifactVersionId, path]) // 同一版本下路径唯一
+
+  @@unique([artifactVersionId, path])
 }
 
 /// MCP 服务器配置表
 model MCPConfig {
   id          String   @id @default(uuid())
-  name        String   // MCP 名称（如 drawing、weather 等）
-  url         String   // MCP 服务地址
-  description String?  // 描述
-  enabled     Boolean  @default(true) // 是否启用
+  name        String
+  url         String
+  description String?
+  enabled     Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
 
+model checkpoint_blobs {
+  thread_id     String
+  checkpoint_ns String @default("")
+  channel       String
+  version       String
+  type          String
+  blob          Bytes?
+
+  @@id([thread_id, checkpoint_ns, channel, version])
+}
+
+model checkpoint_migrations {
+  v Int @id
+}
+
+model checkpoint_writes {
+  thread_id     String
+  checkpoint_ns String  @default("")
+  checkpoint_id String
+  task_id       String
+  idx           Int
+  channel       String
+  type          String?
+  blob          Bytes
+
+  @@id([thread_id, checkpoint_ns, checkpoint_id, task_id, idx])
+}
+
+model checkpoints {
+  thread_id            String
+  checkpoint_ns        String  @default("")
+  checkpoint_id        String
+  parent_checkpoint_id String?
+  type                 String?
+  checkpoint           Json
+  metadata             Json    @default("{}")
+
+  @@id([thread_id, checkpoint_ns, checkpoint_id])
+}

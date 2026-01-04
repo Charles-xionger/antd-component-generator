@@ -25,17 +25,15 @@ export function CodeGenerationCard({
   const title = artifact?.title || "代码生成";
 
   return (
-    <div className="my-3 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 shadow-sm">
+    <div className="my-3 border rounded-lg overflow-hidden bg-card shadow-sm">
       {/* Header */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+        className="w-full px-4 py-3 flex items-center justify-between hover:bg-accent transition-colors"
       >
         <div className="flex items-center gap-2">
           <Code2 className="w-4 h-4 text-blue-500" />
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
-            {title}
-          </span>
+          <span className="text-sm font-medium text-foreground">{title}</span>
           {isStreaming && (
             <span className="flex items-center gap-1 text-xs text-blue-500">
               <span className="animate-pulse">●</span>
@@ -43,39 +41,39 @@ export function CodeGenerationCard({
             </span>
           )}
           {!isStreaming && (
-            <span className="text-xs text-gray-500 dark:text-gray-400">
+            <span className="text-xs text-muted-foreground">
               {fileCount} 个文件
             </span>
           )}
         </div>
         <div className="flex items-center gap-2">
           {isExpanded ? (
-            <ChevronDown className="w-4 h-4 text-gray-500" />
+            <ChevronDown className="w-4 h-4 text-muted-foreground" />
           ) : (
-            <ChevronRight className="w-4 h-4 text-gray-500" />
+            <ChevronRight className="w-4 h-4 text-muted-foreground" />
           )}
         </div>
       </button>
 
       {/* Content */}
       {isExpanded && (
-        <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+        <div className="px-4 py-3 border-t bg-muted">
           {artifact && artifact.files.length > 0 ? (
             <div className="space-y-2">
-              <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <div className="text-xs font-medium text-foreground mb-2">
                 📁 生成的文件：
               </div>
               <div className="space-y-1">
                 {artifact.files.map((file, idx) => (
                   <div
                     key={idx}
-                    className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700"
+                    className="flex items-center gap-2 px-3 py-2 bg-background rounded border"
                   >
                     <FileCode className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                    <span className="text-xs font-mono text-gray-700 dark:text-gray-300 flex-1">
+                    <span className="text-xs font-mono text-foreground flex-1">
                       {file.path}
                     </span>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                    <span className="text-xs text-muted-foreground">
                       {file.content.split("\n").length} 行
                     </span>
                   </div>
@@ -83,7 +81,7 @@ export function CodeGenerationCard({
               </div>
             </div>
           ) : (
-            <div className="text-xs text-gray-500 dark:text-gray-400 text-center py-2">
+            <div className="text-xs text-muted-foreground text-center py-2">
               {isStreaming ? "正在生成文件..." : "暂无文件"}
             </div>
           )}
