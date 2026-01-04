@@ -258,7 +258,12 @@ export function useChat(options: UseChatOptions = {}) {
                 }
               } else if (data.type === "architect_complete") {
                 // ARCHITECT 完成，创建新的 assistant 消息用于 CODER
-                console.log("[useChat] 检测到 ARCHITECT 完成，创建新消息");
+                console.log("[useChat] ✅ 检测到 ARCHITECT 完成事件", {
+                  当前消息数: messages.length,
+                  当前assistant内容长度: assistantContent.length,
+                  包含architectPlan:
+                    assistantContent.includes("</architectPlan>"),
+                });
 
                 const newAssistantMessage: Message = {
                   id: (Date.now() + 2).toString(),
@@ -272,6 +277,8 @@ export function useChat(options: UseChatOptions = {}) {
                 // 更新当前消息引用和内容
                 assistantMessage = newAssistantMessage;
                 assistantContent = "";
+
+                console.log("[useChat] 已创建新消息用于 CODER");
               } else if (data.type === "tool_start") {
                 // 使用 run_id 作为唯一标识符
                 const toolCallId =

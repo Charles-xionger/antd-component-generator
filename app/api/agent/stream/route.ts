@@ -183,9 +183,6 @@ export async function POST(request: NextRequest) {
               // 注意：Architect 消息已经用 <architectPlan> 标签包裹
               // 不再需要过滤，前端会优雅地渲染为卡片
 
-              // 累积内容用于检测标签闭合
-              accumulatedContent += content;
-
               const chunk = encoder.encode(
                 `data: ${JSON.stringify({
                   type: "content",
@@ -195,13 +192,21 @@ export async function POST(request: NextRequest) {
               );
               controller.enqueue(chunk);
 
+              // 累积内容用于检测标签闭合
+              accumulatedContent += content;
+
               // 检测 ARCHITECT 是否完成（标签闭合）
+              // 注意：先发送内容，再检测闭合，确保前端能收到完整的 ARCHITECT 内容
               if (
                 !hasArchitectCompleted &&
                 accumulatedContent.includes("</architectPlan>")
               ) {
                 hasArchitectCompleted = true;
-                console.log("[Stream] ARCHITECT 完成，发送分离事件");
+                console.log("[Stream] ✅ ARCHITECT 完成检测:", {
+                  累积内容长度: accumulatedContent.length,
+                  包含闭合标签: accumulatedContent.includes("</architectPlan>"),
+                  当前chunk: content.substring(0, 50),
+                });
 
                 // 发送 ARCHITECT 完成事件
                 const architectCompleteChunk = encoder.encode(

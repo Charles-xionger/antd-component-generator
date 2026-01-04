@@ -85,10 +85,17 @@ export function extractArchitectOpeningText(content: string): string | null {
 
 /**
  * 提取 architectPlan 的结束语（标签之后的内容）
+ * 修复：如果后面还有 boltArtifact 标签，不提取（避免把 coder 的开场白当作 architect 的结束语）
  */
 export function extractArchitectClosingText(content: string): string | null {
   // 必须有完整的闭合标签才提取结束语
   if (!content.includes("</architectPlan>")) {
+    return null;
+  }
+
+  // 如果消息中同时包含 boltArtifact（完整的 architect → coder 流程）
+  // 则不提取 architect 的结束语，因为那部分内容是 coder 的开场白
+  if (content.includes("<boltArtifact")) {
     return null;
   }
 
