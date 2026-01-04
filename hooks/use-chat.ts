@@ -9,6 +9,10 @@ export interface Message {
   content: string;
   hasArtifact?: boolean;
   toolCalls?: ToolCall[];
+  images?: Array<{
+    dataUrl: string;
+    mime_type: string;
+  }>;
 }
 
 export interface ToolCall {
@@ -400,7 +404,14 @@ export function useChat(options: UseChatOptions = {}) {
 interface RawMessage {
   id?: string;
   type: string;
-  content: string | Array<{ text?: string }>;
+  content:
+    | string
+    | Array<{
+        type?: string;
+        text?: string;
+        source_type?: string;
+        data?: string;
+      }>;
   toolCalls?: Array<{
     id?: string;
     name: string;
@@ -443,14 +454,31 @@ function formatMessagesFromHistory(rawMessages: RawMessage[]): Message[] {
       role = "assistant";
     }
 
-    // Extract content
+    // Extract content and images
     let content = "";
+    let images: Array<{ dataUrl: string; mime_type: string }> | undefined;
+
     if (typeof msg.content === "string") {
       content = msg.content;
     } else if (Array.isArray(msg.content)) {
-      content = msg.content
-        .map((c: { text?: string }) => c.text || "")
-        .join("");
+      // 提取文本内容
+      const textParts = msg.content
+        .filter((c) => c.type === "text" || c.text)
+        .map((c) => c.text || "")
+        .filter(Boolean);
+      content = textParts.join("");
+
+      // 提取图片内容
+      const imageParts = msg.content.filter(
+        (c) => c.type === "image" && c.source_type === "base64" && c.data
+      );
+
+      if (imageParts.length > 0) {
+        images = imageParts.map((img) => ({
+          dataUrl: `data:image/png;base64,${img.data}`,
+          mime_type: "image/png",
+        }));
+      }
     }
 
     // 🚫 只过滤纯内部消息（Supervisor 路由决策）
@@ -486,7 +514,7 @@ function formatMessagesFromHistory(rawMessages: RawMessage[]): Message[] {
     }
 
     // 只有有内容或有 tool calls 的消息才显示
-    if (content || (toolCalls && toolCalls.length > 0)) {
+    if (content || images || (toolCalls && toolCalls.length > 0)) {
       const hasArtifact = content.includes("<boltArtifact");
       formattedMessages.push({
         id: msg.id || `msg-${formattedMessages.length}`,
@@ -494,6 +522,7 @@ function formatMessagesFromHistory(rawMessages: RawMessage[]): Message[] {
         content,
         hasArtifact,
         toolCalls,
+        images,
       });
     }
   }

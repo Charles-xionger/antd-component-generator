@@ -2,14 +2,6 @@
 import { useMemo } from "react";
 import type { Artifact, ParsedFile } from "@/components/canvas";
 
-// 审查结果类型
-export type ReviewResult = "approve" | "reject" | null;
-
-export interface ReviewResultData {
-  result: ReviewResult;
-  reason?: string;
-}
-
 // Architect 规划类型
 export interface ArchitectPlan {
   mode: "create" | "modify";
@@ -23,10 +15,8 @@ export interface ArchitectPlan {
 export interface ParsedMessageData {
   artifact: Artifact | null;
   architectPlan: ArchitectPlan | null;
-  reviewResult: ReviewResultData;
   isArchitectMessage: boolean;
   isCodingMessage: boolean;
-  needsModification: boolean;
   // 三段式内容 - 代码生成
   openingText: string | null; // 开场白
   closingText: string | null; // 结束语
@@ -136,25 +126,6 @@ export function extractArchitectPlanContent(content: string): string | null {
   }
 
   return null;
-}
-
-/**
- * 解析审查结果
- */
-function parseReviewResult(content: string): ReviewResultData {
-  const match = content.match(/<reviewer_result>([\s\S]*?)<\/reviewer_result>/);
-  if (match) {
-    const result = match[1].trim();
-    if (result.toUpperCase().startsWith("APPROVE")) {
-      return { result: "approve" };
-    } else if (result.toUpperCase().startsWith("REJECT")) {
-      return { result: "reject", reason: result.replace(/^REJECT:\s*/i, "") };
-    }
-  }
-  if (content.includes("APPROVE")) return { result: "approve" };
-  const rejectMatch = content.match(/REJECT:\s*(.+)/);
-  if (rejectMatch) return { result: "reject", reason: rejectMatch[1] };
-  return { result: null };
 }
 
 /**
@@ -285,17 +256,6 @@ function parseArchitectPlan(content: string): ArchitectPlan | null {
 }
 
 /**
- * 检查是否需要修改（审查未通过）
- */
-function needsModification(
-  content: string,
-  reviewResult: ReviewResult
-): boolean {
-  if (reviewResult === "reject") return true;
-  return content.includes("REJECT:") || content.includes("需要修改");
-}
-
-/**
  * 合并历史 artifact 和新 artifact（乐观更新）
  * 用于在 modify 模式下保留未修改的文件
  */
@@ -349,27 +309,16 @@ export function useMessageParser(
     return parseArchitectPlan(content);
   }, [content, isUser]);
 
-  // 解析审查结果
-  const reviewResult = useMemo(() => {
-    if (isUser) return { result: null as ReviewResult };
-    return parseReviewResult(content);
-  }, [content, isUser]);
-
   // 判断消息类型
   const isArchitectMessage = !!architectPlan;
   // 修复：只在真正包含 boltArtifact 标签时才认为是代码生成消息
   const isCodingMessage = content.includes("<boltArtifact");
 
-  // 判断是否需要修改
-  const needsModify = needsModification(content, reviewResult.result);
-
   return {
     artifact,
     architectPlan,
-    reviewResult,
     isArchitectMessage,
     isCodingMessage,
-    needsModification: needsModify,
     openingText: isCodingMessage ? extractOpeningText(content) : null,
     closingText: isCodingMessage ? extractClosingText(content) : null,
     architectOpeningText: isArchitectMessage
@@ -393,6 +342,5 @@ export function cleanContent(content: string): string {
   cleaned = cleaned.replace(/<architectPlan>[\s\S]*?<\/architectPlan>/g, "");
   cleaned = cleaned.replace(/^路由决策:.*$/gm, "");
   cleaned = cleaned.replace(/^网络连接错误.*$/gm, "");
-  cleaned = cleaned.replace(/^REJECT:.*$/gm, "");
   return cleaned.trim();
 }

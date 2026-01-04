@@ -1,6 +1,8 @@
 // components/chat/message-item.tsx
 "use client";
 
+import { useMemo } from "react";
+import Image from "next/image";
 import type { Message } from "@/hooks/use-chat";
 import type { Artifact } from "@/components/canvas";
 import { ThinkingCard } from "./thinking-card";
@@ -41,6 +43,32 @@ interface MessageItemProps {
 export function MessageItem({ message, messages }: MessageItemProps) {
   const isUser = message.role === "user";
 
+  // 将 base64 data URL 转换为 Blob URL（优化性能）
+  const imageBlobUrls = useMemo(() => {
+    if (!message.images || message.images.length === 0) return [];
+
+    return message.images.map((img) => {
+      // 将 data URL 转换为 Blob
+      const base64Data = img.dataUrl.split(",")[1];
+      const mimeType = img.dataUrl.match(/data:([^;]+);/)?.[1] || "image/png";
+      const byteCharacters = atob(base64Data);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: mimeType });
+      return URL.createObjectURL(blob);
+    });
+  }, [message.images]);
+
+  // 清理 Blob URL
+  useMemo(() => {
+    return () => {
+      imageBlobUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [imageBlobUrls]);
+
   // 获取前一条消息的 artifact（用于乐观更新）
   const previousArtifact = isUser
     ? null
@@ -75,14 +103,42 @@ export function MessageItem({ message, messages }: MessageItemProps) {
   // 用户消息
   if (isUser) {
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[85%]">
-          <div className="rounded-lg bg-primary px-4 py-2 text-primary-foreground">
-            <div className="whitespace-pre-wrap wrap-break-word">
-              {message.content}
+      <div className="flex flex-col items-end gap-2">
+        {/* 图片气泡（在上） */}
+        {message.images && message.images.length > 0 && (
+          <div className="max-w-[85%]">
+            <div className="rounded-lg bg-primary/90 p-2 space-y-2">
+              {message.images.map((img, index) => (
+                <div
+                  key={index}
+                  className="bg-white/10 rounded-md overflow-hidden relative"
+                  style={{ minHeight: "100px" }}
+                >
+                  <Image
+                    src={imageBlobUrls[index]}
+                    alt={`上传的图片 ${index + 1}`}
+                    width={400}
+                    height={300}
+                    className="w-full h-auto"
+                    style={{ maxHeight: "300px", objectFit: "contain" }}
+                    unoptimized
+                  />
+                </div>
+              ))}
             </div>
           </div>
-        </div>
+        )}
+
+        {/* 文本气泡（在下） */}
+        {message.content && (
+          <div className="max-w-[85%]">
+            <div className="rounded-lg bg-primary px-4 py-2 text-primary-foreground">
+              <div className="whitespace-pre-wrap wrap-break-word">
+                {message.content}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

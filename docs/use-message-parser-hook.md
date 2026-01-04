@@ -2,33 +2,17 @@
 
 ## 概述
 
-`useMessageParser` 是一个用于解析消息内容的 Hook，专门处理聊天消息中的特殊标签（artifact、architectPlan、reviewResult），并提取三段式内容（开场白、标签内容、结束语）。
+`useMessageParser` 是一个用于解析消息内容的 Hook，专门处理聊天消息中的特殊标签（artifact、architectPlan），并提取三段式内容（开场白、标签内容、结束语）。
 
 ## 职责范围
 
 - 🔍 **Artifact 解析**：提取 `<boltArtifact>` 标签中的代码
 - 🏗️ **架构规划解析**：提取 `<architectPlan>` 标签中的规划内容
-- ✅ **审查结果识别**：识别 `<reviewer_result>` 标签（APPROVE/REJECT）
 - 📝 **三段式内容拆分**：开场白、主要内容、结束语
 - 🎯 **消息类型判断**：判断是架构消息还是代码生成消息
 - 🌊 **流式支持**：处理不完整的标签
 
 ## 类型定义
-
-### ReviewResult
-
-```typescript
-type ReviewResult = "approve" | "reject" | null;
-```
-
-### ReviewResultData
-
-```typescript
-interface ReviewResultData {
-  result: ReviewResult;
-  reason?: string; // REJECT 的原因
-}
-```
 
 ### ArchitectPlan
 
@@ -52,12 +36,10 @@ interface ParsedMessageData {
   // 解析结果
   artifact: Artifact | null;
   architectPlan: ArchitectPlan | null;
-  reviewResult: ReviewResultData;
 
   // 消息类型
   isArchitectMessage: boolean;
   isCodingMessage: boolean;
-  needsModification: boolean;
 
   // 三段式内容 - 代码生成
   openingText: string | null; // 开场白
@@ -86,7 +68,7 @@ useMessageParser(
 
 所有解析结果都通过 `ParsedMessageData` 返回，包括：
 
-- **解析结果**：artifact、architectPlan、reviewResult
+- **解析结果**：artifact、architectPlan
 - **消息类型**：isArchitectMessage、isCodingMessage
 - **内容拆分**：开场白、标签内容、结束语
 
@@ -133,26 +115,6 @@ function MessageItem({
       {closingText && <p>{closingText}</p>}
     </div>
   );
-}
-```
-
-### 处理审查结果
-
-```typescript
-function ReviewMessage({ content }: { content: string }) {
-  const { reviewResult, needsModification } = useMessageParser(content, false);
-
-  if (reviewResult.result === "approve") {
-    return <div className="bg-green-50">✅ 审查通过，代码可以渲染</div>;
-  }
-
-  if (reviewResult.result === "reject") {
-    return (
-      <div className="bg-red-50">❌ 审查未通过：{reviewResult.reason}</div>
-    );
-  }
-
-  return null;
 }
 ```
 
@@ -270,9 +232,8 @@ const cleaned = cleanContent(content);
 // 移除：
 // - <boltArtifact>...</boltArtifact>
 // - <architectPlan>...</architectPlan>
-// - <reviewer_result>...</reviewer_result>
 // - 路由决策信息
-// - REJECT: 消息
+// - 网络连接错误信息
 ```
 
 ## 核心特性
@@ -343,27 +304,7 @@ function mergeArtifacts(
 }
 ```
 
-### 4. 审查结果识别
-
-支持多种格式：
-
-```typescript
-// 格式 1: 标签格式
-"<reviewer_result>APPROVE</reviewer_result>"
-→ { result: "approve" }
-
-"<reviewer_result>REJECT: 代码有安全问题</reviewer_result>"
-→ { result: "reject", reason: "代码有安全问题" }
-
-// 格式 2: 文本格式
-"APPROVE"
-→ { result: "approve" }
-
-"REJECT: 需要修改"
-→ { result: "reject", reason: "需要修改" }
-```
-
-### 5. 消息类型判断
+### 4. 消息类型判断
 
 ```typescript
 const isArchitectMessage = content.includes("<architectPlan");
@@ -403,7 +344,6 @@ if (isUser) {
   return {
     artifact: null,
     architectPlan: null,
-    reviewResult: { result: null },
     isArchitectMessage: false,
     isCodingMessage: false,
     // ...
@@ -535,6 +475,7 @@ const parsed2 = useMessageParser(content2, false);
 
 ## 更新日志
 
+- **2026-01**: 移除 reviewResult 和 needsModification 相关逻辑（后端已剔除审查节点）
 - **2024-12**: 架构规划改为 Markdown 格式
 - **2024-11**: 添加 Artifact 合并功能
 - **2024-10**: 添加三段式内容拆分
