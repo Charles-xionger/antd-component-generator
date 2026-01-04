@@ -1,6 +1,6 @@
 // app/api/share/[shareCode]/route.ts
 import { NextRequest } from "next/server";
-import prisma from "@/lib/database/pirsma";
+import prisma from "@/lib/database/prisma";
 
 // 获取分享的代码文件
 export async function GET(

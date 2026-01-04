@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/lib/database/pirsma";
+import prisma from "@/lib/database/prisma";
 import { createGraph } from "@/lib/agent";
 import { BaseMessage } from "@langchain/core/messages";
 

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import prisma from "@/lib/database/pirsma";
+import prisma from "@/lib/database/prisma";
 import { auth } from "@/lib/auth";
 
 // 获取所有会话列表

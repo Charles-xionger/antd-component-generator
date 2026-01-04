@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest } from "next/server";
-import prisma from "@/lib/database/pirsma";
+import prisma from "@/lib/database/prisma";
 
 interface FileData {
   path: string;

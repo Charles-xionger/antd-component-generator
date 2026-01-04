@@ -1,6 +1,6 @@
 // app/api/share/route.ts
 import { NextRequest } from "next/server";
-import prisma from "@/lib/database/pirsma";
+import prisma from "@/lib/database/prisma";
 
 // 创建分享
 export async function POST(request: NextRequest) {

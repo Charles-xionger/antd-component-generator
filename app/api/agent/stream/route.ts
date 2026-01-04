@@ -4,11 +4,17 @@ export const dynamic = "force-dynamic";
 import { NextRequest } from "next/server";
 import { HumanMessage } from "@langchain/core/messages";
 import { createGraph } from "@/lib/agent";
-import prisma from "@/lib/database/pirsma";
+import prisma from "@/lib/database/prisma";
 import { formatCodeContext } from "@/lib/agent/utils";
+import { auth } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { message, images, threadId } = await request.json();
 
     if (!message && (!images || images.length === 0)) {
@@ -70,6 +76,7 @@ export async function POST(request: NextRequest) {
           id: finalThreadId,
           title:
             messageText.slice(0, 50) + (messageText.length > 50 ? "..." : ""),
+          userId: session.user.id,
         },
       });
     }
