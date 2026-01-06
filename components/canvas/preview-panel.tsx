@@ -31,7 +31,7 @@ export const PreviewPanel = forwardRef<HTMLIFrameElement, PreviewPanelProps>(
 
     return (
       <div
-        className={`absolute inset-0 flex items-center justify-center bg-muted/50 transition-opacity duration-200 p-4 ${
+        className={`absolute inset-0 flex items-center justify-center bg-muted/50 transition-opacity duration-200 ${
           isVisible ? "opacity-100 z-10" : "opacity-0 z-0 pointer-events-none"
         }`}
       >

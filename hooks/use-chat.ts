@@ -136,6 +136,7 @@ export function useChat(options: UseChatOptions = {}) {
       id: Date.now().toString(),
       role: "user",
       content: input.trim(),
+      images: images.length > 0 ? images : undefined,
     };
 
     setMessages((prev) => [...prev, userMessage]);

@@ -2,8 +2,7 @@
 "use client";
 
 import { forwardRef, useEffect, useState, useCallback } from "react";
-import { createPortal } from "react-dom";
-import { X, Copy, Check } from "lucide-react";
+import { Copy, Check } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,6 +27,7 @@ interface CanvasPanelProps {
   sandboxError?: string | null;
   onFullscreenToggle?: () => void;
   onSandboxReset?: () => void;
+  isFullscreen?: boolean;
 }
 
 export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
@@ -39,6 +39,7 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
       sandboxError = null,
       onFullscreenToggle,
       onSandboxReset,
+      isFullscreen = false,
     },
     ref
   ) {
@@ -61,8 +62,7 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
       setShouldSendToSandbox,
     } = canvas;
 
-    // 全屏状态
-    const [isFullscreen, setIsFullscreen] = useState(false);
+    // 刷新和语言状态
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [currentLanguage, setCurrentLanguage] = useState<"zh" | "en">("zh");
 
@@ -214,17 +214,6 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
       isRefreshing,
     ]);
 
-    // ESC 键退出全屏
-    useEffect(() => {
-      const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === "Escape" && isFullscreen) {
-          setIsFullscreen(false);
-        }
-      };
-      window.addEventListener("keydown", handleKeyDown);
-      return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [isFullscreen]);
-
     // 监听沙箱错误并显示 toast
     useEffect(() => {
       if (sandboxError) {
@@ -236,13 +225,8 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
     }, [sandboxError]);
 
     // 渲染面板内容
-    const panelContent = (
-      <div
-        ref={isFullscreen ? undefined : ref}
-        className={`flex flex-col bg-background transition-all duration-300 ${
-          isFullscreen ? "fixed inset-0 z-9999" : "h-full"
-        }`}
-      >
+    return (
+      <div ref={ref} className="flex flex-col bg-background h-full">
         {/* Canvas Header */}
         <div className="flex items-center justify-between border-b px-4 py-2">
           <Tabs
@@ -261,18 +245,6 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
                 <div className="text-sm text-muted-foreground">
                   v{selectedVersion}
                 </div>
-              )}
-
-              {/* 全屏模式下显示退出按钮 */}
-              {isFullscreen && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setIsFullscreen(false)}
-                  title="退出全屏"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
               )}
             </div>
           </Tabs>
@@ -300,7 +272,7 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
         <div className="flex-1 overflow-hidden flex flex-col relative">
           {/* Preview Panel - 始终挂载以保持 iframe 在线 */}
           <PreviewPanel
-            ref={iframeRef}
+            ref={isFullscreen ? null : iframeRef}
             isVisible={activeTab === "preview"}
             isSandboxReady={isSandboxReady}
             selectedDevice={selectedDevice}
@@ -349,18 +321,5 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
         </Dialog>
       </div>
     );
-
-    // 全屏时使用 Portal 渲染到 body，确保脱离父容器限制
-    if (isFullscreen && typeof document !== "undefined") {
-      return (
-        <>
-          {/* 保留原位置的占位符，避免布局跳动 */}
-          <div ref={ref} className="h-full bg-background" />
-          {createPortal(panelContent, document.body)}
-        </>
-      );
-    }
-
-    return panelContent;
   }
 );

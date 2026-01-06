@@ -347,6 +347,7 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
               sandboxError={sandboxError}
               onFullscreenToggle={handleFullscreenToggle}
               onSandboxReset={handleSandboxReset}
+              isFullscreen={isFullscreen}
             />
           </div>
         </Pane>
