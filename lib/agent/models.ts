@@ -30,9 +30,9 @@ export function createLLM(
 
   // claud 模型
   if (modelName.startsWith("claud")) {
-    new ChatOpenAI({
-      model: "claude-sonnet-4-20250514", // 固定使用 sonnet 4
-      temperature: config.temperature,
+    return new ChatOpenAI({
+      model: "claude-opus-4-5-20251101", // 固定使用 sonnet 4
+      temperature: 0.3,
       apiKey: process.env.AI302_API_KEY,
       configuration: {
         baseURL: process.env.AI302_BASE_URL || "https://api.302.ai/v1",
@@ -44,7 +44,7 @@ export function createLLM(
 
   // 默认使用 Qwen 或其他 OpenAI 兼容模型
   return new ChatOpenAI({
-    model: modelName || "qwen-plus",
+    model: "qwen3-max",
     temperature: config.temperature,
     apiKey: process.env.ALIYUN_API_KEY,
     configuration: {

@@ -171,8 +171,8 @@ function ModelSelector({
   onModelChange?: (model: string) => void;
 }) {
   const models = [
-    { id: "qwen-plus", name: "Qwen Plus", icon: "Q" },
-    { id: "claud-sonnet-4-20250514", name: "Claude Sonnet 4", icon: "C" },
+    { id: "qwen-plus", name: "Qwen 3", icon: "Q" },
+    { id: "claud-sonnet-4-20250514", name: "Claude 4.5", icon: "C" },
     { id: "gemini-3-pro-preview", name: "Gemini 3 pro", icon: "G" },
   ];
 
