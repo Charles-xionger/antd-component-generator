@@ -51,26 +51,33 @@ GOOGLE_API_KEY=your-google-api-key
 
 ### 3. 运行数据库迁移
 
-#### 本地迁移到 Supabase
+⚠️ **重要警告**：
+
+- ✅ **生产环境必须使用** `prisma migrate deploy`（保留数据）
+- ❌ **禁止使用** `prisma db push`（会清空数据）
+- ❌ **禁止使用** `prisma migrate reset`（会清空数据）
+
+#### 方案 A：本地手动迁移到 Supabase（推荐首次部署）
 
 ```bash
-# 1. 设置环境变量
-export DATABASE_URL="postgresql://postgres.xxxxx:..."
-export DIRECT_URL="postgresql://postgres.xxxxx:..."
+# 1. 设置环境变量（使用 DIRECT_URL，不是 pooler URL）
+export DATABASE_URL="你的 Supabase Direct Connection URL"
 
 # 2. 生成 Prisma Client
 pnpm prisma:generate
 
-# 3. 运行迁移（首次部署）
+# 3. 运行迁移（不会清空数据）
 pnpm prisma:migrate:deploy
 
-# 或者直接推送 schema（不创建迁移文件）
-pnpm prisma:push
+# 4. 验证迁移成功
+pnpm prisma:studio
 ```
 
-#### Vercel 自动迁移
+#### 方案 B：Vercel 自动迁移（适合持续部署）
 
-在 `package.json` 中已配置自动迁移：
+**重要**：必须在 Vercel 环境变量中配置 `DIRECT_URL`（Direct Connection），不是 Pooler URL！
+
+在 `package.json` 中配置：
 
 ```json
 {
@@ -80,7 +87,20 @@ pnpm prisma:push
 }
 ```
 
-Vercel 部署时会自动执行迁移。
+#### 如何创建新的迁移（本地开发）
+
+```bash
+# 1. 修改 prisma/schema.prisma
+# 2. 创建迁移文件
+pnpm prisma:migrate:dev --name add_new_feature
+
+# 3. 提交迁移文件到 git
+git add prisma/migrations
+git commit -m "feat: add new migration"
+
+# 4. 推送到 Vercel，自动部署时会执行迁移
+git push
+```
 
 ### 4. 验证部署
 
@@ -216,12 +236,19 @@ prisma.$on("error", (e) => {
 **解决方案**:
 
 ```bash
-# 使用 DIRECT_URL 运行迁移
+# 方法 1: 使用 DIRECT_URL（不是 Pooler URL）
 DATABASE_URL=$DIRECT_URL pnpm prisma:migrate:deploy
 
-# 或者使用 db push（跳过迁移历史）
+# 方法 2: 如果数据库是空的且不关心迁移历史
+# 警告：这会清空所有数据！仅用于开发环境或首次部署空数据库
 DATABASE_URL=$DIRECT_URL pnpm prisma:push
 ```
+
+⚠️ **生产环境数据保护**：
+
+- 永远不要在有数据的生产数据库上使用 `prisma db push`
+- 永远不要在生产环境使用 `prisma migrate reset`
+- 定期备份 Supabase 数据（Dashboard → Database → Backups）
 
 ### 4. Serverless 环境连接问题
 
