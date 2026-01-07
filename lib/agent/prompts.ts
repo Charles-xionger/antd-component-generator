@@ -134,7 +134,13 @@ export const ARCHITECT_PROMPT = `
 
 ### 架构设计要求
 1. **文件结构（严格控制数量）**：
-   - \`App.tsx\`: 应用主入口，**只负责渲染业务组件和提供基础布局**（如：页面容器、响应式布局）。**禁止**添加任何 Provider（QueryClientProvider、ConfigProvider 等已由沙箱提供）。
+   - \`App.tsx\`: 应用主入口，**仅作为纯布局容器**。职责：
+     * ✅ 导入并渲染业务组件
+     * ✅ 提供页面级布局容器（如 div、响应式布局）
+     * ✅ 设置全局背景色和基础样式类名
+     * ❌ 禁止添加任何 Provider（QueryClientProvider、ConfigProvider、I18nextProvider 等，这些已由沙箱提供）
+     * ❌ 禁止使用 useQuery、useTranslation 等 hooks
+     * ❌ 禁止定义任何组件或业务逻辑
    - \`[业务组件].tsx\`: (以实际业务名命名) 核心业务组件，包含具体的 UI 和交互逻辑。
    - \`interface.ts\`: 所有的 interface, type, enum 定义。
    - \`helpers.ts\`: 工具函数和 Mock 数据。
@@ -262,7 +268,7 @@ export const CODER_PROMPT = `
 
 **第二段：代码生成（严格遵循 XML 格式）**
 
-🚨 **必须严格按照以下结构输出**：
+🚨 **无论是新建还是修改代码，都必须严格按照以下结构输出**：
 
 \`\`\`xml
 <boltArtifact id="项目id" title="项目标题">
@@ -281,13 +287,19 @@ export default function App() {
 </boltArtifact>
 \`\`\`
 
-**关键规则**：
+**关键规则（每次都必须遵守）**：
 1. 每个文件用一个 \`<boltAction type="file" filePath="文件名">\` 包裹
-2. 代码直接写在标签内，**不要用 \`\`\`tsx 等 markdown 标记**
+2. 代码直接写在标签内，**绝对不要用 \`\`\`tsx 等 markdown 代码块标记**
 3. 按架构师的文件顺序生成
 4. 所有代码必须在标签内，开场白和结束语不要包含代码片段
+5. **修改代码时**：输出完整的文件内容，不要用省略号或注释（如 "...existing code..."）
 
-❌ **禁止**：标签外有代码、使用 markdown 代码块、缺少必需属性、空标签
+❌ **禁止的错误格式**：
+- ❌ 标签外有代码片段
+- ❌ 使用 \`\`\`tsx 或 \`\`\`typescript markdown 标记
+- ❌ 缺少 type 或 filePath 属性
+- ❌ 空标签或不完整的代码
+- ❌ 修改时只写部分代码（必须输出完整文件）
 
 **第三段：功能总结与建议**
 - 总结实现了哪些核心功能
@@ -349,12 +361,26 @@ export const i18n_resources = {
 
 #### 6. ID 生成：使用 \`crypto.randomUUID()\`（禁用 nanoid/uuid 等外部库）
 
-#### 7. App.tsx 规范
-**禁止**：添加任何 Provider、导入 QueryClient、初始化 i18next、定义组件
-**允许**：导入业务组件、添加布局容器、设置全局样式类名
+#### 7. App.tsx 规范（最重要）
 
+🚨 **App.tsx 只能是纯展示容器，不能包含任何业务逻辑或 Provider！**
+
+**严格禁止**：
+- ❌ 任何 Provider（QueryClientProvider、ConfigProvider、I18nextProvider）
+- ❌ 任何 hooks（useQuery、useMutation、useTranslation、useState）
+- ❌ 初始化代码（i18n.init、new QueryClient）
+- ❌ 定义组件或函数
+- ❌ 任何业务逻辑
+
+**只允许**：
+- ✅ import 业务组件
+- ✅ 简单的 JSX 布局容器
+- ✅ Tailwind CSS 类名
+
+**正确示例**：
 \`\`\`tsx
 import TodoList from './TodoList';
+
 export default function App() {
   return (
     <div className="min-h-screen bg-[#F0F4F9] p-6">
@@ -363,6 +389,22 @@ export default function App() {
       </div>
     </div>
   );
+}
+\`\`\`
+
+**错误示例（绝对不要这样写）**：
+\`\`\`tsx
+// ❌ 错误：包含 Provider
+import { QueryClientProvider } from '@tanstack/react-query';
+export default function App() {
+  return <QueryClientProvider>...</QueryClientProvider>;
+}
+
+// ❌ 错误：包含 hooks
+import { useTranslation } from 'react-i18next';
+export default function App() {
+  const { t } = useTranslation();
+  return <div>{t('key')}</div>;
 }
 \`\`\`
 
