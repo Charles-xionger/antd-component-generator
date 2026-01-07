@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { message, images, threadId } = await request.json();
+    const { message, images, threadId, model } = await request.json();
 
     if (!message && (!images || images.length === 0)) {
       return Response.json(
@@ -29,6 +29,7 @@ export async function POST(request: NextRequest) {
     const config = {
       configurable: {
         thread_id: finalThreadId,
+        model: model || "qwen-plus", // 传递模型参数到 graph
       },
     };
 

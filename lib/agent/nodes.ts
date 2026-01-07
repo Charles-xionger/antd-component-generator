@@ -1,42 +1,39 @@
 // lib/agent/nodes.ts
-import {
-  AIMessage,
-  HumanMessage,
-  SystemMessage,
-} from "@langchain/core/messages";
-import { ChatOpenAI } from "@langchain/openai";
+import { AIMessage, SystemMessage } from "@langchain/core/messages";
 import type { AgentState } from "./state";
 import { ARCHITECT_PROMPT, CODER_PROMPT } from "./prompts";
+import { createLLM } from "./models";
 
-const baseModelConfig = {
-  model: process.env.NEXT_PUBLIC_MODEL_NAME || "qwen-plus",
-  temperature: 0.7,
-  apiKey: process.env.AI302_API_KEY,
-  configuration: {
-    baseURL: process.env.AI302_BASE_URL || "https://api.302.ai/v1",
-    // 添加更宽松的 SSL 配置来解决连接问题
-    httpAgent: undefined,
-    httpsAgent: undefined,
-  },
-  // 添加重试配置
-  maxRetries: 3,
-  timeout: 30000, // 30秒超时
-};
+/**
+ * 压缩 prompt 以节省 token
+ * - 删除连续的空行（保留单个换行）
+ * - 删除行首尾空格
+ * - 压缩多个连续空格为单个空格
+ */
+function compressPrompt(prompt: string): string {
+  return prompt
+    .split("\n")
+    .map((line) => line.trim()) // 删除每行首尾空格
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n") // 连续3个以上换行压缩为2个
+    .replace(/ {2,}/g, " "); // 连续多个空格压缩为1个
+}
 
 // Architect Node: 生成开发计划
 export async function architect(
-  state: AgentState
+  state: AgentState,
+  config?: { configurable?: { model?: string } }
 ): Promise<Partial<AgentState>> {
-  console.log("🚀 ~ architect ~ state:", state);
-  const llm = new ChatOpenAI({
-    ...baseModelConfig,
+  // 从 config 中获取模型名称，默认使用 qwen-plus
+  const modelName = config?.configurable?.model || "qwen-plus";
+  const llm = createLLM(modelName, {
+    model: modelName,
     temperature: 0.3, // 更低的温度确保结构化输出
   });
 
-  // 注入代码上下文到 architect prompt
-  const promptWithContext = ARCHITECT_PROMPT.replace(
-    "{codeContext}",
-    state.codeContext || ""
+  // 注入代码上下文到 architect prompt，并压缩以节省 token
+  const promptWithContext = compressPrompt(
+    ARCHITECT_PROMPT.replace("{codeContext}", state.codeContext || "")
   );
 
   // 找到上一个 architect 消息的位置（包含 <architectPlan> 的 AI 消息）
@@ -120,16 +117,23 @@ export async function architect(
 }
 
 // Coder Node: 生成代码
-export async function coder(state: AgentState): Promise<Partial<AgentState>> {
-  const llm = new ChatOpenAI({
-    ...baseModelConfig,
+export async function coder(
+  state: AgentState,
+  config?: { configurable?: { model?: string } }
+): Promise<Partial<AgentState>> {
+  // 从 config 中获取模型名称，默认使用 qwen-plus
+  const modelName = config?.configurable?.model || "qwen-plus";
+  const llm = createLLM(modelName, {
+    model: modelName,
     temperature: 0.1, // 代码生成需要更确定性的输出
   });
 
-  // 准备 prompt，注入代码上下文
-  const promptWithContext = CODER_PROMPT.replace(
-    "{codeContext}",
-    state.codeContext || "这是一个新项目，没有现有代码。"
+  // 准备 prompt，注入代码上下文，并压缩以节省 token
+  const promptWithContext = compressPrompt(
+    CODER_PROMPT.replace(
+      "{codeContext}",
+      state.codeContext || "这是一个新项目，没有现有代码。"
+    )
   );
 
   // 找到上一个 coder 消息的位置（包含 <boltArtifact> 的 AI 消息）

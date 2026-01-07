@@ -20,6 +20,7 @@
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
     "@langchain/core": "^1.1.7",
+    "@langchain/google-genai": "^2.1.6",
     "@langchain/langgraph": "^1.0.7",
     "@langchain/langgraph-checkpoint-postgres": "^1.0.0",
     "@langchain/mcp-adapters": "^1.1.1",

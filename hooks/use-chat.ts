@@ -31,6 +31,8 @@ export interface UseChatOptions {
   threadId?: string;
   /** MCP 配置 ID */
   mcpConfigId?: string | null;
+  /** 选中的模型名称 */
+  model?: string;
   /** 检测到 artifact 时的回调（流式和最终） */
   onArtifactDetected?: (content: string) => void;
   /** 后端保存成功时的回调 */
@@ -50,6 +52,7 @@ export function useChat(options: UseChatOptions = {}) {
     api = "/api/agent/stream",
     threadId,
     mcpConfigId,
+    model,
     onArtifactDetected,
     onSaved,
     onStreamStart,
@@ -183,6 +186,7 @@ export function useChat(options: UseChatOptions = {}) {
           images: currentImages,
           threadId,
           mcpConfigId,
+          model,
         }),
         signal: abortControllerRef.current.signal,
       });

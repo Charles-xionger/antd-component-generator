@@ -49,6 +49,10 @@ interface InputBarProps {
   isMcpLoading?: boolean;
   onMcpSelect?: (id: string | null) => void;
   onMcpRefresh?: () => void;
+
+  // 模型选择相关的 Props
+  selectedModel?: string;
+  onModelChange?: (model: string) => void;
 }
 
 function FileUploadButton({
@@ -159,15 +163,49 @@ function SettingsButton({
   );
 }
 
-function ModelSelector() {
+function ModelSelector({
+  selectedModel,
+  onModelChange,
+}: {
+  selectedModel?: string;
+  onModelChange?: (model: string) => void;
+}) {
+  const models = [
+    { id: "qwen-plus", name: "Qwen Plus", icon: "Q" },
+    { id: "claud-sonnet-4-20250514", name: "Claude Sonnet 4", icon: "C" },
+    { id: "gemini-3-pro-preview", name: "Gemini 3 pro", icon: "G" },
+  ];
+
+  const currentModel = models.find((m) => m.id === selectedModel) || models[0];
+
   return (
-    <div className="flex items-center gap-1 px-2 py-1.5 ml-1 rounded-lg hover:bg-accent cursor-pointer transition-colors group">
-      <span className="flex items-center justify-center w-5 h-5 rounded border text-[10px] font-bold text-muted-foreground">
-        G
-      </span>
-      <span className="text-sm font-medium text-muted-foreground">v0 Pro</span>
-      <ChevronDown className="h-4 w-4 text-muted-foreground group-hover:text-foreground" />
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <div className="flex items-center gap-1 px-2 py-1.5 ml-1 rounded-lg hover:bg-accent cursor-pointer transition-colors group">
+          <span className="flex items-center justify-center w-5 h-5 rounded border text-[10px] font-bold text-muted-foreground">
+            {currentModel.icon}
+          </span>
+          <span className="text-sm font-medium text-muted-foreground">
+            {currentModel.name}
+          </span>
+          <ChevronDown className="h-4 w-4 text-muted-foreground group-hover:text-foreground" />
+        </div>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-48">
+        {models.map((model) => (
+          <DropdownMenuItem
+            key={model.id}
+            className="cursor-pointer"
+            onSelect={() => onModelChange?.(model.id)}
+          >
+            <span className="flex items-center justify-center w-5 h-5 rounded border text-[10px] font-bold text-muted-foreground mr-2">
+              {model.icon}
+            </span>
+            <span>{model.name}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -184,6 +222,8 @@ export function InputBar({
   isMcpLoading,
   onMcpSelect,
   onMcpRefresh,
+  selectedModel,
+  onModelChange,
 }: InputBarProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -271,7 +311,10 @@ export function InputBar({
               onMcpSelect={onMcpSelect}
               onMcpRefresh={onMcpRefresh}
             />
-            <ModelSelector />
+            <ModelSelector
+              selectedModel={selectedModel}
+              onModelChange={onModelChange}
+            />
           </div>
 
           <button

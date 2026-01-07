@@ -34,6 +34,22 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
   const [selectedMcpId, setSelectedMcpId] = useState<string | null>(null);
   const [isMcpLoading, setIsMcpLoading] = useState(false);
 
+  // Model selection state with localStorage persistence
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("selectedModel");
+      return saved || "qwen-plus";
+    }
+    return "qwen-plus";
+  });
+
+  // Persist model selection to localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("selectedModel", selectedModel);
+    }
+  }, [selectedModel]);
+
   // Sandbox state
   const [isSandboxReady, setIsSandboxReady] = useState(false);
   const [sandboxError, setSandboxError] = useState<string | null>(null);
@@ -51,6 +67,7 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
   const chat = useChat({
     threadId,
     mcpConfigId: selectedMcpId,
+    model: selectedModel,
     onArtifactDetected: (content) =>
       chatCallbacksRef.current.onArtifactDetected?.(content),
     onStreamStart: () => chatCallbacksRef.current.onStreamStart?.(),
@@ -333,6 +350,8 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
               isMcpLoading={isMcpLoading}
               onMcpSelect={setSelectedMcpId}
               onMcpRefresh={fetchMcpConfigs}
+              selectedModel={selectedModel}
+              onModelChange={setSelectedModel}
             />
           </div>
         </Pane>
