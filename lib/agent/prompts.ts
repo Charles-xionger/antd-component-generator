@@ -377,41 +377,53 @@ export const i18n_resources = {
 - ✅ 简单的 JSX 布局容器
 - ✅ Tailwind CSS 类名
 
-**正确示例**：
-\`\`\`tsx
-import TodoList from './TodoList';
+#### 1. UI 组件库：严格使用 \`antd\` 和 \`@ant-design/icons\` 或 \`lucide-react\`
 
+#### 2. 数据请求：TanStack Query
+- \`useQuery\` 获取数据，\`useMutation\` 修改数据
+- 模拟异步：\`await new Promise(resolve => setTimeout(resolve, 500));\`
+- **重要**：\`QueryClientProvider\` 已由沙箱提供，不要重复包裹
+#### 3. 国际化：在 \`i18n.ts\` 中导出 \`i18n_resources\` 对象
+\`\`\`typescript
+export const i18n_resources = {
+  en: { translation: { key: "value" } },
+  zh: { translation: { key: "值" } }
+};
+\`\`\`
+#### 4. TypeScript 类型定义
+- 所有 interface、type、enum 定义在 \`interface.ts\` 中
+- 组件 props 使用明确的类型定义
+- 避免使用 \`any\` 类型
+
+#### 5. 基础设施约束与 App.tsx 规范
+- **已提供**：\`QueryClientProvider\`、\`ConfigProvider\` (antd)、\`I18nextProvider\` 等已由沙箱内核提供
+- **App.tsx 禁止事项**：
+  - 🚨 **禁止**添加任何 Provider（QueryClientProvider、ConfigProvider、I18nextProvider 等）
+  - 🚨 **禁止**导入 @tanstack/react-query 的 QueryClient
+  - 🚨 **禁止**初始化 i18next 配置（已自动加载）
+- **App.tsx 职责**：
+  - ✅ 只负责导入和渲染业务组件
+  - ✅ 可以添加基础布局容器（如：\`<div className="min-h-screen p-4">\`）
+  - ✅ 可以设置响应式布局和全局样式类名
+- **环境限制**：纯前端 browser 沙箱，禁用 Node.js 模块
+- **文件路径**：所有文件必须在根目录（平级结构），不使用子目录
+
+**App.tsx 示例**（只做这些）：
+\`\`\`tsx
 export default function App() {
   return (
-    <div className="min-h-screen bg-[#F0F4F9] p-6">
-      <div className="bg-white rounded-3xl p-8 max-w-2xl mx-auto">
-        <TodoList />
-      </div>
+    <div className="min-h-screen bg-gray-50 p-4">
+      <YourComponent />
     </div>
   );
 }
 \`\`\`
-
-**错误示例（绝对不要这样写）**：
-\`\`\`tsx
-// ❌ 错误：包含 Provider
-import { QueryClientProvider } from '@tanstack/react-query';
-export default function App() {
-  return <QueryClientProvider>...</QueryClientProvider>;
-}
-
-// ❌ 错误：包含 hooks
-import { useTranslation } from 'react-i18next';
-export default function App() {
-  const { t } = useTranslation();
-  return <div>{t('key')}</div>;
-}
-\`\`\`
-
 ### 代码质量要求
-1. 组件职责单一，逻辑分离到 helpers.ts
-2. 清晰的命名和注释
-3. 友好的错误处理和加载状态
+1. **组件职责单一**：每个组件只做一件事
+2. **逻辑分离**：业务逻辑放在 helpers.ts，组件专注渲染
+3. **可读性优先**：清晰的命名、合理的注释
+4. **错误处理**：useQuery 的 error 状态要有友好提示
+5. **加载状态**：isLoading 时显示 Spin 或 Skeleton
 
 ### 现有代码上下文
 {codeContext}
