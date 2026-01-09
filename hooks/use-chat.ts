@@ -46,6 +46,8 @@ export interface UseChatOptions {
   onToolCall?: (toolCall: ToolCall) => void;
   /** 发生错误时的回调 */
   onError?: (error: Error) => void;
+  /** 标题更新时的回调 */
+  onTitleUpdate?: (threadId: string, title: string) => void;
 }
 
 export function useChat(options: UseChatOptions = {}) {
@@ -60,6 +62,7 @@ export function useChat(options: UseChatOptions = {}) {
     onStreamComplete,
     onToolCall,
     onError,
+    onTitleUpdate,
   } = options;
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -78,6 +81,7 @@ export function useChat(options: UseChatOptions = {}) {
   const onStreamCompleteRef = useRef(onStreamComplete);
   const onToolCallRef = useRef(onToolCall);
   const onErrorRef = useRef(onError);
+  const onTitleUpdateRef = useRef(onTitleUpdate);
 
   // 同步更新 ref
   useEffect(() => {
@@ -87,6 +91,7 @@ export function useChat(options: UseChatOptions = {}) {
     onStreamCompleteRef.current = onStreamComplete;
     onToolCallRef.current = onToolCall;
     onErrorRef.current = onError;
+    onTitleUpdateRef.current = onTitleUpdate;
   });
 
   // 标记是否已经加载过历史消息
@@ -354,6 +359,16 @@ export function useChat(options: UseChatOptions = {}) {
                       : msg
                   )
                 );
+              } else if (data.type === "title_update") {
+                // 标题更新事件
+                console.log("[useChat] 🏷️ 收到标题更新事件:", {
+                  threadId: data.threadId,
+                  newTitle: data.title,
+                });
+
+                if (onTitleUpdateRef.current) {
+                  onTitleUpdateRef.current(data.threadId, data.title);
+                }
               }
               // 注意：移除了 data.type === "saved" 的处理
               // 现在由前端主动保存，不再依赖后端的保存信号

@@ -38,6 +38,7 @@ interface InputBarProps {
   value: string;
   onChange: (value: string) => void;
   onSubmit: () => void;
+  onStop?: () => void;
   isLoading: boolean;
   isCanvasMode?: boolean;
   placeholder?: string;
@@ -214,6 +215,7 @@ export function InputBar({
   value,
   onChange,
   onSubmit,
+  onStop,
   isLoading,
   placeholder,
   images = [],
@@ -323,20 +325,26 @@ export function InputBar({
           </div>
 
           <button
-            onClick={onSubmit}
-            disabled={(!value.trim() && images.length === 0) || isDisabled}
+            onClick={isLoading && onStop ? onStop : onSubmit}
+            disabled={
+              !isLoading &&
+              ((!value.trim() && images.length === 0) || isDisabled)
+            }
             className={`flex items-center justify-center w-8 h-8 rounded-lg transition-all ${
-              (!value.trim() && images.length === 0) || isDisabled
+              isLoading
+                ? "bg-red-500/10 text-red-600 hover:bg-red-500/20"
+                : (!value.trim() && images.length === 0) || isDisabled
                 ? "bg-muted text-muted-foreground cursor-not-allowed"
                 : "bg-muted text-foreground hover:bg-accent"
             }`}
+            title={isLoading ? "停止生成" : "发送"}
           >
-            {isDisabled ? (
-              <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+            {isLoading ? (
+              <div className="w-3.5 h-3.5 bg-red-600 rounded-sm" />
             ) : (
               <ArrowUp className="h-5 w-5 stroke-[2.5px]" />
             )}
-            <span className="sr-only">Send</span>
+            <span className="sr-only">{isLoading ? "Stop" : "Send"}</span>
           </button>
         </div>
       </div>

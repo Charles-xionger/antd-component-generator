@@ -2,6 +2,8 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import { SystemMessage, HumanMessage } from "@langchain/core/messages";
+import { TITLE_GENERATION_PROMPT } from "./prompts";
 
 export interface ModelConfig {
   model: string;
@@ -55,4 +57,50 @@ export function createLLM(
     maxRetries: 3,
     timeout: 30000,
   });
+}
+
+/**
+ * 生成会话标题
+ * @param userMessage 用户的首条消息
+ * @param aiResponse AI 的回复内容（可选）
+ * @param modelName 使用的模型名称
+ * @returns 生成的简洁标题
+ */
+export async function generateThreadTitle(
+  userMessage: string,
+  aiResponse: string = "",
+  modelName: string = "qwen-plus"
+): Promise<string> {
+  try {
+    // 创建一个专门用于标题生成的 LLM，使用较低的 temperature
+    const llm = createLLM(modelName, {
+      model: modelName,
+      temperature: 0.3, // 使用较低的温度以获得更稳定的输出
+    });
+
+    // 构建提示内容
+    const content = `用户消息：${userMessage}\n\nAI回复：${aiResponse.slice(
+      0,
+      200
+    )}`;
+
+    const response = await llm.invoke([
+      new SystemMessage(TITLE_GENERATION_PROMPT),
+      new HumanMessage(content),
+    ]);
+
+    const title = response.content.toString().trim();
+
+    // 确保标题不为空且长度合理
+    if (!title || title.length === 0) {
+      return userMessage.slice(0, 20);
+    }
+
+    // 限制标题长度（最多30个字符）
+    return title.length > 30 ? title.slice(0, 30) : title;
+  } catch (error) {
+    console.error("生成标题失败:", error);
+    // 失败时使用用户消息的前20个字符作为后备
+    return userMessage.slice(0, 20) || "新会话";
+  }
 }

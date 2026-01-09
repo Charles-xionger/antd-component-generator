@@ -68,6 +68,7 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
     onArtifactDetected?: (content: string) => void;
     onStreamStart?: () => void;
     onStreamComplete?: () => Promise<void>;
+    onTitleUpdate?: (threadId: string, title: string) => void;
   }>({});
 
   const chat = useChat({
@@ -78,6 +79,8 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
       chatCallbacksRef.current.onArtifactDetected?.(content),
     onStreamStart: () => chatCallbacksRef.current.onStreamStart?.(),
     onStreamComplete: () => chatCallbacksRef.current.onStreamComplete?.(),
+    onTitleUpdate: (threadId, title) =>
+      chatCallbacksRef.current.onTitleUpdate?.(threadId, title),
   });
 
   // Canvas hook - 传入 messages 用于实时监听
@@ -146,18 +149,23 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
               canvas.setIsGenerating(false);
             }
           } catch (error) {
-            console.error("[UnifiedChat] 保存出错:", error);
-            // 错误也要禁用生成模式
+            console.error("[UnifiedChat] 保存异常:", error);
             canvas.setIsGenerating(false);
           }
         } else {
-          console.log("[UnifiedChat] 代码生成完成但没有 artifact");
-          // 没有 artifact 也要禁用生成模式
+          // 没有代码生成，直接禁用生成模式
           canvas.setIsGenerating(false);
         }
       },
+      onTitleUpdate: (threadId: string, title: string) => {
+        console.log("[UnifiedChat] 🏷️ 标题已更新:", { threadId, title });
+        // 触发父组件的 onThreadUpdate，刷新 sidebar 的 threads 列表
+        if (onThreadUpdate) {
+          onThreadUpdate();
+        }
+      },
     };
-  }, [canvas, threadId]);
+  }, [canvas, threadId, onThreadUpdate]);
 
   // 全屏切换处理
   const handleFullscreenToggle = useCallback(() => {
@@ -381,6 +389,7 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
               value={chat.input}
               onChange={chat.setInput}
               onSubmit={chat.sendMessage}
+              onStop={chat.stop}
               isLoading={chat.isLoading}
               isCanvasMode={true}
               images={chat.images}

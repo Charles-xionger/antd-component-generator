@@ -7,6 +7,7 @@ import { createGraph } from "@/lib/agent";
 import prisma from "@/lib/database/prisma";
 import { formatCodeContext } from "@/lib/agent/utils";
 import { auth } from "@/lib/auth";
+import { generateThreadTitle } from "@/lib/agent/models";
 
 export async function POST(request: NextRequest) {
   try {
@@ -149,6 +150,7 @@ export async function POST(request: NextRequest) {
           // 追踪 ARCHITECT 是否已完成
           let hasArchitectCompleted = false;
           let accumulatedContent = ""; // 累积内容用于检测标签闭合
+          let aiResponseContent = ""; // 累积AI回复用于生成标题
 
           for await (const event of eventStream) {
             // 流式发送 AI 消息内容
@@ -200,8 +202,9 @@ export async function POST(request: NextRequest) {
               );
               controller.enqueue(chunk);
 
-              // 累积内容用于检测标签闭合
+              // 累积内容用于检测标签闭合和生成标题
               accumulatedContent += content;
+              aiResponseContent += content;
 
               // 检测 ARCHITECT 是否完成（标签闭合）
               // 注意：先发送内容，再检测闭合，确保前端能收到完整的 ARCHITECT 内容
@@ -265,6 +268,57 @@ export async function POST(request: NextRequest) {
           // ==========================================
           // 注意：artifact 解析和保存已移到前端处理
           // 前端会在流式完成后调用 /api/artifact/save
+
+          // ==========================================
+          // 6. 自动生成会话标题（如果是新会话）
+          // ==========================================
+          const shouldGenerateTitle =
+            thread &&
+            (thread.title === "新会话" ||
+              thread.title === "New Chat" ||
+              thread.title.endsWith("..."));
+
+          if (shouldGenerateTitle && aiResponseContent) {
+            try {
+              // 提取用户消息文本
+              const userMessageText =
+                typeof message === "string"
+                  ? message
+                  : Array.isArray(message)
+                  ? message.find((m) => m.type === "text")?.text || ""
+                  : "";
+
+              // 异步生成标题（不阻塞响应完成）
+              const newTitle = await generateThreadTitle(
+                userMessageText,
+                aiResponseContent,
+                model || "qwen-plus"
+              );
+
+              // 更新数据库中的标题
+              await prisma.thread.update({
+                where: { id: finalThreadId },
+                data: { title: newTitle },
+              });
+
+              // 发送标题更新事件到前端
+              const titleUpdateChunk = encoder.encode(
+                `data: ${JSON.stringify({
+                  type: "title_update",
+                  threadId: finalThreadId,
+                  title: newTitle,
+                })}\n\n`
+              );
+              controller.enqueue(titleUpdateChunk);
+
+              console.log(
+                `[标题生成] ✅ 会话 ${finalThreadId} 标题已更新: ${newTitle}`
+              );
+            } catch (error) {
+              console.error("[标题生成] ❌ 生成标题失败:", error);
+              // 标题生成失败不影响主流程，继续执行
+            }
+          }
 
           // 发送结束信号
           const endChunk = encoder.encode(
