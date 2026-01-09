@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { toast } from "sonner";
 import { MessageBuffer } from "@/lib/message-filter";
 import { useGenerationStore } from "@/stores/use-generation-store";
 
@@ -166,20 +167,6 @@ export function useChat(options: UseChatOptions = {}) {
     }
     abortControllerRef.current = new AbortController();
 
-    // Helper: read File to base64 (without prefix)
-    async function readFileAsBase64(file: File): Promise<string> {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result as string;
-          const base64Data = result.split(",")[1] || "";
-          resolve(base64Data);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-    }
-
     // Build payloadMessage: 始终发送字符串格式给后端
     const payloadMessage: string = userMessage.content;
 
@@ -221,6 +208,9 @@ export function useChat(options: UseChatOptions = {}) {
       // 创建消息缓冲器，处理流式传输时标签被拆分的问题
       const messageBuffer = new MessageBuffer();
 
+      // 标记是否需要为 Coder 创建新消息
+      let needNewMessageForCoder = false;
+
       // Process streaming response
       while (true) {
         const { done, value } = await reader.read();
@@ -236,6 +226,28 @@ export function useChat(options: UseChatOptions = {}) {
 
               if (data.type === "content" || data.content) {
                 const content = data.content || "";
+
+                // 🔥 如果是 Coder 阶段的第一个内容，创建新消息
+                if (needNewMessageForCoder && content) {
+                  console.log(
+                    "[useChat] Coder 开始输出，创建新消息:",
+                    content.substring(0, 20)
+                  );
+
+                  const newAssistantMessage: Message = {
+                    id: (Date.now() + 2).toString(),
+                    role: "assistant",
+                    content: "",
+                    toolCalls: [],
+                  };
+
+                  setMessages((prev) => [...prev, newAssistantMessage]);
+
+                  // 更新当前消息引用和内容
+                  assistantMessage = newAssistantMessage;
+                  assistantContent = "";
+                  needNewMessageForCoder = false;
+                }
 
                 // 使用消息缓冲器判断是否应该显示
                 const shouldShow = messageBuffer.append(content, data.metadata);
@@ -269,7 +281,7 @@ export function useChat(options: UseChatOptions = {}) {
                   onArtifactDetectedRef.current(assistantContent);
                 }
               } else if (data.type === "architect_complete") {
-                // ARCHITECT 完成，创建新的 assistant 消息用于 CODER
+                // ARCHITECT 完成
                 console.log("[useChat] ✅ 检测到 ARCHITECT 完成事件", {
                   当前消息数: messages.length,
                   当前assistant内容长度: assistantContent.length,
@@ -280,20 +292,17 @@ export function useChat(options: UseChatOptions = {}) {
                 // 🔥 切换到 Coding 阶段
                 useGenerationStore.getState().startCoding();
 
-                const newAssistantMessage: Message = {
-                  id: (Date.now() + 2).toString(),
-                  role: "assistant",
-                  content: "",
-                  toolCalls: [],
-                };
+                // ⚠️ 不要立即创建新消息和重置 assistantContent
+                // 等待 Coder 真正开始输出内容时（下一个 content chunk）再创建
+                // 这样可以避免 Architect 消息被"截断"显示
+                needNewMessageForCoder = true;
 
-                setMessages((prev) => [...prev, newAssistantMessage]);
+                console.log(
+                  "[useChat] Architect 完成，等待 Coder 输出时创建新消息"
+                );
 
-                // 更新当前消息引用和内容
-                assistantMessage = newAssistantMessage;
-                assistantContent = "";
-
-                console.log("[useChat] 已创建新消息用于 CODER");
+                // 继续处理后续的 content chunks
+                continue;
               } else if (data.type === "tool_start") {
                 // 使用 run_id 作为唯一标识符
                 const toolCallId =
@@ -380,8 +389,10 @@ export function useChat(options: UseChatOptions = {}) {
       }
 
       // 流式响应完成，触发回调
-      if (onStreamCompleteRef.current && assistantContent) {
-        onStreamCompleteRef.current(assistantContent);
+      // 注意：即使 assistantContent 为空也要触发，因为可能是 architect 完成后创建的新消息
+      // artifact 内容可能在前一条消息中
+      if (onStreamCompleteRef.current) {
+        onStreamCompleteRef.current(assistantContent || "");
       }
 
       // � 结束生成状态
@@ -426,7 +437,16 @@ export function useChat(options: UseChatOptions = {}) {
       setIsLoading(false);
       abortControllerRef.current = null;
     }
-  }, [api, input, isLoading, threadId, mcpConfigId]);
+  }, [
+    api,
+    input,
+    isLoading,
+    threadId,
+    mcpConfigId,
+    model,
+    images,
+    messages.length,
+  ]);
 
   /** 表单提交处理 */
   const handleSubmit = useCallback(
@@ -451,6 +471,244 @@ export function useChat(options: UseChatOptions = {}) {
     setError(null);
   }, []);
 
+  /** 强制重新加载历史消息 */
+  const reloadHistory = useCallback(async () => {
+    if (!threadId) return;
+
+    // 重置加载标记，强制重新加载
+    historyLoadedRef.current = null;
+
+    setIsLoading(true);
+    try {
+      const response = await fetch(`/api/agent/history/${threadId}`);
+      if (response.ok) {
+        const data = await response.json();
+        const formattedMessages = formatMessagesFromHistory(
+          data.messages || []
+        );
+        setMessages(formattedMessages);
+        historyLoadedRef.current = threadId;
+      }
+    } catch (err) {
+      console.error("Failed to reload history:", err);
+      setError(err instanceof Error ? err : new Error("Unknown error"));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [threadId]);
+
+  /** 重新生成消息：从 LangGraph 检查点重新执行，不重新发送消息 */
+  const regenerateFromMessage = useCallback(
+    async (messageId: string) => {
+      if (!threadId) return;
+
+      // 从消息 ID 中提取索引
+      const match = messageId.match(/^msg-(\d+)$/);
+      if (!match) {
+        toast.error("无效的消息 ID");
+        return;
+      }
+      const messageIndex = parseInt(match[1], 10);
+
+      // 查找目标消息
+      const targetMessage = messages[messageIndex];
+      if (!targetMessage || targetMessage.role !== "user") {
+        toast.error("只能重新生成用户消息");
+        return;
+      }
+
+      try {
+        setIsLoading(true);
+        setError(null);
+
+        // 触发流式响应开始回调
+        if (onStreamStartRef.current) {
+          onStreamStartRef.current();
+        }
+
+        // 创建新的 AbortController
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+        }
+        abortControllerRef.current = new AbortController();
+
+        // 🔥 调用新的 regenerate API，它会：
+        // 1. 删除该消息之后的所有消息和版本
+        // 2. 从 LangGraph 检查点重新执行
+        // 3. 不会重新发送用户消息
+        const response = await fetch("/api/agent/regenerate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            threadId,
+            messageId,
+          }),
+          signal: abortControllerRef.current.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`请求失败: ${response.status}`);
+        }
+
+        // 先重新加载历史消息，显示删除后的状态
+        await reloadHistory();
+
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error("No reader available");
+
+        // 使用消息缓冲区来过滤重复消息
+        const messageBuffer = new MessageBuffer();
+        let assistantContent = "";
+        let assistantMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          content: "",
+          toolCalls: [],
+        };
+        setMessages((prev) => [...prev, assistantMessage]);
+
+        // 标记：是否需要为 Coder 创建新消息
+        let needNewMessageForCoder = false;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = new TextDecoder().decode(value);
+          const lines = chunk
+            .split("\n")
+            .filter((line) => line.trim().startsWith("data:"));
+
+          for (const line of lines) {
+            const jsonStr = line.replace(/^data:\s*/, "");
+            if (!jsonStr || jsonStr === "[DONE]") continue;
+
+            try {
+              const data = JSON.parse(jsonStr);
+
+              if (data.type === "content") {
+                // 如果需要为 Coder 创建新消息，现在创建
+                if (needNewMessageForCoder && data.content) {
+                  console.log("[useChat] 🔥 检测到 Coder 开始输出，创建新消息");
+                  assistantMessage = {
+                    id: (Date.now() + 2).toString(),
+                    role: "assistant",
+                    content: "",
+                    toolCalls: [],
+                  };
+                  assistantContent = "";
+                  setMessages((prev) => [...prev, assistantMessage]);
+                  needNewMessageForCoder = false;
+                }
+
+                // 使用缓冲区过滤
+                const shouldShow = messageBuffer.append(
+                  data.content,
+                  data.metadata
+                );
+                if (!shouldShow) {
+                  continue;
+                }
+
+                assistantContent += data.content;
+
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMessage.id
+                      ? { ...msg, content: assistantContent }
+                      : msg
+                  )
+                );
+
+                const hasArtifact = assistantContent.includes("<boltArtifact");
+                if (hasArtifact && onArtifactDetectedRef.current) {
+                  onArtifactDetectedRef.current(assistantContent);
+                }
+              } else if (data.type === "architect_complete") {
+                useGenerationStore.getState().startCoding();
+                needNewMessageForCoder = true;
+              } else if (data.type === "tool_start") {
+                const toolCallId =
+                  data.tool_call_id || data.run_id || Date.now().toString();
+                const toolCall: ToolCall = {
+                  id: toolCallId,
+                  name: data.tool_name || data.tool || "unknown",
+                  args: data.args || {},
+                  status: "running",
+                };
+
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMessage.id
+                      ? {
+                          ...msg,
+                          toolCalls: [...(msg.toolCalls || []), toolCall],
+                        }
+                      : msg
+                  )
+                );
+
+                if (onToolCallRef.current) {
+                  onToolCallRef.current(toolCall);
+                }
+              } else if (data.type === "tool_end") {
+                const toolCallId = data.tool_call_id || data.run_id;
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMessage.id
+                      ? {
+                          ...msg,
+                          toolCalls: msg.toolCalls?.map((tc) =>
+                            tc.id === toolCallId
+                              ? {
+                                  ...tc,
+                                  status: "success" as const,
+                                  result: data.result || data.output,
+                                }
+                              : tc
+                          ),
+                        }
+                      : msg
+                  )
+                );
+              } else if (data.type === "error") {
+                setError(new Error(data.error));
+              }
+            } catch (e) {
+              console.error("Failed to parse SSE data:", e, jsonStr);
+            }
+          }
+        }
+
+        // 🔥 完成后总是调用 onStreamComplete（不管是否检测到 end 事件）
+        if (onStreamCompleteRef.current) {
+          onStreamCompleteRef.current(assistantContent);
+        }
+
+        setIsLoading(false);
+        toast.success("重新生成成功");
+      } catch (error) {
+        console.error("重新生成失败:", error);
+        toast.error("重新生成失败，请重试");
+        setIsLoading(false);
+        setError(error instanceof Error ? error : new Error("Unknown error"));
+      }
+    },
+    [
+      threadId,
+      messages,
+      reloadHistory,
+      api,
+      mcpConfigId,
+      model,
+      onStreamStartRef,
+      abortControllerRef,
+      onArtifactDetectedRef,
+      onToolCallRef,
+      onStreamCompleteRef,
+    ]
+  );
+
   return {
     // 状态
     messages,
@@ -468,6 +726,8 @@ export function useChat(options: UseChatOptions = {}) {
     // 消息操作
     sendMessage,
     clearMessages,
+    reloadHistory,
+    regenerateFromMessage,
 
     // 请求控制
     stop,

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { UnifiedChat } from "@/components/unified-chat";
-import { ChatSidebar } from "@/components/chat";
+import { ChatSidebar, HomeLanding } from "@/components/chat";
 import { HeaderClient } from "@/components/header-client";
 import { handleSignOut } from "@/app/actions/auth";
 import { toast } from "sonner";
@@ -43,11 +43,18 @@ export function HomeClient({ user }: HomeClientProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
+  // 首页显示状态：无会话时显示首页
+  const [showHomeLanding, setShowHomeLanding] = useState(
+    !searchParams.get("thread")
+  );
+  // 预设消息：从首页传入的初始消息
+  const [initialMessage, setInitialMessage] = useState<string | undefined>();
 
   // 当 selectedThreadId 改变时，更新 URL
   useEffect(() => {
     if (selectedThreadId) {
       router.replace(`/?thread=${selectedThreadId}`, { scroll: false });
+      setShowHomeLanding(false);
     } else {
       router.replace("/", { scroll: false });
     }
@@ -88,8 +95,24 @@ export function HomeClient({ user }: HomeClientProps) {
     }
   }, [searchParams]);
 
-  // 创建新会话
-  const createNewThread = async () => {
+  // 创建新会话 - 直接跳转到首页
+  const createNewThread = () => {
+    setSelectedThreadId(undefined);
+    setShowHomeLanding(true);
+    setInitialMessage(undefined);
+  };
+
+  // 点击首页按钮
+  const handleHomeClick = () => {
+    setSelectedThreadId(undefined);
+    setShowHomeLanding(true);
+    setInitialMessage(undefined);
+  };
+
+  // 从首页提交消息
+  const handleHomeSubmit = async (message: string) => {
+    console.log("[HomeClient] handleHomeSubmit 被调用:", message);
+    // 创建新会话并传入预设消息
     try {
       const response = await fetch("/api/agent/history", {
         method: "POST",
@@ -99,10 +122,18 @@ export function HomeClient({ user }: HomeClientProps) {
         body: JSON.stringify({ title: "新会话" }),
       });
       const data = await response.json();
+      console.log("[HomeClient] 会话创建响应:", data);
       if (data.thread) {
         setThreads((prev) => [data.thread, ...prev]);
         setSelectedThreadId(data.thread.id);
-        toast.success("新会话创建成功");
+        setShowHomeLanding(false);
+        setInitialMessage(message);
+        console.log(
+          "[HomeClient] 状态已更新 - threadId:",
+          data.thread.id,
+          "initialMessage:",
+          message
+        );
       } else {
         throw new Error("创建会话响应异常");
       }
@@ -201,9 +232,11 @@ export function HomeClient({ user }: HomeClientProps) {
     fetchThreads();
   }, [fetchThreads]);
 
-  const title = selectedThreadId
+  const title = showHomeLanding
+    ? "Antd Component Generator"
+    : selectedThreadId
     ? threads.find((t) => t.id === selectedThreadId)?.title || "会话"
-    : "Next LangGraph Demo";
+    : "Antd Component Generator";
 
   return (
     <div className="h-screen flex bg-gray-50 overflow-hidden">
@@ -217,8 +250,14 @@ export function HomeClient({ user }: HomeClientProps) {
           threads={threads}
           selectedThreadId={selectedThreadId}
           isLoading={isLoading}
-          onThreadSelect={setSelectedThreadId}
+          showingHome={showHomeLanding}
+          onThreadSelect={(id) => {
+            setSelectedThreadId(id);
+            setShowHomeLanding(false);
+            setInitialMessage(undefined);
+          }}
           onNewThread={createNewThread}
+          onHomeClick={handleHomeClick}
           onDeleteThread={deleteThread}
           onRenameThread={renameThread}
           onToggleFavorite={toggleFavorite}
@@ -246,11 +285,14 @@ export function HomeClient({ user }: HomeClientProps) {
 
         {/* Unified Chat 区域 */}
         <div className="flex-1 overflow-hidden">
-          {selectedThreadId ? (
+          {showHomeLanding ? (
+            <HomeLanding onSubmit={handleHomeSubmit} />
+          ) : selectedThreadId ? (
             <UnifiedChat
               key={selectedThreadId}
               threadId={selectedThreadId}
               onThreadUpdate={fetchThreads}
+              initialMessage={initialMessage}
             />
           ) : (
             <div className="h-full flex items-center justify-center text-gray-500">

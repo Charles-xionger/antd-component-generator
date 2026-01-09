@@ -42,6 +42,7 @@ import {
   Trash2,
   Edit,
   Star,
+  Home,
 } from "lucide-react";
 
 interface Thread {
@@ -61,8 +62,10 @@ interface ChatSidebarProps {
   threads: Thread[];
   selectedThreadId?: string;
   isLoading?: boolean;
+  showingHome?: boolean;
   onThreadSelect: (threadId: string) => void;
   onNewThread: () => void;
+  onHomeClick: () => void;
   onDeleteThread: (threadId: string) => void;
   onRenameThread: (threadId: string, newTitle: string) => void;
   onToggleFavorite: (threadId: string, favorite: boolean) => void;
@@ -73,8 +76,10 @@ export function ChatSidebar({
   threads,
   selectedThreadId,
   isLoading = false,
+  showingHome = false,
   onThreadSelect,
   onNewThread,
+  onHomeClick,
   onDeleteThread,
   onRenameThread,
   onToggleFavorite,
@@ -89,8 +94,16 @@ export function ChatSidebar({
 
   return (
     <div className="h-full flex flex-col bg-background border-r">
-      {/* New Chat Button */}
-      <div className="p-4 border-b">
+      {/* Home and New Chat Buttons */}
+      <div className="p-4 border-b space-y-2">
+        <Button
+          onClick={onHomeClick}
+          className="w-full justify-start gap-2"
+          variant={showingHome ? "secondary" : "ghost"}
+        >
+          <Home className="h-4 w-4" />
+          首页
+        </Button>
         <Button
           onClick={onNewThread}
           className="w-full justify-start gap-2"

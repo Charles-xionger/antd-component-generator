@@ -21,13 +21,19 @@ import { useIsGenerating } from "@/stores/use-generation-store";
 interface UnifiedChatProps {
   threadId?: string;
   onThreadUpdate?: () => void;
+  initialMessage?: string;
 }
 
-export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
+export function UnifiedChat({
+  threadId,
+  onThreadUpdate,
+  initialMessage,
+}: UnifiedChatProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // 🔥 获取生成状态
   const isGenerating = useIsGenerating();
@@ -41,19 +47,19 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
   const [isMcpLoading, setIsMcpLoading] = useState(false);
 
   // Model selection state with localStorage persistence
-  const [selectedModel, setSelectedModel] = useState<string>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("selectedModel");
-      return saved || "qwen-plus";
+  const [selectedModel, setSelectedModel] = useState<string>("qwen-plus");
+
+  // Load from localStorage after mount (client-side only)
+  useEffect(() => {
+    const saved = localStorage.getItem("selectedModel");
+    if (saved) {
+      setSelectedModel(saved);
     }
-    return "qwen-plus";
-  });
+  }, []);
 
   // Persist model selection to localStorage
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      localStorage.setItem("selectedModel", selectedModel);
-    }
+    localStorage.setItem("selectedModel", selectedModel);
   }, [selectedModel]);
 
   // Sandbox state
@@ -67,7 +73,7 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
   const chatCallbacksRef = useRef<{
     onArtifactDetected?: (content: string) => void;
     onStreamStart?: () => void;
-    onStreamComplete?: () => Promise<void>;
+    onStreamComplete?: (content: string) => void;
     onTitleUpdate?: (threadId: string, title: string) => void;
   }>({});
 
@@ -78,13 +84,42 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
     onArtifactDetected: (content) =>
       chatCallbacksRef.current.onArtifactDetected?.(content),
     onStreamStart: () => chatCallbacksRef.current.onStreamStart?.(),
-    onStreamComplete: () => chatCallbacksRef.current.onStreamComplete?.(),
+    onStreamComplete: (content) =>
+      chatCallbacksRef.current.onStreamComplete?.(content),
     onTitleUpdate: (threadId, title) =>
       chatCallbacksRef.current.onTitleUpdate?.(threadId, title),
   });
 
   // Canvas hook - 传入 messages 用于实时监听
   const canvas = useCanvas({ threadId, messages: chat.messages });
+
+  // 用 ref 跟踪是否已经处理过 initialMessage
+  const initialMessageSentRef = useRef(false);
+  const pendingAutoSendRef = useRef(false);
+
+  // 第一步：接收 initialMessage，设置输入框
+  useEffect(() => {
+    if (initialMessage && !initialMessageSentRef.current) {
+      initialMessageSentRef.current = true;
+      pendingAutoSendRef.current = true;
+      chat.setInput(initialMessage);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialMessage]);
+
+  // 第二步：监听 chat.input 变化，当输入框被填充后自动发送
+  useEffect(() => {
+    if (pendingAutoSendRef.current && chat.input && !chat.isLoading) {
+      pendingAutoSendRef.current = false;
+
+      // 短暂延迟确保历史加载完成
+      const timer = setTimeout(() => {
+        chat.sendMessage();
+      }, 1000);
+
+      return () => clearTimeout(timer);
+    }
+  }, [chat.input, chat.isLoading, chat.messages.length, chat.sendMessage]);
 
   // 设置 chat 回调（依赖 canvas）
   useEffect(() => {
@@ -114,7 +149,9 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
       onStreamComplete: async () => {
         // 流式响应完成
         if (canvas.artifact && canvas.artifact.files.length > 0) {
-          console.log("[UnifiedChat] 代码生成完成，保存到后端");
+          console.log("[UnifiedChat] 代码生成完成，准备保存到后端", {
+            filesCount: canvas.artifact.files.length,
+          });
 
           // 调用保存接口
           try {
@@ -132,9 +169,9 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
 
             if (response.ok) {
               const result = await response.json();
-              console.log("[UnifiedChat] 保存成功:", result);
+              console.log("[UnifiedChat] 保存结果:", result);
 
-              // 刷新版本列表
+              // 刷新版本列表，更新下拉框选项
               await canvas.refreshVersionList();
               console.log("[UnifiedChat] 版本列表刷新完成");
 
@@ -224,7 +261,6 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
     canvas.artifact,
     canvas.shouldSendToSandbox,
     canvas.sendFilesToSandbox,
-    canvas,
   ]);
 
   // ESC 键退出全屏
@@ -357,13 +393,21 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
               ref={messagesContainerRef}
               className="flex-1 space-y-4 overflow-y-auto p-4 custom-scrollbar"
             >
-              {chat.messages.length === 0 && <EmptyState />}
-
               {chat.messages.map((message) => (
                 <MessageItem
                   key={message.id}
                   message={message}
                   messages={chat.messages}
+                  threadId={threadId || ""}
+                  onMessageDeleted={async () => {
+                    // 🔥 暂时注释掉刷新逻辑，待优化后再启用
+                    // await chat.reloadHistory();
+                    // await canvas.refreshVersionList();
+                    console.log("[UnifiedChat] 消息删除回调（功能已禁用）");
+                  }}
+                  onRegenerate={(messageId) => {
+                    chat.regenerateFromMessage(messageId);
+                  }}
                 />
               ))}
 
@@ -386,6 +430,7 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
 
             {/* Input Bar */}
             <InputBar
+              ref={inputRef}
               value={chat.input}
               onChange={chat.setInput}
               onSubmit={chat.sendMessage}
@@ -430,19 +475,6 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
           onClose={handleFullscreenClose}
         />
       )}
-    </div>
-  );
-}
-
-// Empty state component
-function EmptyState() {
-  return (
-    <div className="flex h-full items-center justify-center text-gray-500">
-      <div className="text-center">
-        <div className="mb-4 text-4xl">💬</div>
-        <div className="mb-2 text-lg font-medium">开始对话</div>
-        <div className="text-sm">你可以问我任何问题，或者让我帮你生成代码</div>
-      </div>
     </div>
   );
 }

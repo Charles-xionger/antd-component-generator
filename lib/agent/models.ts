@@ -20,7 +20,7 @@ export function createLLM(
   modelName: string,
   config: ModelConfig
 ): BaseChatModel {
-  // Gemini 模型
+  // Gemini 模型（支持视觉）
   if (modelName.startsWith("gemini")) {
     return new ChatGoogleGenerativeAI({
       model: modelName,
@@ -30,10 +30,10 @@ export function createLLM(
     });
   }
 
-  // claud 模型
+  // Claude 模型（支持视觉）
   if (modelName.startsWith("claud")) {
     return new ChatOpenAI({
-      model: "claude-opus-4-5-20251101", // 固定使用 sonnet 4
+      model: "claude-opus-4-5-20251101",
       temperature: 0.3,
       apiKey: process.env.AI302_API_KEY,
       configuration: {
@@ -44,9 +44,9 @@ export function createLLM(
     });
   }
 
-  // 默认使用 Qwen 或其他 OpenAI 兼容模型
+  // 默认使用 Qwen 视觉模型（qwen-vl-max-latest 支持图片理解）
   return new ChatOpenAI({
-    model: "qwen3-max",
+    model: "qwen-vl-max-latest", // 使用支持视觉的模型
     temperature: config.temperature,
     apiKey: process.env.ALIYUN_API_KEY,
     configuration: {

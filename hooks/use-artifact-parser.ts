@@ -12,6 +12,7 @@ export interface ParsedFile {
 export interface ArtifactData {
   id: string;
   title: string;
+  version?: number; // 版本号（从 <boltArtifact version="N"> 中提取）
   files: ParsedFile[];
   currentGeneratingFile: string | null; // 当前正在生成的文件路径
 }
@@ -53,20 +54,24 @@ class ArtifactParserBuffer {
     // 提取 id 和 title（也支持未闭合的标签）
     let id = "";
     let title = "";
+    let version: number | undefined;
 
-    // 尝试完整匹配
+    // 尝试完整匹配（包含 version）
     const fullMatch = content.match(
-      /<boltArtifact[^>]*id="([^"]*)"[^>]*title="([^"]*)"[^>]*>/
+      /<boltArtifact[^>]*id="([^"]*)"[^>]*title="([^"]*)"[^>]*(?:version="(\d+)")?[^>]*>/
     );
     if (fullMatch) {
       id = fullMatch[1];
       title = fullMatch[2];
+      version = fullMatch[3] ? parseInt(fullMatch[3], 10) : undefined;
     } else {
-      // 容错：分别提取 id 和 title
+      // 容错：分别提取 id、title 和 version
       const idMatch = content.match(/<boltArtifact[^>]*id="([^"]*)"/);
       const titleMatch = content.match(/title="([^"]*)"/);
+      const versionMatch = content.match(/version="(\d+)"/);
       if (idMatch) id = idMatch[1];
       if (titleMatch) title = titleMatch[1];
+      if (versionMatch) version = parseInt(versionMatch[1], 10);
     }
 
     if (!id && !title) {
@@ -77,7 +82,7 @@ class ArtifactParserBuffer {
     const { files, currentGeneratingFile } =
       this.extractFilesWithState(content);
 
-    return { id, title, files, currentGeneratingFile };
+    return { id, title, version, files, currentGeneratingFile };
   }
 
   /**

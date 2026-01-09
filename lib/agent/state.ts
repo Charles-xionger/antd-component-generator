@@ -23,6 +23,14 @@ export interface AgentState {
 export const StateAnnotations = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
     reducer: (x, y) => {
+      // 特殊处理：如果 y 的第一个元素有 __replace__ 标记，则直接替换
+      // 这用于删除消息等需要完全替换消息列表的场景
+      if (y && y.length > 0 && (y[0] as any).__replace__) {
+        // 移除标记并返回实际消息列表
+        const [_marker, ...actualMessages] = y;
+        return actualMessages;
+      }
+
       // 如果 y 是空数组，返回 x
       if (!y || y.length === 0) return x;
 

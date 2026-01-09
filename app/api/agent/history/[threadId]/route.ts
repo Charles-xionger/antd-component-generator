@@ -26,9 +26,10 @@ export async function GET(
     const state = await graph.getState(config);
 
     // 格式化消息，提取需要的字段
+    // 使用索引作为消息ID，因为LangGraph消息的msg.id可能不稳定
     const messages =
-      state.values?.messages?.map((msg: BaseMessage) => ({
-        id: msg.id,
+      state.values?.messages?.map((msg: BaseMessage, index: number) => ({
+        id: `msg-${index}`, // 使用索引作为ID
         type: msg._getType?.() || "unknown",
         content: msg.content,
         // 工具调用信息（如果有，用于 AI 消息）

@@ -15,7 +15,11 @@ interface SaveArtifactRequest {
 
 export async function POST(request: NextRequest) {
   try {
-    const { threadId, files }: SaveArtifactRequest = await request.json();
+    const {
+      threadId,
+      files,
+      versionNumber,
+    }: SaveArtifactRequest & { versionNumber?: number } = await request.json();
 
     if (!threadId || !files || files.length === 0) {
       return Response.json(
@@ -24,8 +28,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    console.log("[Artifact Save] 收到保存请求:", {
+      threadId,
+      filesCount: files.length,
+      versionNumber,
+    });
+
     // ==========================================
-    // 纯数据持久化：不做解析，直接存储前端传来的数据
+    // 智能持久化：
+    // 1. 如果提供了 versionNumber，检查是否已存在（Coder 已创建）
+    // 2. 如果已存在，更新文件内容
+    // 3. 如果不存在，创建新版本
     // ==========================================
 
     // 查找该 thread 下的 artifact
@@ -34,7 +47,7 @@ export async function POST(request: NextRequest) {
       include: {
         versions: {
           orderBy: { versionNumber: "desc" },
-          take: 1,
+          take: versionNumber ? 10 : 1, // 如果指定版本号，多查几个
           include: { files: true },
         },
       },
@@ -42,6 +55,28 @@ export async function POST(request: NextRequest) {
 
     const currentVersion = artifact?.versions[0];
     const currentFiles = currentVersion?.files || [];
+
+    // 检查指定的版本是否已存在
+    let existingVersion = null;
+    if (versionNumber && artifact) {
+      existingVersion = artifact.versions.find(
+        (v) => v.versionNumber === versionNumber
+      );
+
+      if (existingVersion) {
+        console.log(
+          `[Artifact Save] 版本 ${versionNumber} 已存在（Coder 已创建），跳过保存`
+        );
+        return Response.json({
+          success: true,
+          artifactId: artifact.id,
+          versionId: existingVersion.id,
+          versionNumber: existingVersion.versionNumber,
+          message: "Version already exists (created by Coder)",
+          skipped: true,
+        });
+      }
+    }
 
     if (!artifact) {
       // 创建新的 Artifact 和第一个版本
