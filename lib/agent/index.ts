@@ -1,6 +1,6 @@
 import "dotenv/config";
 
-import { START, StateGraph } from "@langchain/langgraph";
+import { START, END, StateGraph } from "@langchain/langgraph";
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import { StateAnnotations } from "./state";
 import { architect, coder } from "./nodes";
@@ -14,14 +14,15 @@ const postgresCheckpointer = PostgresSaver.fromConnString(
 await postgresCheckpointer.setup();
 
 /**
- * 创建主图 (Architect → Coder)
+ * 创建主图 (Architect → Coder → END)
  */
 export async function createGraph() {
   const workflow = new StateGraph(StateAnnotations)
     .addNode("architect", architect)
     .addNode("coder", coder)
     .addEdge(START, "architect")
-    .addEdge("architect", "coder");
+    .addEdge("architect", "coder")
+    .addEdge("coder", END);
 
   const graph = workflow.compile({
     checkpointer: postgresCheckpointer,

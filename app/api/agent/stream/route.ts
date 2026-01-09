@@ -96,21 +96,25 @@ export async function POST(request: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          // 构建多模态消息内容（只包含用户输入，不注入 codeContext）
-          // codeContext 通过 state.codeContext 传递给 agent，避免污染用户消息
+          // 构建多模态消息内容（只包含用户输入）
+          // codeContext 通过 state.codeContext 传递，agent 会从消息历史中获取代码上下文
           let messageContent:
             | string
             | Array<{
                 type: string;
                 text?: string;
-                image_url?: { url: string; detail?: string };
+                source_type?: string;
+                data?: string;
+                mime_type?: string;
               }> = message;
 
           if (images && images.length > 0) {
             const imageBlocks: Array<{
               type: string;
               text?: string;
-              image_url?: { url: string; detail?: string };
+              source_type?: string;
+              data?: string;
+              mime_type?: string;
             }> = [];
 
             // 添加用户的文本消息
@@ -119,16 +123,20 @@ export async function POST(request: NextRequest) {
             }
 
             // images 是 {dataUrl, mime_type} 对象数组
-            // LangChain 统一使用 image_url 格式，支持 Gemini、Claude、OpenAI 等
+            // LangGraph 要求图片格式：type: "image", source_type: "base64", data: base64字符串, mime_type: MIME类型
             for (const img of images) {
               const imgData = img as { dataUrl: string; mime_type: string };
 
+              // 从 data URL 中提取纯 base64 数据（移除 "data:image/png;base64," 前缀）
+              const base64Data = imgData.dataUrl.includes(",")
+                ? imgData.dataUrl.split(",")[1]
+                : imgData.dataUrl;
+
               imageBlocks.push({
-                type: "image_url",
-                image_url: {
-                  url: imgData.dataUrl, // 使用完整的 data URL
-                  detail: "high", // 高清晰度，更好的图片识别
-                },
+                type: "image",
+                source_type: "base64",
+                data: base64Data,
+                mime_type: imgData.mime_type, // 添加 MIME 类型
               });
             }
 
@@ -138,13 +146,14 @@ export async function POST(request: NextRequest) {
               imageCount: images.length,
               hasText: !!message,
               firstImagePreview: images[0]?.dataUrl?.substring(0, 50) + "...",
+              mimeType: images[0]?.mime_type,
             });
           }
 
           const inputMessage = new HumanMessage({ content: messageContent });
 
           // 使用 streamEvents 获取流式响应
-          // codeContext 通过 state 传递，在 nodes.ts 的 SystemMessage 中注入
+          // codeContext 通过 state 传递，agent 通过消息历史获取代码上下文，不在 prompt 中重复注入
           const eventStream = graph.streamEvents(
             {
               messages: [inputMessage],
@@ -234,6 +243,25 @@ export async function POST(request: NextRequest) {
                 );
                 controller.enqueue(architectCompleteChunk);
               }
+            }
+
+            // 监听 architect 节点完成事件（更可靠的完成信号）
+            if (
+              event.event === "on_chain_end" &&
+              event.name === "architect" &&
+              !hasArchitectCompleted
+            ) {
+              hasArchitectCompleted = true;
+              console.log("[Stream] ✅ ARCHITECT 节点完成（on_chain_end）");
+
+              // 发送 ARCHITECT 完成事件
+              const architectCompleteChunk = encoder.encode(
+                `data: ${JSON.stringify({
+                  type: "architect_complete",
+                  threadId: finalThreadId,
+                })}\n\n`
+              );
+              controller.enqueue(architectCompleteChunk);
             }
 
             // 处理工具调用开始
