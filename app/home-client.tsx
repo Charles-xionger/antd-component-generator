@@ -6,6 +6,7 @@ import { UnifiedChat } from "@/components/unified-chat";
 import { ChatSidebar, HomeLanding } from "@/components/chat";
 import { HeaderClient } from "@/components/header-client";
 import { handleSignOut } from "@/app/actions/auth";
+import { useGenerationStore } from "@/stores/use-generation-store";
 import { toast } from "sonner";
 
 interface Thread {
@@ -238,6 +239,12 @@ export function HomeClient({ user }: HomeClientProps) {
     ? threads.find((t) => t.id === selectedThreadId)?.title || "会话"
     : "Antd Component Generator";
 
+  const onSignOut = async () => {
+    // 清除 Zustand 状态
+    useGenerationStore.getState().reset();
+    await handleSignOut();
+  };
+
   return (
     <div className="h-screen flex bg-gray-50 overflow-hidden">
       {/* 左侧边栏 */}
@@ -280,7 +287,7 @@ export function HomeClient({ user }: HomeClientProps) {
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
           title={title}
           user={user}
-          handleSignOut={handleSignOut}
+          handleSignOut={onSignOut}
         />
 
         {/* Unified Chat 区域 */}
