@@ -3,6 +3,7 @@
 
 import { useMemo } from "react";
 import Image from "next/image";
+import { Streamdown } from "streamdown";
 import type { Message } from "@/hooks/use-chat";
 import type { Artifact } from "@/components/canvas";
 import { ThinkingCard } from "./thinking-card";
@@ -133,9 +134,9 @@ export function MessageItem({ message, messages }: MessageItemProps) {
         {message.content && (
           <div className="max-w-[85%]">
             <div className="rounded-lg bg-primary px-4 py-2 text-primary-foreground">
-              <div className="whitespace-pre-wrap wrap-break-word">
+              <Streamdown className="prose prose-sm max-w-none">
                 {message.content}
-              </div>
+              </Streamdown>
             </div>
           </div>
         )}
@@ -158,9 +159,12 @@ export function MessageItem({ message, messages }: MessageItemProps) {
           {/* Architect 开场白 */}
           {architectOpeningText && (
             <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-              <div className="whitespace-pre-wrap text-sm">
+              <Streamdown
+                className="prose prose-sm max-w-none text-sm"
+                isAnimating={architectStreaming}
+              >
                 {architectOpeningText}
-              </div>
+              </Streamdown>
             </div>
           )}
 
@@ -176,16 +180,21 @@ export function MessageItem({ message, messages }: MessageItemProps) {
           {/* Architect 结束语 */}
           {architectClosingText && !architectStreaming && (
             <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-              <div className="whitespace-pre-wrap text-sm">
+              <Streamdown className="prose prose-sm max-w-none text-sm">
                 {architectClosingText}
-              </div>
+              </Streamdown>
             </div>
           )}
 
           {/* Coding 开场白 */}
           {openingText && (
             <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-              <div className="whitespace-pre-wrap text-sm">{openingText}</div>
+              <Streamdown
+                className="prose prose-sm max-w-none text-sm"
+                isAnimating={codingStreaming}
+              >
+                {openingText}
+              </Streamdown>
             </div>
           )}
 
@@ -200,7 +209,9 @@ export function MessageItem({ message, messages }: MessageItemProps) {
           {/* Coding 结束语 */}
           {closingText && !codingStreaming && (
             <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-              <div className="whitespace-pre-wrap text-sm">{closingText}</div>
+              <Streamdown className="prose prose-sm max-w-none text-sm">
+                {closingText}
+              </Streamdown>
             </div>
           )}
         </div>
@@ -221,7 +232,12 @@ export function MessageItem({ message, messages }: MessageItemProps) {
           {/* 开场白 - 即使没有 artifact 标签也显示 */}
           {openingText && (
             <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-              <div className="whitespace-pre-wrap text-sm">{openingText}</div>
+              <Streamdown
+                className="prose prose-sm max-w-none text-sm"
+                isAnimating={isStreaming}
+              >
+                {openingText}
+              </Streamdown>
             </div>
           )}
 
@@ -233,7 +249,9 @@ export function MessageItem({ message, messages }: MessageItemProps) {
           {/* 结束语 */}
           {closingText && !isStreaming && (
             <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-              <div className="whitespace-pre-wrap text-sm">{closingText}</div>
+              <Streamdown className="prose prose-sm max-w-none text-sm">
+                {closingText}
+              </Streamdown>
             </div>
           )}
         </div>
@@ -254,7 +272,9 @@ export function MessageItem({ message, messages }: MessageItemProps) {
         <div className="flex justify-start">
           <div className="max-w-[85%]">
             <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-              <div className="whitespace-pre-wrap">{message.content}</div>
+              <Streamdown className="prose prose-sm max-w-none">
+                {message.content}
+              </Streamdown>
             </div>
           </div>
         </div>
@@ -267,9 +287,12 @@ export function MessageItem({ message, messages }: MessageItemProps) {
           {/* 开场白 */}
           {architectOpeningText && (
             <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-              <div className="whitespace-pre-wrap text-sm">
+              <Streamdown
+                className="prose prose-sm max-w-none text-sm"
+                isAnimating={isStreaming}
+              >
                 {architectOpeningText}
-              </div>
+              </Streamdown>
             </div>
           )}
 
@@ -283,9 +306,9 @@ export function MessageItem({ message, messages }: MessageItemProps) {
           {/* 结束语 */}
           {architectClosingText && !isStreaming && (
             <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-              <div className="whitespace-pre-wrap text-sm">
+              <Streamdown className="prose prose-sm max-w-none text-sm">
                 {architectClosingText}
-              </div>
+              </Streamdown>
             </div>
           )}
         </div>
@@ -299,7 +322,9 @@ export function MessageItem({ message, messages }: MessageItemProps) {
       <div className="flex justify-start">
         <div className="max-w-[85%]">
           <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-            <div className="whitespace-pre-wrap">{message.content}</div>
+            <Streamdown className="prose prose-sm max-w-none">
+              {message.content}
+            </Streamdown>
           </div>
         </div>
       </div>
@@ -315,7 +340,9 @@ export function MessageItem({ message, messages }: MessageItemProps) {
     <div className="flex justify-start">
       <div className="max-w-[85%]">
         <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-          <div className="whitespace-pre-wrap">{message.content}</div>
+          <Streamdown className="prose prose-sm max-w-none">
+            {message.content}
+          </Streamdown>
         </div>
       </div>
     </div>

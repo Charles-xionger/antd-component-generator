@@ -5,6 +5,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { Loader2 } from "lucide-react";
 import { SplitPane, Pane } from "react-split-pane";
 import "react-split-pane/styles.css";
+import "@/app/split-pane.css";
 
 // Hooks
 import { useChat } from "@/hooks/use-chat";
@@ -300,6 +301,29 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
   useEffect(() => {
     fetchMcpConfigs();
   }, [fetchMcpConfigs]);
+
+  // Fix for fast dragging issue
+  useEffect(() => {
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.classList.contains("Resizer")) {
+        document.body.classList.add("dragging");
+      }
+    };
+
+    const handleMouseUp = () => {
+      document.body.classList.remove("dragging");
+    };
+
+    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.body.classList.remove("dragging");
+    };
+  }, []);
 
   return (
     <div className="h-full bg-background">

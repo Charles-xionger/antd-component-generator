@@ -5,6 +5,26 @@
   z-index: 1;
   box-sizing: border-box;
   background-clip: padding-box;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+/* Fix for fast dragging issue - prevent pointer events loss */
+.Resizer.vertical:active {
+  pointer-events: all !important;
+  cursor: col-resize !important;
+}
+
+/* Ensure body doesn't interfere with dragging */
+body.dragging * {
+  user-select: none !important;
+  pointer-events: none !important;
+}
+
+body.dragging .Resizer {
+  pointer-events: all !important;
 }
 
 .Resizer:hover {
