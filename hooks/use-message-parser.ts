@@ -29,10 +29,23 @@ export interface ParsedMessageData {
 /**
  * 提取开场白（boltArtifact 之前的内容）
  * 支持流式：即使标签未出现，也提取当前所有内容作为开场白
+ * 修复：检测代码块中的 artifact，避免破坏 markdown 结构
  */
 export function extractOpeningText(content: string): string | null {
-  // 如果内容包含 <boltArtifact 标签，提取标签之前的内容
+  // 如果内容包含 <boltArtifact 标签
   if (content.includes("<boltArtifact")) {
+    // 检测是否在代码块中：```xml\n<boltArtifact 或 ```\n<boltArtifact
+    const codeBlockMatch = content.match(
+      /^([\s\S]*?)```[\w]*\s*\n<boltArtifact/
+    );
+
+    if (codeBlockMatch) {
+      // artifact 在代码块中，提取到代码块开始标记之前的内容
+      const beforeCodeBlock = codeBlockMatch[1].trim();
+      return beforeCodeBlock || null;
+    }
+
+    // artifact 不在代码块中，正常提取
     const match = content.match(/^([\s\S]*?)<boltArtifact/);
     if (match && match[1].trim()) {
       return match[1].trim();
@@ -54,6 +67,7 @@ export function extractOpeningText(content: string): string | null {
 /**
  * 提取结束语（boltArtifact 之后的内容）
  * 只在标签完整闭合后提取
+ * 修复：如果 artifact 在代码块中，从代码块结束标记后提取
  */
 export function extractClosingText(content: string): string | null {
   // 必须有完整的闭合标签才提取结束语
@@ -61,6 +75,16 @@ export function extractClosingText(content: string): string | null {
     return null;
   }
 
+  // 检测 artifact 是否在代码块中：</boltArtifact>\n```
+  const codeBlockMatch = content.match(/<\/boltArtifact>\s*\n```([\s\S]*)$/);
+
+  if (codeBlockMatch) {
+    // artifact 在代码块中，从代码块结束标记之后提取
+    const afterCodeBlock = codeBlockMatch[1].trim();
+    return afterCodeBlock || null;
+  }
+
+  // artifact 不在代码块中，正常提取
   const match = content.match(/<\/boltArtifact>([\s\S]*?)$/);
   if (match && match[1].trim()) {
     return match[1].trim();
