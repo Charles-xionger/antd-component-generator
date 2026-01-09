@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { MCPConfigPanel } from "@/components/mcp/config-panel";
+import { useIsGenerating } from "@/stores/use-generation-store";
 
 interface ImageItem {
   dataUrl: string;
@@ -227,6 +228,10 @@ export function InputBar({
 }: InputBarProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // 🔥 获取生成状态
+  const isGenerating = useIsGenerating();
+  const isDisabled = isLoading || isGenerating;
+
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "inherit";
@@ -239,7 +244,7 @@ export function InputBar({
     if (
       e.key === "Enter" &&
       !e.shiftKey &&
-      !isLoading &&
+      !isDisabled &&
       (value.trim() || images.length > 0)
     ) {
       e.preventDefault();
@@ -295,7 +300,7 @@ export function InputBar({
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={placeholder || "Ask a follow-up..."}
-            disabled={isLoading}
+            disabled={isDisabled}
             className="w-full bg-transparent border-none outline-none text-foreground placeholder-muted-foreground text-sm py-1 resize-none min-h-6 max-h-50 overflow-y-auto"
           />
         </div>
@@ -319,14 +324,14 @@ export function InputBar({
 
           <button
             onClick={onSubmit}
-            disabled={(!value.trim() && images.length === 0) || isLoading}
+            disabled={(!value.trim() && images.length === 0) || isDisabled}
             className={`flex items-center justify-center w-8 h-8 rounded-lg transition-all ${
-              (!value.trim() && images.length === 0) || isLoading
-                ? "bg-muted text-muted-foreground"
+              (!value.trim() && images.length === 0) || isDisabled
+                ? "bg-muted text-muted-foreground cursor-not-allowed"
                 : "bg-muted text-foreground hover:bg-accent"
             }`}
           >
-            {isLoading ? (
+            {isDisabled ? (
               <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
             ) : (
               <ArrowUp className="h-5 w-5 stroke-[2.5px]" />

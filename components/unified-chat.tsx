@@ -14,7 +14,9 @@ import { useCanvas } from "@/hooks/use-canvas";
 // Components
 import { type MCPConfig } from "@/components/mcp";
 import { MessageItem, InputBar } from "@/components/chat";
+import { GenerationStatusCard } from "@/components/chat/generation-status-card";
 import { CanvasPanel, FullscreenPreview } from "@/components/canvas";
+import { useIsGenerating } from "@/stores/use-generation-store";
 
 interface UnifiedChatProps {
   threadId?: string;
@@ -26,6 +28,9 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
+
+  // 🔥 获取生成状态
+  const isGenerating = useIsGenerating();
 
   // 保留 onThreadUpdate 参数以供将来使用
   void onThreadUpdate;
@@ -254,18 +259,26 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
   }, []);
 
   // Scroll to bottom when messages change (only if user is not scrolling)
+  // 🔥 生成中强制滚动到底部
   useEffect(() => {
-    if (!isUserScrolling) {
+    if (!isUserScrolling || isGenerating) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [chat.messages, isUserScrolling]);
+  }, [chat.messages, isUserScrolling, isGenerating]);
 
   // Detect user scrolling
+  // 🔥 生成中禁用手动滚动
   useEffect(() => {
     const container = messagesContainerRef.current;
     if (!container) return;
 
     const handleScroll = () => {
+      // 生成中禁用手动滚动检测
+      if (isGenerating) {
+        setIsUserScrolling(false);
+        return;
+      }
+
       const { scrollTop, scrollHeight, clientHeight } = container;
       const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
 
@@ -280,7 +293,7 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
 
     container.addEventListener("scroll", handleScroll);
     return () => container.removeEventListener("scroll", handleScroll);
-  }, []);
+  }, [isGenerating]);
 
   // Fetch MCP configurations
   const fetchMcpConfigs = useCallback(async () => {
@@ -345,6 +358,9 @@ export function UnifiedChat({ threadId, onThreadUpdate }: UnifiedChatProps) {
                   messages={chat.messages}
                 />
               ))}
+
+              {/* 🔥 生成状态卡片 */}
+              <GenerationStatusCard />
 
               {chat.isLoading && (
                 <div className="flex justify-start">

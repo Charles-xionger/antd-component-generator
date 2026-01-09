@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { MessageBuffer } from "@/lib/message-filter";
+import { useGenerationStore } from "@/stores/use-generation-store";
 
 export interface Message {
   id: string;
@@ -207,7 +208,8 @@ export function useChat(options: UseChatOptions = {}) {
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
-
+      // 🔥 启动生成状态：进入 Architect 阶段
+      useGenerationStore.getState().startArchitect(assistantMessage.id);
       // 流式响应开始，移除"思考中"状态
       setIsLoading(false);
 
@@ -269,6 +271,9 @@ export function useChat(options: UseChatOptions = {}) {
                   包含architectPlan:
                     assistantContent.includes("</architectPlan>"),
                 });
+
+                // 🔥 切换到 Coding 阶段
+                useGenerationStore.getState().startCoding();
 
                 const newAssistantMessage: Message = {
                   id: (Date.now() + 2).toString(),
@@ -363,9 +368,31 @@ export function useChat(options: UseChatOptions = {}) {
       if (onStreamCompleteRef.current && assistantContent) {
         onStreamCompleteRef.current(assistantContent);
       }
+
+      // � 结束生成状态
+      useGenerationStore.getState().complete();
+
+      // �🔧 修复：强制更新最后一次消息状态，确保 React 渲染最新内容
+      // 这解决了 architectPlan 结束标签到达后状态未更新的问题
+      if (assistantContent) {
+        const hasArtifact = assistantContent.includes("<boltArtifact");
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === assistantMessage.id
+              ? {
+                  ...msg,
+                  content: assistantContent,
+                  hasArtifact,
+                }
+              : msg
+          )
+        );
+      }
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
-        return; // 请求被取消，不处理
+        // 请求被取消，重置状态
+        useGenerationStore.getState().reset();
+        return;
       }
       const error = err instanceof Error ? err : new Error("未知错误");
       setError(error);
@@ -378,6 +405,8 @@ export function useChat(options: UseChatOptions = {}) {
         },
       ]);
       onErrorRef.current?.(error);
+      // 🔥 错误时重置生成状态
+      useGenerationStore.getState().reset();
     } finally {
       setIsLoading(false);
       abortControllerRef.current = null;
@@ -397,6 +426,8 @@ export function useChat(options: UseChatOptions = {}) {
   const stop = useCallback(() => {
     abortControllerRef.current?.abort();
     setIsLoading(false);
+    // 🔥 停止时重置生成状态
+    useGenerationStore.getState().reset();
   }, []);
 
   /** 清空消息记录 */

@@ -146,6 +146,7 @@ export function MessageItem({ message, messages }: MessageItemProps) {
 
   // AI 消息 - 同时包含 Architect 和 Coding（完整流程）
   if (isArchitectMessage && isCodingMessage) {
+    // 使用更严格的闭合标签检测，确保状态正确更新
     const architectStreaming =
       message.content.includes("<architectPlan") &&
       !message.content.includes("</architectPlan>");
@@ -331,10 +332,9 @@ export function MessageItem({ message, messages }: MessageItemProps) {
     );
   }
 
-  // AI 消息 - 普通聊天回复（兜底）
-  if (!message.content) {
-    return null;
-  }
+  // AI 消息 - 兜底（不应该到这里，如果到了说明有逻辑问题）
+  // 为了安全，使用 cleanContent 清理 XML 标签
+  console.warn("[MessageItem] 进入兜底分支，消息ID:", message.id);
 
   return (
     <div className="flex justify-start">
