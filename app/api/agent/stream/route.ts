@@ -103,36 +103,42 @@ export async function POST(request: NextRequest) {
             | Array<{
                 type: string;
                 text?: string;
-                image_url?: { url: string };
-                source_type?: string;
-                data?: string;
-                mime_type?: string;
+                image_url?: { url: string; detail?: string };
               }> = message;
 
           if (images && images.length > 0) {
-            const imageBlocks = [];
+            const imageBlocks: Array<{
+              type: string;
+              text?: string;
+              image_url?: { url: string; detail?: string };
+            }> = [];
 
-            // 只添加用户的文本消息
-            imageBlocks.push({ type: "text", text: message });
+            // 添加用户的文本消息
+            if (message) {
+              imageBlocks.push({ type: "text", text: message });
+            }
 
             // images 是 {dataUrl, mime_type} 对象数组
+            // LangChain 统一使用 image_url 格式，支持 Gemini、Claude、OpenAI 等
             for (const img of images) {
-              // 提取 base64 数据（剔除 data:image/xxx;base64, 前缀）
-              const imageData = (
-                img as { dataUrl: string; mime_type: string }
-              ).dataUrl.replace(/^data:image\/\w+;base64,/, "");
-              const mimeType = (img as { dataUrl: string; mime_type: string })
-                .mime_type;
+              const imgData = img as { dataUrl: string; mime_type: string };
 
               imageBlocks.push({
-                type: "image",
-                source_type: "base64",
-                data: imageData,
-                mime_type: mimeType,
+                type: "image_url",
+                image_url: {
+                  url: imgData.dataUrl, // 使用完整的 data URL
+                  detail: "high", // 高清晰度，更好的图片识别
+                },
               });
             }
 
             messageContent = imageBlocks;
+
+            console.log("[Stream API] 图片消息已构建:", {
+              imageCount: images.length,
+              hasText: !!message,
+              firstImagePreview: images[0]?.dataUrl?.substring(0, 50) + "...",
+            });
           }
 
           const inputMessage = new HumanMessage({ content: messageContent });
