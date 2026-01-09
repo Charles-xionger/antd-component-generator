@@ -226,6 +226,7 @@ export const InputBar = forwardRef<HTMLTextAreaElement, InputBarProps>(
       onSubmit,
       onStop,
       isLoading,
+      isCanvasMode,
       placeholder,
       images = [],
       onImagesChange,
@@ -243,9 +244,10 @@ export const InputBar = forwardRef<HTMLTextAreaElement, InputBarProps>(
     const internalRef =
       (ref as React.RefObject<HTMLTextAreaElement>) || textareaRef;
 
-    // 🔥 获取生成状态
+    // 🔥 获取生成状态，只在 canvas 模式下使用
     const isGenerating = useIsGenerating();
-    const isDisabled = isLoading || isGenerating;
+    // Canvas 模式下同时检查 isLoading 和 isGenerating，非 canvas 模式只检查 isLoading
+    const isDisabled = isCanvasMode ? isLoading || isGenerating : isLoading;
 
     useEffect(() => {
       if (internalRef.current) {
@@ -338,26 +340,26 @@ export const InputBar = forwardRef<HTMLTextAreaElement, InputBarProps>(
             </div>
 
             <button
-              onClick={isLoading && onStop ? onStop : onSubmit}
+              onClick={isDisabled && onStop ? onStop : onSubmit}
               disabled={
-                !isLoading &&
+                !isDisabled &&
                 ((!value.trim() && images.length === 0) || isDisabled)
               }
               className={`flex items-center justify-center w-8 h-8 rounded-lg transition-all ${
-                isLoading
+                isDisabled
                   ? "bg-red-500/10 text-red-600 hover:bg-red-500/20"
-                  : (!value.trim() && images.length === 0) || isDisabled
+                  : !value.trim() && images.length === 0
                   ? "bg-muted text-muted-foreground cursor-not-allowed"
                   : "bg-muted text-foreground hover:bg-accent"
               }`}
-              title={isLoading ? "停止生成" : "发送"}
+              title={isDisabled ? "停止生成" : "发送"}
             >
-              {isLoading ? (
+              {isDisabled ? (
                 <div className="w-3.5 h-3.5 bg-red-600 rounded-sm" />
               ) : (
                 <ArrowUp className="h-5 w-5 stroke-[2.5px]" />
               )}
-              <span className="sr-only">{isLoading ? "Stop" : "Send"}</span>
+              <span className="sr-only">{isDisabled ? "Stop" : "Send"}</span>
             </button>
           </div>
         </div>
