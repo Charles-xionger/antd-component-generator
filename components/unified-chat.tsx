@@ -22,12 +22,14 @@ interface UnifiedChatProps {
   threadId?: string;
   onThreadUpdate?: () => void;
   initialMessage?: string;
+  initialImages?: { dataUrl: string; mime_type: string }[];
 }
 
 export function UnifiedChat({
   threadId,
   onThreadUpdate,
   initialMessage,
+  initialImages,
 }: UnifiedChatProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -47,15 +49,13 @@ export function UnifiedChat({
   const [isMcpLoading, setIsMcpLoading] = useState(false);
 
   // Model selection state with localStorage persistence
-  const [selectedModel, setSelectedModel] = useState<string>("qwen-plus");
-
-  // Load from localStorage after mount (client-side only)
-  useEffect(() => {
-    const saved = localStorage.getItem("selectedModel");
-    if (saved) {
-      setSelectedModel(saved);
+  // 🔧 修复：在初始化时直接从 localStorage 读取，避免时序问题
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("selectedModel") || "qwen-plus";
     }
-  }, []);
+    return "qwen-plus";
+  });
 
   // Persist model selection to localStorage
   useEffect(() => {
@@ -97,15 +97,19 @@ export function UnifiedChat({
   const initialMessageSentRef = useRef(false);
   const pendingAutoSendRef = useRef(false);
 
-  // 第一步：接收 initialMessage，设置输入框
+  // 第一步：接收 initialMessage 和 initialImages，设置输入框和图片
   useEffect(() => {
     if (initialMessage && !initialMessageSentRef.current) {
       initialMessageSentRef.current = true;
       pendingAutoSendRef.current = true;
       chat.setInput(initialMessage);
+      // 如果有初始图片，也设置到 chat 中
+      if (initialImages && initialImages.length > 0) {
+        chat.setImages(initialImages);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialMessage]);
+  }, [initialMessage, initialImages]);
 
   // 第二步：监听 chat.input 变化，当输入框被填充后自动发送
   useEffect(() => {

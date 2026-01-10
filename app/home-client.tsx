@@ -50,6 +50,7 @@ export function HomeClient({ user }: HomeClientProps) {
   );
   // 预设消息：从首页传入的初始消息
   const [initialMessage, setInitialMessage] = useState<string | undefined>();
+  const [initialImages, setInitialImages] = useState<{ dataUrl: string; mime_type: string }[] | undefined>();
 
   // 当 selectedThreadId 改变时，更新 URL
   useEffect(() => {
@@ -111,8 +112,8 @@ export function HomeClient({ user }: HomeClientProps) {
   };
 
   // 从首页提交消息
-  const handleHomeSubmit = async (message: string) => {
-    console.log("[HomeClient] handleHomeSubmit 被调用:", message);
+  const handleHomeSubmit = async (message: string, images?: { dataUrl: string; mime_type: string }[]) => {
+    console.log("[HomeClient] handleHomeSubmit 被调用:", message, "图片数量:", images?.length);
     // 创建新会话并传入预设消息
     try {
       const response = await fetch("/api/agent/history", {
@@ -129,11 +130,14 @@ export function HomeClient({ user }: HomeClientProps) {
         setSelectedThreadId(data.thread.id);
         setShowHomeLanding(false);
         setInitialMessage(message);
+        setInitialImages(images);
         console.log(
-          "[HomeClient] 状态已更新 - threadId:",
+          "[HomeClient] 状态更新 - threadId:",
           data.thread.id,
-          "initialMessage:",
-          message
+          "message:",
+          message,
+          "images:",
+          images?.length
         );
       } else {
         throw new Error("创建会话响应异常");
@@ -300,6 +304,7 @@ export function HomeClient({ user }: HomeClientProps) {
               threadId={selectedThreadId}
               onThreadUpdate={fetchThreads}
               initialMessage={initialMessage}
+              initialImages={initialImages}
             />
           ) : (
             <div className="h-full flex items-center justify-center text-gray-500">

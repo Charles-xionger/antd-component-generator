@@ -53,22 +53,26 @@ const presetPrompts: PresetPrompt[] = [
 ];
 
 interface HomeLandingProps {
-  onSubmit: (message: string) => void;
+  onSubmit: (
+    message: string,
+    images?: { dataUrl: string; mime_type: string }[]
+  ) => void;
 }
 
 export function HomeLanding({ onSubmit }: HomeLandingProps) {
   const [input, setInput] = useState("");
+  const [images, setImages] = useState<
+    { dataUrl: string; mime_type: string }[]
+  >([]);
 
   // 模型选择状态（与 localStorage 同步）
-  const [selectedModel, setSelectedModel] = useState<string>("qwen-plus");
-
-  // Load from localStorage after mount (client-side only)
-  useEffect(() => {
-    const saved = localStorage.getItem("selectedModel");
-    if (saved) {
-      setSelectedModel(saved);
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    // Initialize from localStorage on mount (client-side only)
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("selectedModel") || "qwen-plus";
     }
-  }, []);
+    return "qwen-plus";
+  });
 
   // 持久化模型选择
   useEffect(() => {
@@ -76,10 +80,12 @@ export function HomeLanding({ onSubmit }: HomeLandingProps) {
   }, [selectedModel]);
 
   const handleSubmit = () => {
-    if (input.trim()) {
+    if (input.trim() || images.length > 0) {
       console.log("[HomeLanding] 发送消息:", input.trim());
-      onSubmit(input.trim());
+      console.log("[HomeLanding] 图片数量:", images.length);
+      onSubmit(input.trim(), images);
       setInput(""); // 清空输入框
+      setImages([]); // 清空图片
     }
   };
 
@@ -156,6 +162,8 @@ export function HomeLanding({ onSubmit }: HomeLandingProps) {
             onSubmit={handleSubmit}
             isLoading={false}
             placeholder="描述你想要生成的组件..."
+            images={images}
+            onImagesChange={setImages}
             selectedModel={selectedModel}
             onModelChange={setSelectedModel}
           />

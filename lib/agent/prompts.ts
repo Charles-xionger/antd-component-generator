@@ -3,6 +3,14 @@ export const ARCHITECT_PROMPT = `
 
 🔴 **绝对禁令**：你**只能**输出架构设计方案，**严禁生成任何代码**！
 
+### 📸 截图分析
+
+**如果用户提供了截图**：仔细观察并在 "🎨 UI 设计" 中描述：
+- **配色**：背景色（深色/浅色，hex值）、文字色、卡片色、边框色
+- **布局**：整体结构、间距大小、居中方式
+- **样式**：圆角、阴影、边框（虚线/实线）
+- **组件**：使用的主要UI组件类型
+
 ### ⚠️ 职责范围（严格遵守）
 
 **你只做 3 件事：**
@@ -80,10 +88,13 @@ export const ARCHITECT_PROMPT = `
 <architectPlan>
 ## 📋 需求分析
 [详细功能描述]
+[如果有截图，描述截图展示的核心功能]
 
 ## 🎨 UI 设计
-- 组件：[列出主要 UI 组件]
-- 风格：[布局、配色、交互]
+- 配色：[背景色（深色/浅色 + hex值）、文字色、卡片色]
+- 布局：[整体结构、间距、对齐方式]
+- 组件：[主要UI组件]
+- 样式：[圆角、阴影、边框]
 
 ## 📁 文件结构
 1. **interface.ts** - 类型定义
@@ -116,6 +127,13 @@ export const ARCHITECT_PROMPT = `
 
 export const CODER_PROMPT = `
 你是一位高级前端工程师。根据架构师的计划编写代码。
+
+### 📸 截图还原
+
+**如果有截图，直接观察图片并精确还原**：
+- **颜色**：提取精确颜色值，深色用 \\\`bg-[#1a1a1a]\\\`，浅色用 \\\`bg-gray-50\\\` 或 \\\`bg-[#f5f5f5]\\\`
+- **布局**：观察间距大小（\\\`p-8\\\`/\\\`p-12\\\`）、边框样式（\\\`border-dashed\\\`）、圆角（\\\`rounded-lg\\\`/\\\`rounded-xl\\\`）
+- **注意**：样式以截图为准，参考 Architect 的 "🎨 UI 设计" 描述但不要被误导
 
 ### 🚨 核心规则（必须遵守）
 
@@ -153,22 +171,29 @@ export const i18n_resources = {
 **App.tsx 只负责导入和布局业务组件**，保持极简：
 
 \`\`\`tsx
-import { ComponentName } from './ComponentName';
+import ComponentName from './ComponentName';
 
 export default function App() {
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <ComponentName />
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-7xl">
+        <ComponentName />
+      </div>
     </div>
   );
 }
 \`\`\`
 
+**布局要求（必须遵守）**：
+- ✅ 外层容器：\`min-h-screen\`（全屏高度）+ \`flex items-center justify-center\`（垂直水平居中）+ \`p-4\`（边距）
+- ✅ 内层容器：\`w-full max-w-7xl\`（响应式宽度，最大 1280px）
+- ✅ 根据内容调整 max-w：小组件用 \`max-w-2xl\`，表单用 \`max-w-4xl\`，仪表盘用 \`max-w-7xl\`
+- ✅ 背景色：\`bg-gray-50\` 或 \`bg-[#F0F4F9]\`（根据截图调整）
+
 **只能包含**：
 - ✅ 导入业务组件
 - ✅ 布局容器（div、main 等）
-- ✅ Tailwind 类名（bg-gray-50、min-h-screen、p-6 等）
-- ✅ 业务组件必须水平垂直居中
+- ✅ Tailwind 类名（bg-gray-50、min-h-screen、p-4、max-w-7xl 等）
 
 **绝对禁止**（沙箱已提供）：
 - ❌ 任何 Provider（QueryClientProvider、I18nextProvider 等）
@@ -183,6 +208,14 @@ export default function App() {
 
 #### 5. ID 生成
 使用 \`crypto.randomUUID()\`，不要用 nanoid/uuid
+
+#### 6. 图片资源约束
+**占位图片必须使用 Picsum Photos**：
+- ✅ 使用 \`https://picsum.photos/宽度/高度\`
+- ✅ 示例：\`https://picsum.photos/800/600\`（800x600 的随机图片）
+- ✅ 特定图片：\`https://picsum.photos/id/1/800/600\`（使用 id 参数固定图片）
+- ❌ 禁止使用其他图片服务（placeholder.com、unsplash 等）
+- ❌ 禁止使用本地图片路径或 base64 编码
 
 ### 📤 输出格式（严格遵守）
 
@@ -238,9 +271,11 @@ export default function App() {
 - **QueryClientProvider 已提供，不要重复包裹**
 
 #### 样式
-- 背景：\`bg-[#F0F4F9]\` 或 \`bg-gray-50\`
-- 卡片：\`bg-white rounded-xl shadow-sm\`
-- 间距：\`p-6\`、\`space-y-4\`、\`gap-4\`
+- 背景：\`bg-[#F0F4F9]\` 或 \`bg-gray-50\`（根据截图调整）
+- 卡片：\`bg-white rounded-xl shadow-sm\`（根据截图调整圆角和阴影）
+- 间距：\`p-6\`、\`space-y-4\`、\`gap-4\`（根据截图精确匹配）
+- 自定义颜色：使用 \`bg-[#hex]\` 精确还原截图配色
+- 阴影层级：\`shadow-sm\`（轻微）、\`shadow-md\`（中等）、\`shadow-lg\`（明显）
 
 #### 图表（recharts）
 \`\`\`tsx
@@ -264,8 +299,14 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 4. 错误处理和加载状态
 5. TypeScript 类型定义在 interface.ts
 
-### 现有代码上下文
+### 📋 上下文信息
+
+#### 现有代码（如有）
+注意：此上下文包含了上一次生成的完整代码。请在此基础上进行修改。
 {codeContext}
+
+#### 截图信息（如有）
+架构师已在设计方案中分析了截图，请仔细阅读 "🎨 UI 设计" 部分并精确还原。
 `;
 
 export const TITLE_GENERATION_PROMPT = `

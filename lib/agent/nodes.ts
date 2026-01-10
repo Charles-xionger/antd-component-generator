@@ -3,7 +3,6 @@ import { AIMessage, SystemMessage } from "@langchain/core/messages";
 import type { AgentState } from "./state";
 import { ARCHITECT_PROMPT, CODER_PROMPT } from "./prompts";
 import { createLLM } from "./models";
-import prisma from "@/lib/database/prisma";
 
 /**
  * 压缩 prompt 以节省 token
@@ -119,6 +118,22 @@ export async function architect(
     过滤后消息数: relevantMessages.length,
   });
 
+  // 🔴 优化：Architect 减少历史代码干扰
+  // 仅提取每个文件的头几行，让 Architect 知道结构即可
+  let simplifiedCodeContext = "";
+  if (state.codeContext) {
+    // 简单的正则匹配 <boltAction filePath="xxx">...</boltAction>
+    const fileMatches = state.codeContext.matchAll(
+      /<boltAction\s+type="file"\s+filePath="([^"]+)">([\s\S]*?)<\/boltAction>/g
+    );
+    for (const match of fileMatches) {
+      const filePath = match[1];
+      const content = match[2];
+      const firstLines = content.trim().split("\n").slice(0, 5).join("\n");
+      simplifiedCodeContext += `File: ${filePath}\n${firstLines}\n...\n\n`;
+    }
+  }
+
   // 确保包含第一条用户消息（含图片），作为视觉参考
   const firstUserMessage = state.messages.find((m) => m._getType() === "human");
   const hasFirstUserInRelevant = relevantMessages.some(
@@ -127,7 +142,12 @@ export async function architect(
 
   // 构建消息列表
   const messages = [
-    new SystemMessage(promptWithContext),
+    new SystemMessage(
+      promptWithContext +
+        (simplifiedCodeContext
+          ? `\n\n### 现有文件结构参考：\n${simplifiedCodeContext}`
+          : "")
+    ),
     // 如果相关消息中没有第一条用户消息，添加它（提供图片等视觉参考）
     ...(hasFirstUserInRelevant
       ? []
@@ -258,6 +278,16 @@ export async function coder(
     hasCodeContext: !!state.codeContext,
   });
 
+  // 🔴 优化：Coder 只保留上一次生成的完整代码作为参考，移除历史冗余代码
+  // 我们手动构造 codeContext，确保它被 <boltArtifact> 包裹，
+  // 这样 LLM 清楚这是之前的状态，且不容易受到历史 Prompt 的干扰。
+  const lastGeneratedArtifact = state.generatedArtifact || state.codeContext;
+  const optimizedCodeContext = lastGeneratedArtifact
+    ? lastGeneratedArtifact.includes("<boltArtifact")
+      ? lastGeneratedArtifact
+      : `<boltArtifact id="previous-state" title="Previous State">\n${lastGeneratedArtifact}\n</boltArtifact>`
+    : "";
+
   // 检测是否有图片消息
   const hasImageMessages = state.messages.some((msg) => {
     const content = msg.content;
@@ -319,6 +349,24 @@ export async function coder(
     relevantMessages = state.messages.slice(lastCoderIndex);
   }
 
+  // 🔴 关键修复：确保 Coder 能看到最新的 Architect 规划（包含截图分析）
+  // 找到最后一个 architect 消息
+  let lastArchitectMessage = null;
+  let lastArchitectInRelevant = false;
+
+  for (let i = state.messages.length - 1; i >= 0; i--) {
+    const msg = state.messages[i];
+    if (
+      msg._getType() === "ai" &&
+      msg.content.toString().includes("<architectPlan")
+    ) {
+      lastArchitectMessage = msg;
+      // 检查这个 architect 消息是否已经在 relevantMessages 中
+      lastArchitectInRelevant = relevantMessages.includes(msg);
+      break;
+    }
+  }
+
   // 确保包含第一条用户消息（含图片），作为视觉参考
   const firstUserMessage = state.messages.find((m) => m._getType() === "human");
   const hasFirstUserInRelevant = relevantMessages.some(
@@ -327,13 +375,19 @@ export async function coder(
 
   // 构建消息列表
   const messages = [
-    new SystemMessage(promptWithContext),
+    new SystemMessage(
+      promptWithContext.replace("{codeContext}", optimizedCodeContext)
+    ),
     // 如果相关消息中没有第一条用户消息，添加它（提供图片等视觉参考）
     ...(hasFirstUserInRelevant
       ? []
       : firstUserMessage
       ? [firstUserMessage]
       : []),
+    // 🔴 如果最新的 architect 规划不在 relevantMessages 中，添加它
+    ...(lastArchitectInRelevant || !lastArchitectMessage
+      ? []
+      : [lastArchitectMessage]),
     ...relevantMessages, // 上一个 coder 之后的所有用户消息和 architect 消息
   ];
 
@@ -342,6 +396,7 @@ export async function coder(
     lastCoderIndex,
     relevantMessagesCount: relevantMessages.length,
     includesFirstUserMessage: !!firstUserMessage,
+    includesLatestArchitect: !!lastArchitectMessage && !lastArchitectInRelevant,
   });
 
   // 调试：打印消息内容摘要
@@ -387,6 +442,36 @@ export async function coder(
 
     console.log(`  ${idx}. [${msgType}] ${contentDesc}`);
   });
+
+  // 🔍 详细打印完整消息内容（用于调试）
+  console.log("\n[Coder] 🔍 完整消息内容:");
+  messages.forEach((msg, idx) => {
+    console.log(`\n========== 消息 ${idx} [${msg._getType()}] ==========`);
+    const rawContent = msg.content;
+    if (typeof rawContent === "string") {
+      console.log(rawContent.substring(0, 500));
+      if (rawContent.length > 500) {
+        console.log(`... (剩余 ${rawContent.length - 500} 字符)`);
+      }
+    } else if (Array.isArray(rawContent)) {
+      rawContent.forEach((item, i) => {
+        console.log(`\n--- 内容块 ${i} (${item.type}) ---`);
+        if (item.type === "text") {
+          const text = String(item.text || "");
+          console.log(text.substring(0, 300));
+          if (text.length > 300) {
+            console.log(`... (剩余 ${text.length - 300} 字符)`);
+          }
+        } else if (item.type === "image") {
+          console.log(`图片: mime_type=${item.mime_type}`);
+          console.log(`数据长度: ${String(item.data || "").length} 字符`);
+        } else {
+          console.log(JSON.stringify(item, null, 2));
+        }
+      });
+    }
+  });
+  console.log("\n========== 消息内容结束 ==========\n");
 
   try {
     const response = await llm.invoke(messages);
