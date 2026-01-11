@@ -7,6 +7,8 @@ import {
 import type { AgentState } from "./state";
 import { ARCHITECT_PROMPT, CODER_PROMPT } from "./prompts";
 import { createLLM } from "./models";
+import { parseXmlToFiles } from "./utils";
+import prisma from "@/lib/database/prisma";
 
 /**
  * 压缩 prompt 以节省 token
@@ -273,10 +275,147 @@ export async function architect(
   }
 }
 
+// Artifact Saver Node: 保存生成的代码到数据库
+export async function artifactSaver(
+  state: AgentState,
+  config?: { configurable?: { thread_id?: string } }
+): Promise<Partial<AgentState>> {
+  console.log("[ArtifactSaver] 💾 开始执行保存节点");
+
+  const threadId = config?.configurable?.thread_id;
+  if (!threadId) {
+    console.error("[ArtifactSaver] ❌ 缺少 thread_id，无法保存");
+    return {};
+  }
+
+  // 获取最新的生成内容
+  // 优先使用 state.generatedArtifact，如果没有则尝试从最后一条消息提取
+  let content = state.generatedArtifact;
+  if (!content) {
+    const lastMessage = state.messages[state.messages.length - 1];
+    if (lastMessage && lastMessage._getType() === "ai") {
+      content = lastMessage.content.toString();
+    }
+  }
+
+  if (!content || !content.includes("<boltArtifact")) {
+    console.log("[ArtifactSaver] ℹ️ 没有检测到有效的 Artifact 内容，跳过保存");
+    return {};
+  }
+
+  try {
+    // 1. 解析文件
+    const files = parseXmlToFiles(content);
+    if (files.length === 0) {
+      console.log("[ArtifactSaver] ⚠️ 解析后文件列表为空，跳过保存");
+      return {};
+    }
+
+    // 2. 检查完整性 (简单检查)
+    const hasAppTsx = files.some(
+      (f) => f.path === "App.tsx" || f.path.endsWith("/App.tsx")
+    );
+    if (!hasAppTsx) {
+      console.warn("[ArtifactSaver] ⚠️ 警告：生成的代码缺少 App.tsx");
+      // 这里我们可以选择继续保存，或者中止。为了数据安全，最好还是保存，但可以在描述里标记
+    }
+
+    console.log(
+      `[ArtifactSaver] 准备保存 ${files.length} 个文件到 Thread: ${threadId}`
+    );
+
+    // 3. 数据库操作 (复用 api/artifact/save 的逻辑)
+    // 查找该 thread 下的 artifact
+    const artifact = await prisma.artifact.findUnique({
+      where: { threadId },
+      include: {
+        versions: {
+          orderBy: { versionNumber: "desc" },
+          take: 1,
+          include: { files: true },
+        },
+      },
+    });
+
+    const currentVersion = artifact?.versions[0];
+    const currentFiles = currentVersion?.files || [];
+
+    if (!artifact) {
+      // 创建新的 Artifact 和第一个版本
+      const newArtifact = await prisma.artifact.create({
+        data: {
+          threadId,
+          versions: {
+            create: {
+              versionNumber: 1,
+              description: "初始版本 (Auto-Saved)",
+              files: {
+                create: files.map((file) => ({
+                  path: file.path,
+                  content: file.content,
+                })),
+              },
+            },
+          },
+        },
+      });
+      console.log("[ArtifactSaver] ✅ 创建新 Artifact:", newArtifact.id);
+    } else {
+      // 合并逻辑：旧文件 + 新文件 = 新快照
+      const currentFilesMap = new Map(
+        currentFiles.map((f) => [f.path, f.content])
+      );
+
+      // 用新文件覆盖旧文件
+      files.forEach((file) => {
+        currentFilesMap.set(file.path, file.content);
+      });
+
+      const mergedFiles = Array.from(currentFilesMap.entries()).map(
+        ([path, content]) => ({
+          path,
+          content,
+        })
+      );
+
+      // 重新查询最新版本号
+      const latestVersion = await prisma.artifactVersion.findFirst({
+        where: { artifactId: artifact.id },
+        orderBy: { versionNumber: "desc" },
+        select: { versionNumber: true },
+      });
+      const nextVersionNumber = (latestVersion?.versionNumber || 0) + 1;
+
+      const newVersion = await prisma.artifactVersion.create({
+        data: {
+          artifactId: artifact.id,
+          versionNumber: nextVersionNumber,
+          description: `自动保存于 ${new Date().toLocaleString()}`,
+          files: {
+            create: mergedFiles,
+          },
+        },
+      });
+      console.log(
+        "[ArtifactSaver] ✅ 创建新版本:",
+        newVersion.id,
+        "v" + nextVersionNumber
+      );
+    }
+
+    // 可以返回一个系统消息通知保存成功，或者不做任何事
+    // return { messages: [new SystemMessage("代码已自动保存到数据库。")] };
+    return {};
+  } catch (error) {
+    console.error("[ArtifactSaver] ❌ 保存失败:", error);
+    return {};
+  }
+}
+
 // Coder Node: 生成代码
 export async function coder(
   state: AgentState,
-  config?: { configurable?: { model?: string } }
+  config?: { configurable?: { model?: string; thread_id?: string } }
 ): Promise<Partial<AgentState>> {
   console.log("[Coder] 💻 开始执行 coder 节点", {
     messagesCount: state.messages.length,
@@ -505,6 +644,106 @@ export async function coder(
 
     // 创建新的 AIMessage 带上修改后的内容
     const messageWithVersion = new AIMessage(content);
+
+    // ==========================================
+    // 🛡️ 后端自动保存逻辑
+    // ==========================================
+    try {
+      // 1. 检查生成内容是否包含有效的 Artifact
+      if (
+        content.includes("<boltArtifact") &&
+        content.includes("</boltArtifact>")
+      ) {
+        const threadId = config?.configurable?.thread_id;
+        if (threadId) {
+          console.log(
+            `[Coder] 💾 自动保存生成结果到数据库... Thread: ${threadId}`
+          );
+
+          // 2. 解析文件
+          const files = parseXmlToFiles(content);
+
+          if (files.length > 0) {
+            // 3. 检查入口文件完整性
+            const hasAppTsx = files.some(
+              (f) => f.path === "App.tsx" || f.path.endsWith("/App.tsx")
+            );
+
+            if (hasAppTsx) {
+              // 4. 执行保存操作 (模拟 api/artifact/save 逻辑)
+              const artifact = await prisma.artifact.findUnique({
+                where: { threadId },
+                include: {
+                  versions: {
+                    orderBy: { versionNumber: "desc" },
+                    take: 1,
+                    include: { files: true },
+                  },
+                },
+              });
+
+              const currentVersion = artifact?.versions[0];
+              const currentFiles = currentVersion?.files || [];
+
+              if (!artifact) {
+                // 创建新 Artifact
+                await prisma.artifact.create({
+                  data: {
+                    threadId,
+                    versions: {
+                      create: {
+                        versionNumber: 1,
+                        description: "初始版本 (Auto-Saved by Coder)",
+                        files: {
+                          create: files.map((file) => ({
+                            path: file.path,
+                            content: file.content,
+                          })),
+                        },
+                      },
+                    },
+                  },
+                });
+                console.log("[Coder] ✅ 新 Artifact 创建成功");
+              } else {
+                // 合并文件
+                const currentFilesMap = new Map(
+                  currentFiles.map((f) => [f.path, f.content])
+                );
+                files.forEach((file) => {
+                  currentFilesMap.set(file.path, file.content);
+                });
+                const mergedFiles = Array.from(currentFilesMap.entries()).map(
+                  ([path, content]) => ({ path, content })
+                );
+
+                // 创建新版本
+                const nextVersionNumber =
+                  (currentVersion?.versionNumber || 0) + 1;
+                await prisma.artifactVersion.create({
+                  data: {
+                    artifactId: artifact.id,
+                    versionNumber: nextVersionNumber,
+                    description: `自动更新于 ${new Date().toLocaleString()} (Auto-Saved)`,
+                    files: {
+                      create: mergedFiles,
+                    },
+                  },
+                });
+                console.log(
+                  `[Coder] ✅ Artifact v${nextVersionNumber} 更新成功`
+                );
+              }
+            } else {
+              console.warn("[Coder] ⚠️ 生成结果缺少 App.tsx，跳过自动保存");
+            }
+          }
+        }
+      }
+    } catch (saveError) {
+      console.error("[Coder] ❌ 自动保存失败 (非致命错误):", saveError);
+      // 注意：保存失败不应影响主流程，依然返回生成的 message
+    }
 
     return {
       messages: [messageWithVersion],

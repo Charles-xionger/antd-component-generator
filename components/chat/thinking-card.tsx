@@ -15,7 +15,8 @@ export function ThinkingCard({
   duration = "思考中",
   isStreaming = false,
 }: ThinkingCardProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  // 生成时默认展开，历史记录默认收起
+  const [isExpanded, setIsExpanded] = useState(isStreaming);
 
   return (
     <div className="my-3 border rounded-lg overflow-hidden bg-card shadow-sm">

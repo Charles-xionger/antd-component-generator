@@ -50,7 +50,9 @@ export function HomeClient({ user }: HomeClientProps) {
   );
   // 预设消息：从首页传入的初始消息
   const [initialMessage, setInitialMessage] = useState<string | undefined>();
-  const [initialImages, setInitialImages] = useState<{ dataUrl: string; mime_type: string }[] | undefined>();
+  const [initialImages, setInitialImages] = useState<
+    { dataUrl: string; mime_type: string }[] | undefined
+  >();
 
   // 当 selectedThreadId 改变时，更新 URL
   useEffect(() => {
@@ -112,8 +114,16 @@ export function HomeClient({ user }: HomeClientProps) {
   };
 
   // 从首页提交消息
-  const handleHomeSubmit = async (message: string, images?: { dataUrl: string; mime_type: string }[]) => {
-    console.log("[HomeClient] handleHomeSubmit 被调用:", message, "图片数量:", images?.length);
+  const handleHomeSubmit = async (
+    message: string,
+    images?: { dataUrl: string; mime_type: string }[]
+  ) => {
+    console.log(
+      "[HomeClient] handleHomeSubmit 被调用:",
+      message,
+      "图片数量:",
+      images?.length
+    );
     // 创建新会话并传入预设消息
     try {
       const response = await fetch("/api/agent/history", {
@@ -163,6 +173,7 @@ export function HomeClient({ user }: HomeClientProps) {
         // 如果删除的是当前选中的thread，清除选择
         if (selectedThreadId === threadId) {
           setSelectedThreadId(undefined);
+          setShowHomeLanding(true);
         }
         // 显示成功消息
         toast.success("会话删除成功");
@@ -307,15 +318,7 @@ export function HomeClient({ user }: HomeClientProps) {
               initialImages={initialImages}
             />
           ) : (
-            <div className="h-full flex items-center justify-center text-gray-500">
-              <div className="text-center">
-                <div className="text-2xl mb-4">🎯</div>
-                <div className="text-lg mb-2">欢迎使用 AI 助手</div>
-                <div className="text-sm">
-                  选择一个会话开始聊天，或创建新的会话
-                </div>
-              </div>
-            </div>
+            <HomeLanding onSubmit={handleHomeSubmit} />
           )}
         </div>
       </div>

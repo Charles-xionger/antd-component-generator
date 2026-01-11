@@ -4,6 +4,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Loader2 } from "lucide-react";
 import { SplitPane, Pane } from "react-split-pane";
+import { toast } from "sonner";
 import "react-split-pane/styles.css";
 import "@/app/split-pane.css";
 
@@ -154,48 +155,59 @@ export function UnifiedChat({
         canvas.setIsGenerating(true);
         canvas.setShouldSendToSandbox(false);
       },
-      onStreamComplete: async () => {
+      onStreamComplete: async (content: string) => {
         // 流式响应完成
         if (canvas.artifact && canvas.artifact.files.length > 0) {
           console.log("[UnifiedChat] 代码生成完成，准备保存到后端", {
             filesCount: canvas.artifact.files.length,
+            contentLength: content.length,
           });
 
-          // 调用保存接口
-          try {
-            const response = await fetch("/api/artifact/save", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                threadId,
-                files: canvas.artifact.files.map((f) => ({
-                  path: f.path,
-                  content: f.content,
-                })),
-              }),
-            });
+          // 🛡️ 完整性校验
+          const hasClosingTag = content.includes("</boltArtifact>");
+          const hasEntryFile = canvas.artifact.files.some(
+            (f) =>
+              f.path === "App.tsx" ||
+              f.path === "src/App.tsx" ||
+              f.path.endsWith("/App.tsx")
+          );
 
-            if (response.ok) {
-              const result = await response.json();
-              console.log("[UnifiedChat] 保存结果:", result);
-
-              // 刷新版本列表，更新下拉框选项
-              await canvas.refreshVersionList();
-              console.log("[UnifiedChat] 版本列表刷新完成");
-
-              // 生成完成，禁用 messages 监听（切换为查看历史模式）
-              canvas.setIsGenerating(false);
-
-              // 允许发送到沙箱渲染
-              canvas.setShouldSendToSandbox(true);
-            } else {
-              console.error("[UnifiedChat] 保存失败:", await response.text());
-              // 失败也要禁用生成模式
-              canvas.setIsGenerating(false);
-            }
-          } catch (error) {
-            console.error("[UnifiedChat] 保存异常:", error);
+          if (!hasClosingTag) {
+            console.error("[UnifiedChat] ❌ 生成不完整：缺少闭合标签");
+            toast.warning("生成中断，内容不完整");
             canvas.setIsGenerating(false);
+            return;
+          }
+
+          if (!hasEntryFile) {
+            console.error("[UnifiedChat] ❌ 生成不完整：缺少入口文件 App.tsx");
+            toast.warning("生成结果缺失关键文件，可能无法运行");
+            // 不强制中断，允许尝试加载
+          }
+
+          // 🚀 后端已接管自动保存逻辑 (Server-Side Auto-Save)
+          // 前端只需刷新版本列表即可
+          console.log("[UnifiedChat] 生成完成，后端应已自动保存，准备刷新版本列表");
+          
+          try {
+            // 短暂延迟确保后端事务完成
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // 刷新版本列表，获取后端保存的最新版本
+            await canvas.refreshVersionList();
+            console.log("[UnifiedChat] 版本列表刷新完成");
+
+            // 生成完成，禁用 messages 监听（切换为查看历史模式）
+            canvas.setIsGenerating(false);
+
+            // 允许发送到沙箱渲染
+            canvas.setShouldSendToSandbox(true);
+            
+            toast.success("代码已生成并保存");
+          } catch (error) {
+            console.error("[UnifiedChat] 刷新版本列表失败:", error);
+            canvas.setIsGenerating(false);
+            toast.error("刷新版本失败，请手动刷新页面");
           }
         } else {
           // 没有代码生成，直接禁用生成模式

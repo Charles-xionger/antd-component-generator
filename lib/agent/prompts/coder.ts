@@ -59,7 +59,32 @@ export const CODER_PROMPT = `
 5. **i18n.ts 格式**：
    - 变量名必须是 \`i18n_resources\`
    - 结构必须有 \`translation\` 层级
-   - 禁止包含初始化代码
+   - 禁止包含初始化代码（沙箱已提供）
+   - 格式示例（仅展示结构，实际键名和内容根据架构师方案确定）：
+     \`\`\`typescript
+     export const i18n_resources = {
+       en: {
+         translation: {
+           page_title: "Page Title",
+           action_submit: "Submit",
+           action_cancel: "Cancel",
+           // 根据架构师方案和实际需求添加所有翻译键值对
+         }
+       },
+       zh: {
+         translation: {
+           page_title: "页面标题",
+           action_submit: "提交",
+           action_cancel: "取消",
+           // 根据架构师方案和实际需求添加所有翻译键值对
+         }
+       }
+     };
+     \`\`\`
+   - **重要**：
+     - 示例仅用于展示结构格式，实际键名和翻译内容必须根据架构师方案和组件中的实际文本确定
+     - 确保所有在组件中使用的文本都有对应的翻译键
+     - 不要硬编码示例中的键名和内容
 6. **App.tsx 约束**：
    - **App.tsx 是沙箱渲染的入口文件，绝对不能遗漏！**
    - 只负责导入和布局业务组件
