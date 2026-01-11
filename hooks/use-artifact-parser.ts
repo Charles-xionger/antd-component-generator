@@ -96,8 +96,11 @@ class ArtifactParserBuffer {
     const processedPaths = new Set<string>();
     let currentGeneratingFile: string | null = null;
 
+    console.log("[Parser] 开始解析文件，内容长度:", content.length);
+
     // 阶段 1: 完整闭合的文件（已完成）
     this.extractClosedFilesWithState(content, files, processedPaths);
+    console.log(`[Parser] 阶段1完成，找到 ${files.length} 个完整文件`);
 
     // 阶段 2: 标签完整但内容未完成的文件（正在生成）
     const generatingFiles = this.extractPartialFilesWithState(
@@ -105,12 +108,29 @@ class ArtifactParserBuffer {
       files,
       processedPaths
     );
+    console.log(
+      `[Parser] 阶段2完成，总共 ${files.length} 个文件，其中 ${generatingFiles.length} 个正在生成`
+    );
+
     if (generatingFiles.length > 0) {
       currentGeneratingFile = generatingFiles[generatingFiles.length - 1];
+      console.log(`[Parser] 当前生成文件: ${currentGeneratingFile}`);
     }
 
     // 阶段 3: 标签本身还在生成的文件（等待中）
     this.extractIncompleteFilesWithState(content, files, processedPaths);
+    console.log(`[Parser] 阶段3完成，最终文件数: ${files.length}`);
+
+    // 打印最终文件列表
+    console.log(
+      "[Parser] 最终解析结果:",
+      files.map((f) => ({
+        path: f.path,
+        contentLength: f.content.length,
+        isComplete: f.isComplete,
+        isGenerating: f.isGenerating,
+      }))
+    );
 
     return { files, currentGeneratingFile };
   }
@@ -123,15 +143,23 @@ class ArtifactParserBuffer {
     files: ParsedFile[],
     processedPaths: Set<string>
   ): void {
+    // 使用非贪婪匹配，更准确地捕获每个完整的 boltAction
     const regex =
       /<boltAction[^>]*type="file"[^>]*filePath="([^"]+)"[^>]*>([\s\S]*?)<\/boltAction>/g;
 
     let match;
     while ((match = regex.exec(content)) !== null) {
       const filePath = match[1];
-      if (processedPaths.has(filePath)) continue;
+      if (processedPaths.has(filePath)) {
+        console.log(`[Parser] 跳过重复文件: ${filePath}`);
+        continue;
+      }
 
       const cleanContent = this.cleanCodeBlock(match[2]);
+      console.log(
+        `[Parser] 完整文件: ${filePath}, 内容长度: ${cleanContent.length}`
+      );
+
       files.push({
         path: filePath,
         content: cleanContent,
@@ -157,7 +185,10 @@ class ArtifactParserBuffer {
     let match;
     while ((match = regex.exec(content)) !== null) {
       const filePath = match[1];
-      if (processedPaths.has(filePath)) continue;
+      if (processedPaths.has(filePath)) {
+        console.log(`[Parser] 跳过已处理文件: ${filePath}`);
+        continue;
+      }
 
       const startIndex = match.index! + match[0].length;
       const endIndex = content.indexOf("</boltAction>", startIndex);
@@ -169,8 +200,12 @@ class ArtifactParserBuffer {
 
       const cleanContent = this.cleanCodeBlock(fileContent);
 
-      // 修复：无论内容是否为空，只要标签完整且没有结束标签，就认为是正在生成
+      // 关键修复：无论内容是否为空，都要添加文件
       if (endIndex === -1) {
+        // 没有结束标签，说明正在生成
+        console.log(
+          `[Parser] 正在生成文件: ${filePath}, 当前内容长度: ${cleanContent.length}`
+        );
         files.push({
           path: filePath,
           content: cleanContent,
@@ -180,8 +215,11 @@ class ArtifactParserBuffer {
         });
         processedPaths.add(filePath);
         generatingFiles.push(filePath);
-      } else if (cleanContent) {
-        // 有结束标签但内容不为空，说明生成完成
+      } else {
+        // 有结束标签，说明已完成（即使内容为空也要添加）
+        console.log(
+          `[Parser] 已完成文件: ${filePath}, 内容长度: ${cleanContent.length}`
+        );
         files.push({
           path: filePath,
           content: cleanContent,
@@ -213,12 +251,17 @@ class ArtifactParserBuffer {
       let match;
       while ((match = regex.exec(content)) !== null) {
         const filePath = match[1];
-        if (processedPaths.has(filePath)) continue;
+        if (processedPaths.has(filePath)) {
+          console.log(`[Parser] 阶段3跳过已处理文件: ${filePath}`);
+          continue;
+        }
 
         const tagStart = match.index!;
         const tagEnd = content.indexOf(">", tagStart);
 
         if (tagEnd === -1) {
+          // 标签还没闭合
+          console.log(`[Parser] 标签未完成: ${filePath}`);
           files.push({
             path: filePath,
             content: "",
@@ -226,151 +269,7 @@ class ArtifactParserBuffer {
             isComplete: false,
             isGenerating: false, // 标签未完成，还未开始生成内容
           });
-        } else {
-          const contentStart = tagEnd + 1;
-          const contentEnd = content.indexOf("</boltAction>", contentStart);
-
-          const fileContent =
-            contentEnd !== -1
-              ? content.substring(contentStart, contentEnd)
-              : content.substring(contentStart);
-
-          const cleanContent = this.cleanCodeBlock(fileContent);
-          if (cleanContent) {
-            files.push({
-              path: filePath,
-              content: cleanContent,
-              language: this.getLanguageFromPath(filePath),
-              isComplete: contentEnd !== -1,
-              isGenerating: contentEnd === -1,
-            });
-          }
-        }
-        processedPaths.add(filePath);
-      }
-    }
-  }
-
-  /**
-   * 提取文件列表（三阶段解析）
-   */
-  private extractFiles(content: string): ParsedFile[] {
-    const files: ParsedFile[] = [];
-    const processedPaths = new Set<string>();
-
-    // 阶段 1: 完整闭合的文件（最高优先级）
-    this.extractClosedFiles(content, files, processedPaths);
-
-    // 阶段 2: 标签完整但内容未完成的文件
-    this.extractPartialFiles(content, files, processedPaths);
-
-    // 阶段 3: 标签本身还在生成的文件（最宽容的匹配）
-    this.extractIncompleteFiles(content, files, processedPaths);
-
-    return files;
-  }
-
-  /**
-   * 阶段 1: 提取完整闭合的文件
-   */
-  private extractClosedFiles(
-    content: string,
-    files: ParsedFile[],
-    processedPaths: Set<string>
-  ): void {
-    const regex =
-      /<boltAction[^>]*type="file"[^>]*filePath="([^"]+)"[^>]*>([\s\S]*?)<\/boltAction>/g;
-
-    let match;
-    while ((match = regex.exec(content)) !== null) {
-      const filePath = match[1];
-      if (processedPaths.has(filePath)) continue;
-
-      const cleanContent = this.cleanCodeBlock(match[2]);
-      files.push({
-        path: filePath,
-        content: cleanContent,
-        language: this.getLanguageFromPath(filePath),
-        isComplete: true,
-        isGenerating: false,
-      });
-      processedPaths.add(filePath);
-    }
-  }
-
-  /**
-   * 阶段 2: 提取标签完整但内容未完成的文件
-   */
-  private extractPartialFiles(
-    content: string,
-    files: ParsedFile[],
-    processedPaths: Set<string>
-  ): void {
-    const regex = /<boltAction[^>]*type="file"[^>]*filePath="([^"]+)"[^>]*>/g;
-
-    let match;
-    while ((match = regex.exec(content)) !== null) {
-      const filePath = match[1];
-      if (processedPaths.has(filePath)) continue;
-
-      const startIndex = match.index! + match[0].length;
-      const endIndex = content.indexOf("</boltAction>", startIndex);
-
-      const fileContent =
-        endIndex !== -1
-          ? content.substring(startIndex, endIndex)
-          : content.substring(startIndex);
-
-      const cleanContent = this.cleanCodeBlock(fileContent);
-      if (cleanContent) {
-        files.push({
-          path: filePath,
-          content: cleanContent,
-          language: this.getLanguageFromPath(filePath),
-          isComplete: endIndex !== -1,
-          isGenerating: endIndex === -1,
-        });
-        processedPaths.add(filePath);
-      }
-    }
-  }
-
-  /**
-   * 阶段 3: 提取标签不完整的文件（最宽容的匹配）
-   */
-  private extractIncompleteFiles(
-    content: string,
-    files: ParsedFile[],
-    processedPaths: Set<string>
-  ): void {
-    // 匹配：<boltAction 开头，包含 type="file" 和 filePath="xxx"
-    // 不要求引号闭合、不要求标签闭合
-    const patterns = [
-      // 完整的 filePath
-      /<boltAction[^>]*type="file"[^>]*filePath="([^"]+)"/g,
-      // filePath 的引号未闭合（只有开始引号）
-      /<boltAction[^>]*type="file"[^>]*filePath="([^">]+)/g,
-    ];
-
-    for (const regex of patterns) {
-      let match;
-      while ((match = regex.exec(content)) !== null) {
-        const filePath = match[1];
-        if (processedPaths.has(filePath)) continue;
-
-        // 查找标签是否闭合
-        const tagStart = match.index!;
-        const tagEnd = content.indexOf(">", tagStart);
-
-        if (tagEnd === -1) {
-          // 标签未闭合，添加占位符
-          files.push({
-            path: filePath,
-            content: "",
-            language: this.getLanguageFromPath(filePath),
-            isComplete: false,
-            isGenerating: true,
-          });
+          processedPaths.add(filePath);
         } else {
           // 标签已闭合，提取内容
           const contentStart = tagEnd + 1;
@@ -381,15 +280,23 @@ class ArtifactParserBuffer {
               ? content.substring(contentStart, contentEnd)
               : content.substring(contentStart);
 
+          const cleanContent = this.cleanCodeBlock(fileContent);
+
+          // 修复：无论内容是否为空都要添加
+          console.log(
+            `[Parser] 阶段3找到文件: ${filePath}, 内容长度: ${
+              cleanContent.length
+            }, 是否完成: ${contentEnd !== -1}`
+          );
           files.push({
             path: filePath,
-            content: this.cleanCodeBlock(fileContent),
+            content: cleanContent,
             language: this.getLanguageFromPath(filePath),
             isComplete: contentEnd !== -1,
             isGenerating: contentEnd === -1,
           });
+          processedPaths.add(filePath);
         }
-        processedPaths.add(filePath);
       }
     }
   }
