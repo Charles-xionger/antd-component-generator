@@ -11,13 +11,14 @@ import {
 } from "react";
 import Image from "next/image";
 import {
-  Loader2,
   Plus,
   Settings2,
   ChevronDown,
   ArrowUp,
   X,
   Cpu,
+  PanelRightOpen,
+  PanelRightClose,
 } from "lucide-react";
 import { type MCPConfig } from "@/components/mcp";
 import {
@@ -62,6 +63,10 @@ interface InputBarProps {
   // 模型选择相关的 Props
   selectedModel?: string;
   onModelChange?: (model: string) => void;
+
+  // Canvas 开关相关
+  isCanvasVisible?: boolean;
+  onToggleCanvas?: () => void;
 }
 
 function FileUploadButton({
@@ -237,6 +242,8 @@ export const InputBar = forwardRef<HTMLTextAreaElement, InputBarProps>(
       onMcpRefresh,
       selectedModel,
       onModelChange,
+      isCanvasVisible,
+      onToggleCanvas,
     }: InputBarProps,
     ref
   ) {
@@ -261,6 +268,7 @@ export const InputBar = forwardRef<HTMLTextAreaElement, InputBarProps>(
       if (
         e.key === "Enter" &&
         !e.shiftKey &&
+        !e.nativeEvent.isComposing &&
         !isDisabled &&
         (value.trim() || images.length > 0)
       ) {
@@ -337,6 +345,24 @@ export const InputBar = forwardRef<HTMLTextAreaElement, InputBarProps>(
                 selectedModel={selectedModel}
                 onModelChange={onModelChange}
               />
+              {/* Canvas 开关 */}
+              {isCanvasMode && onToggleCanvas && (
+                <button
+                  onClick={onToggleCanvas}
+                  className={`p-2 rounded-lg transition-colors ml-1 ${
+                    isCanvasVisible
+                      ? "text-blue-500 bg-blue-50 hover:bg-blue-100"
+                      : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                  }`}
+                  title={isCanvasVisible ? "隐藏预览" : "显示预览"}
+                >
+                  {isCanvasVisible ? (
+                    <PanelRightClose className="h-5 w-5" />
+                  ) : (
+                    <PanelRightOpen className="h-5 w-5" />
+                  )}
+                </button>
+              )}
             </div>
 
             <button

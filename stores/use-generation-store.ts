@@ -7,10 +7,10 @@ import { create } from "zustand";
 export enum GenerationStage {
   /** 空闲状态 */
   IDLE = "idle",
-  /** Architect 规划阶段 */
-  ARCHITECT = "architect",
-  /** Coder 代码生成阶段 */
-  CODING = "coding",
+  /** 思考中（通用状态） */
+  THINKING = "thinking",
+  /** 生成中（通用状态） */
+  GENERATING = "generating",
 }
 
 /**
@@ -21,8 +21,6 @@ export interface GenerationState {
   isGenerating: boolean;
   /** 当前生成阶段 */
   stage: GenerationStage;
-  /** 生成进度描述（可选） */
-  progressText?: string;
   /** 当前处理的消息 ID */
   currentMessageId?: string;
 }
@@ -31,16 +29,14 @@ export interface GenerationState {
  * 生成状态操作接口
  */
 export interface GenerationActions {
-  /** 开始 Architect 规划 */
-  startArchitect: (messageId?: string) => void;
-  /** 完成 Architect，进入 Coding */
-  startCoding: (messageId?: string) => void;
+  /** 开始思考 */
+  startThinking: (messageId?: string) => void;
+  /** 开始生成内容 */
+  startGenerating: (messageId?: string) => void;
   /** 完成所有生成 */
   complete: () => void;
   /** 重置状态 */
   reset: () => void;
-  /** 设置进度文本 */
-  setProgressText: (text?: string) => void;
 }
 
 /**
@@ -55,24 +51,21 @@ export const useGenerationStore = create<GenerationStore>((set) => ({
   // 初始状态
   isGenerating: false,
   stage: GenerationStage.IDLE,
-  progressText: undefined,
   currentMessageId: undefined,
 
   // Actions
-  startArchitect: (messageId) =>
+  startThinking: (messageId) =>
     set({
       isGenerating: true,
-      stage: GenerationStage.ARCHITECT,
+      stage: GenerationStage.THINKING,
       currentMessageId: messageId,
-      progressText: "正在分析需求和规划架构...",
     }),
 
-  startCoding: (messageId) =>
+  startGenerating: (messageId) =>
     set({
       isGenerating: true,
-      stage: GenerationStage.CODING,
+      stage: GenerationStage.GENERATING,
       currentMessageId: messageId,
-      progressText: "正在生成代码，请稍候...",
     }),
 
   complete: () =>
@@ -80,7 +73,6 @@ export const useGenerationStore = create<GenerationStore>((set) => ({
       isGenerating: false,
       stage: GenerationStage.IDLE,
       currentMessageId: undefined,
-      progressText: undefined,
     }),
 
   reset: () =>
@@ -88,12 +80,6 @@ export const useGenerationStore = create<GenerationStore>((set) => ({
       isGenerating: false,
       stage: GenerationStage.IDLE,
       currentMessageId: undefined,
-      progressText: undefined,
-    }),
-
-  setProgressText: (text) =>
-    set({
-      progressText: text,
     }),
 }));
 
@@ -110,15 +96,13 @@ export const useGenerationStage = () =>
   useGenerationStore((state) => state.stage);
 
 /** 获取进度文本 */
-export const useProgressText = () =>
-  useGenerationStore((state) => state.progressText);
+export const useProgressText = () => undefined;
 
 /** 获取生成状态和操作 */
 export const useGenerationActions = () =>
   useGenerationStore((state) => ({
-    startArchitect: state.startArchitect,
-    startCoding: state.startCoding,
+    startThinking: state.startThinking,
+    startGenerating: state.startGenerating,
     complete: state.complete,
     reset: state.reset,
-    setProgressText: state.setProgressText,
   }));

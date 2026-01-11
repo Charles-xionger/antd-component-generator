@@ -16,7 +16,10 @@ import { type MCPConfig } from "@/components/mcp";
 import { MessageItem, InputBar } from "@/components/chat";
 import { GenerationStatusCard } from "@/components/chat/generation-status-card";
 import { CanvasPanel, FullscreenPreview } from "@/components/canvas";
-import { useIsGenerating } from "@/stores/use-generation-store";
+import {
+  useIsGenerating,
+  useGenerationStore,
+} from "@/stores/use-generation-store";
 
 interface UnifiedChatProps {
   threadId?: string;
@@ -68,6 +71,7 @@ export function UnifiedChat({
 
   // Fullscreen state
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isCanvasVisible, setIsCanvasVisible] = useState(false);
 
   // Chat hook - 先初始化，回调稍后通过 ref 设置
   const chatCallbacksRef = useRef<{
@@ -363,34 +367,74 @@ export function UnifiedChat({
     fetchMcpConfigs();
   }, [fetchMcpConfigs]);
 
-  // Fix for fast dragging issue
-  useEffect(() => {
-    const handleMouseDown = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.classList.contains("Resizer")) {
-        document.body.classList.add("dragging");
-      }
-    };
-
-    const handleMouseUp = () => {
-      document.body.classList.remove("dragging");
-    };
-
-    document.addEventListener("mousedown", handleMouseDown);
-    document.addEventListener("mouseup", handleMouseUp);
-
-    return () => {
-      document.removeEventListener("mousedown", handleMouseDown);
-      document.removeEventListener("mouseup", handleMouseUp);
-      document.body.classList.remove("dragging");
-    };
+  // Fix for fast dragging issue using props instead of global listeners
+  const handleDragStarted = useCallback(() => {
+    document.body.classList.add("dragging");
+    // Ensure iframe interaction is disabled during drag
+    if (iframeRef.current) {
+      iframeRef.current.style.pointerEvents = "none";
+    }
   }, []);
+
+  const handleDragFinished = useCallback(() => {
+    document.body.classList.remove("dragging");
+    // Re-enable iframe interaction
+    if (iframeRef.current) {
+      iframeRef.current.style.pointerEvents = "auto";
+    }
+  }, []);
+
+  // Canvas visibility state
+  // 🔥 FIX: Remove duplicate declaration
+  // const [isCanvasVisible, setIsCanvasVisible] = useState(false);
+
+  // Auto-show canvas when code is generated or versions exist
+  useEffect(() => {
+    // 检查 artifact 解析结果是否真的包含文件
+    const hasFiles =
+      canvas.artifact &&
+      canvas.artifact.files &&
+      canvas.artifact.files.length > 0;
+    const hasVersions = canvas.versions && canvas.versions.length > 0;
+
+    // 只有当真正有文件内容或有版本历史时才显示
+    if (hasFiles || hasVersions) {
+      console.log("[UnifiedChat] 自动显示 Canvas:", { hasFiles, hasVersions });
+      setIsCanvasVisible(true);
+    }
+  }, [canvas.artifact, canvas.versions]);
+
+  // 🔥 修复：初始加载时重置生成状态
+  // 避免上次会话遗留的状态导致“正在生成内容”卡片错误显示
+  useEffect(() => {
+    // 只有当没有消息或者最新消息不是 assistant 时，才可能是异常状态
+    if (chat.messages.length === 0) {
+      useGenerationStore.getState().reset();
+    }
+  }, [chat.messages.length]);
 
   return (
     <div className="h-full bg-background">
-      <SplitPane direction="horizontal">
+      <SplitPane
+        // 兼容性修复：react-split-pane 类型定义可能不包含 split 属性，但组件本身支持
+        // @ts-expect-error react-split-pane props compatibility
+        split="vertical"
+        // 🔥 如果 canvas 不可见，设置为单面板模式 (通过 max/min size 控制)
+        primary="first"
+        minSize={isCanvasVisible ? 300 : "100%"}
+        maxSize={isCanvasVisible ? "70%" : "100%"}
+        defaultSize={isCanvasVisible ? "40%" : "100%"}
+        size={isCanvasVisible ? "40%" : "100%"} // 🔥 强制控制大小，确保状态更新时触发重新渲染
+        allowResize={isCanvasVisible}
+        pane2Style={isCanvasVisible ? {} : { display: "none", width: 0 }} // 🔥 强制隐藏第二个面板
+        onDragStarted={handleDragStarted}
+        onDragFinished={handleDragFinished}
+      >
         {/* Left: Chat Area */}
-        <Pane defaultSize="40%" minSize="300px">
+        <Pane
+          className="h-full"
+          style={isCanvasVisible ? {} : { width: "100%" }} // 🔥 强制占满宽度
+        >
           <div className="flex h-full flex-col border-r border-border">
             {/* Messages */}
             <div
@@ -450,6 +494,14 @@ export function UnifiedChat({
               onMcpRefresh={fetchMcpConfigs}
               selectedModel={selectedModel}
               onModelChange={setSelectedModel}
+              isCanvasVisible={isCanvasVisible}
+              onToggleCanvas={() => {
+                console.log(
+                  "[UnifiedChat] 切换 Canvas 显示状态:",
+                  !isCanvasVisible
+                );
+                setIsCanvasVisible(!isCanvasVisible);
+              }}
             />
           </div>
         </Pane>

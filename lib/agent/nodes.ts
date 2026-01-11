@@ -1,5 +1,9 @@
 // lib/agent/nodes.ts
-import { AIMessage, SystemMessage } from "@langchain/core/messages";
+import {
+  AIMessage,
+  HumanMessage,
+  SystemMessage,
+} from "@langchain/core/messages";
 import type { AgentState } from "./state";
 import { ARCHITECT_PROMPT, CODER_PROMPT } from "./prompts";
 import { createLLM } from "./models";
@@ -212,7 +216,7 @@ export async function architect(
         return {
           messages: [
             new AIMessage(
-              "⚠️ 架构师输出格式错误：不能输出代码。请确保只输出 <architectPlan> 标签内的架构方案。"
+              "⚠️ 架构师输出格式错误：不能输出代码。请确保只输出 architectPlan 标签内的架构方案。"
             ),
           ],
         };
@@ -246,11 +250,12 @@ export async function architect(
 
     // 检查是否包含架构方案
     if (!content.includes("<architectPlan")) {
-      console.error("[Architect] ❌ 响应中没有 <architectPlan> 标签");
+      console.log(
+        "[Architect] ℹ️ 响应中没有 <architectPlan> 标签 (可能是闲聊或拒绝)"
+      );
+      // 不再强制返回错误，允许 Architect 进行闲聊或拒绝生成
       return {
-        messages: [
-          new AIMessage("⚠️ 架构师输出格式错误：缺少 <architectPlan> 标签。"),
-        ],
+        messages: [response],
       };
     }
 
@@ -352,7 +357,6 @@ export async function coder(
   // 🔴 关键修复：确保 Coder 能看到最新的 Architect 规划（包含截图分析）
   // 找到最后一个 architect 消息
   let lastArchitectMessage = null;
-  let lastArchitectInRelevant = false;
 
   for (let i = state.messages.length - 1; i >= 0; i--) {
     const msg = state.messages[i];
@@ -361,8 +365,6 @@ export async function coder(
       msg.content.toString().includes("<architectPlan")
     ) {
       lastArchitectMessage = msg;
-      // 检查这个 architect 消息是否已经在 relevantMessages 中
-      lastArchitectInRelevant = relevantMessages.includes(msg);
       break;
     }
   }
@@ -372,6 +374,24 @@ export async function coder(
   const hasFirstUserInRelevant = relevantMessages.some(
     (m) => m === firstUserMessage
   );
+
+  // 🛡️ 将 Architect 的 Plan 转换为 HumanMessage 指令
+  // 这样可以强制 Coder 转换角色，将其视为输入指令而不是自己的历史输出
+  // 避免 Coder 模仿 Architect 的语气或尝试"完善"计划
+  let architectPlanInstruction: HumanMessage | null = null;
+  if (lastArchitectMessage) {
+    const planContent =
+      typeof lastArchitectMessage.content === "string"
+        ? lastArchitectMessage.content
+        : Array.isArray(lastArchitectMessage.content)
+        ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          lastArchitectMessage.content.map((c: any) => c.text || "").join("")
+        : "";
+
+    architectPlanInstruction = new HumanMessage(
+      `👉 **Architect Design Plan**:\n\n${planContent}\n\n🚨 **Instruction**: Please implement the above design plan immediately. Generate the full code structure as specified.`
+    );
+  }
 
   // 构建消息列表
   const messages = [
@@ -384,11 +404,10 @@ export async function coder(
       : firstUserMessage
       ? [firstUserMessage]
       : []),
-    // 🔴 如果最新的 architect 规划不在 relevantMessages 中，添加它
-    ...(lastArchitectInRelevant || !lastArchitectMessage
-      ? []
-      : [lastArchitectMessage]),
-    ...relevantMessages, // 上一个 coder 之后的所有用户消息和 architect 消息
+    // 过滤掉原始的 Architect 消息（因为它会被包装成指令放在最后）
+    ...relevantMessages.filter((msg) => msg !== lastArchitectMessage),
+    // 将 Architect Plan 作为最新的用户指令添加
+    ...(architectPlanInstruction ? [architectPlanInstruction] : []),
   ];
 
   console.log("[Coder] 上下文消息数量:", {
@@ -396,7 +415,8 @@ export async function coder(
     lastCoderIndex,
     relevantMessagesCount: relevantMessages.length,
     includesFirstUserMessage: !!firstUserMessage,
-    includesLatestArchitect: !!lastArchitectMessage && !lastArchitectInRelevant,
+    includesLatestArchitect: !!lastArchitectMessage,
+    hasPlanInstruction: !!architectPlanInstruction,
   });
 
   // 调试：打印消息内容摘要

@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { toast } from "sonner";
 import { MessageBuffer } from "@/lib/message-filter";
-import { useGenerationStore } from "@/stores/use-generation-store";
+import { useGenerationStore, GenerationStage } from "@/stores/use-generation-store";
 
 export interface Message {
   id: string;
@@ -71,8 +71,10 @@ export function useChat(options: UseChatOptions = {}) {
   const [images, setImages] = useState<
     Array<{ dataUrl: string; mime_type: string }>
   >([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
+    // 增加 history 加载状态，分离出页面级 loading
+    const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+    const [error, setError] = useState<Error | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // 使用 ref 存储回调，避免依赖变化导致死循环
@@ -112,7 +114,8 @@ export function useChat(options: UseChatOptions = {}) {
     }
 
     const fetchHistory = async () => {
-      setIsLoading(true);
+      // 使用专门的历史加载状态，不影响对话输入框的 loading
+      setIsHistoryLoading(true);
       try {
         const response = await fetch(`/api/agent/history/${threadId}`);
         if (response.ok) {
@@ -131,7 +134,7 @@ export function useChat(options: UseChatOptions = {}) {
       } catch (err) {
         console.error("Error fetching messages:", err);
       } finally {
-        setIsLoading(false);
+        setIsHistoryLoading(false);
       }
     };
 
@@ -200,8 +203,8 @@ export function useChat(options: UseChatOptions = {}) {
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
-      // 🔥 启动生成状态：进入 Architect 阶段
-      useGenerationStore.getState().startArchitect(assistantMessage.id);
+      // 🔥 启动生成状态：进入 Thinking 阶段（而不是直接进入 Architect）
+      useGenerationStore.getState().startThinking(assistantMessage.id);
       // 流式响应开始，移除"思考中"状态
       setIsLoading(false);
 
@@ -263,6 +266,17 @@ export function useChat(options: UseChatOptions = {}) {
 
                 // 累积显示的内容
                 assistantContent += content;
+                
+                // 🔥 检测是否进入 Architect 阶段
+                const currentStage = useGenerationStore.getState().stage;
+                if (
+                  assistantContent.includes("<architectPlan") &&
+                  currentStage !== GenerationStage.GENERATING
+                ) {
+                  console.log("[useChat] 检测到 Architect 标签，切换状态");
+                  useGenerationStore.getState().startGenerating(assistantMessage.id);
+                }
+
                 const hasArtifact = assistantContent.includes("<boltArtifact");
 
                 setMessages((prev) =>
@@ -289,8 +303,8 @@ export function useChat(options: UseChatOptions = {}) {
                     assistantContent.includes("</architectPlan>"),
                 });
 
-                // 🔥 切换到 Coding 阶段
-                useGenerationStore.getState().startCoding();
+                // 🔥 确保保持在生成状态
+                useGenerationStore.getState().startGenerating();
 
                 // ⚠️ 不要立即创建新消息和重置 assistantContent
                 // 等待 Coder 真正开始输出内容时（下一个 content chunk）再创建
@@ -567,6 +581,10 @@ export function useChat(options: UseChatOptions = {}) {
         };
         setMessages((prev) => [...prev, assistantMessage]);
 
+        // 🔥 启动生成状态：进入 Thinking 阶段
+        useGenerationStore.getState().startThinking(assistantMessage.id);
+        setIsLoading(false);
+
         // 标记：是否需要为 Coder 创建新消息
         let needNewMessageForCoder = false;
 
@@ -612,6 +630,16 @@ export function useChat(options: UseChatOptions = {}) {
 
                 assistantContent += data.content;
 
+                // 🔥 检测是否进入 Architect 阶段
+                const currentStage = useGenerationStore.getState().stage;
+                if (
+                  assistantContent.includes("<architectPlan") &&
+                  currentStage !== GenerationStage.GENERATING
+                ) {
+                  console.log("[useChat] 检测到 Architect 标签，切换状态");
+                  useGenerationStore.getState().startGenerating(assistantMessage.id);
+                }
+
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === assistantMessage.id
@@ -625,7 +653,7 @@ export function useChat(options: UseChatOptions = {}) {
                   onArtifactDetectedRef.current(assistantContent);
                 }
               } else if (data.type === "architect_complete") {
-                useGenerationStore.getState().startCoding();
+                useGenerationStore.getState().startGenerating();
                 needNewMessageForCoder = true;
               } else if (data.type === "tool_start") {
                 const toolCallId =
@@ -715,6 +743,7 @@ export function useChat(options: UseChatOptions = {}) {
     input,
     images,
     isLoading,
+    isHistoryLoading, // 暴露新的状态
     error,
     threadId,
 
