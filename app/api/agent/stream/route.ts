@@ -1,4 +1,9 @@
-export const maxDuration = 60;
+// Vercel 执行时间限制：
+// - Hobby 计划：10 秒
+// - Pro 计划：60 秒（默认），可配置到 300 秒
+// - Enterprise 计划：900 秒
+// 如果使用 Pro 计划，可以在 vercel.json 中配置 route 的 maxDuration
+export const maxDuration = 300; // 增加到 300 秒（5 分钟），适用于 Pro 计划
 export const dynamic = "force-dynamic";
 
 import { NextRequest } from "next/server";
@@ -95,6 +100,7 @@ export async function POST(request: NextRequest) {
 
     const stream = new ReadableStream({
       async start(controller) {
+        let heartbeatInterval: NodeJS.Timeout | undefined;
         try {
           // 构建多模态消息内容（只包含用户输入）
           // codeContext 通过 state.codeContext 传递，agent 会从消息历史中获取代码上下文
@@ -166,6 +172,27 @@ export async function POST(request: NextRequest) {
           let hasArchitectCompleted = false;
           let accumulatedContent = ""; // 累积内容用于检测标签闭合
           let aiResponseContent = ""; // 累积AI回复用于生成标题
+          let lastHeartbeat = Date.now(); // 心跳时间戳
+
+          // 心跳机制：每 30 秒发送一次心跳，防止连接超时
+          heartbeatInterval = setInterval(() => {
+            const now = Date.now();
+            // 如果超过 30 秒没有发送数据，发送心跳
+            if (now - lastHeartbeat > 30000) {
+              try {
+                const heartbeatChunk = encoder.encode(
+                  `data: ${JSON.stringify({
+                    type: "heartbeat",
+                    timestamp: now,
+                  })}\n\n`
+                );
+                controller.enqueue(heartbeatChunk);
+                lastHeartbeat = now;
+              } catch (error) {
+                console.error("[心跳] 发送失败:", error);
+              }
+            }
+          }, 30000); // 每 30 秒检查一次
 
           for await (const event of eventStream) {
             // 流式发送 AI 消息内容
@@ -216,6 +243,7 @@ export async function POST(request: NextRequest) {
                 })}\n\n`
               );
               controller.enqueue(chunk);
+              lastHeartbeat = Date.now(); // 更新心跳时间戳
 
               // 累积内容用于检测标签闭合和生成标题
               accumulatedContent += content;
@@ -372,6 +400,10 @@ export async function POST(request: NextRequest) {
           );
           controller.enqueue(errorChunk);
         } finally {
+          // 清理心跳定时器
+          if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+          }
           controller.close();
         }
       },
