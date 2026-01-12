@@ -1,9 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Sparkles, Table, LineChart, FileEdit, LayoutGrid } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { InputBar } from "./input-bar";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface PresetPrompt {
   icon: React.ComponentType<{ className?: string }>;
@@ -24,31 +30,31 @@ const techStack = [
 const presetPrompts: PresetPrompt[] = [
   {
     icon: Table,
-    title: "数据表格",
-    description: "带分页、排序和搜索",
+    title: "高级数据表格",
+    description: "带搜索、筛选、排序和批量操作",
     prompt:
-      "创建一个用户数据表格组件，包含姓名、邮箱、角色、状态等字段，支持分页、排序和搜索功能，使用 Ant Design Table 组件",
+      "创建一个高级用户管理表格，包含头像、姓名、角色（标签显示）、状态（徽标显示）、最后登录时间等字段。功能要求：支持分页、列排序、多条件筛选（角色/状态）、关键词搜索、行多选批量操作（批量删除/导出）。操作栏包含编辑、删除、重置密码按钮，删除需二次确认。",
   },
   {
     icon: LineChart,
-    title: "数据可视化",
-    description: "Recharts 图表",
+    title: "销售数据看板",
+    description: "多维度数据可视化分析",
     prompt:
-      "生成一个 Recharts 折线图组件，展示最近7天的销售数据趋势，包含图例、工具提示和响应式布局，使用平滑的曲线样式",
+      "生成一个销售数据分析看板，包含三个核心指标卡片（总销售额、订单量、客单价，带环比增长率）。下方展示一个组合图表（折线图+柱状图），展示近 30 天的销售额和订单量趋势，支持时间范围筛选（近7天/近30天/本月）。包含数据加载状态和空数据展示。",
   },
   {
     icon: FileEdit,
-    title: "表单组件",
-    description: "验证和提交",
+    title: "分步注册表单",
+    description: "复杂表单验证与步骤条",
     prompt:
-      "创建一个用户注册表单，包含用户名、邮箱、密码、确认密码字段，使用 Ant Design Form 组件，带实时验证、错误提示和表单提交功能",
+      "创建一个分步注册流程表单：第一步账户信息（用户名、邮箱、密码强度检测）；第二步个人资料（头像上传、职位选择、技能标签输入）；第三步确认信息。包含步骤条导航，每一步都有严格的表单验证，支持上一步/下一步切换，最后提交显示成功结果页。",
   },
   {
     icon: LayoutGrid,
-    title: "卡片布局",
-    description: "响应式网格",
+    title: "商品展示卡片",
+    description: "响应式网格与交互操作",
     prompt:
-      "生成一个产品卡片网格布局，每个卡片包含图片、标题、价格、标签和购买按钮，支持响应式布局，使用 Ant Design Card 和 Grid 组件",
+      "生成一个电商商品展示网格，每个卡片包含：商品图片（带悬停放大效果）、标题、描述（两行省略）、价格（原价/现价）、评分星级、销量。卡片底部包含加入购物车和收藏按钮。右上角显示新品/热销标签。支持响应式布局（手机单列/平板双列/桌面四列）。",
   },
 ];
 
@@ -61,6 +67,7 @@ interface HomeLandingProps {
 
 export function HomeLanding({ onSubmit }: HomeLandingProps) {
   const [input, setInput] = useState("");
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const [images, setImages] = useState<
     { dataUrl: string; mime_type: string }[]
   >([]);
@@ -127,36 +134,47 @@ export function HomeLanding({ onSubmit }: HomeLandingProps) {
 
         {/* 预设卡片网格 */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {presetPrompts.map((preset, index) => (
-            <button
-              key={index}
-              onClick={() => {
-                console.log("[HomeLanding] 点击预设消息:", preset.title);
-                setInput(preset.prompt);
-              }}
-              className="group relative flex items-start gap-4 rounded-lg border border-border bg-card p-5 text-left transition-all hover:shadow-md hover:bg-accent hover:border-primary"
-            >
-              {/* 图标 */}
-              <div className="flex items-center justify-center w-12 h-12 shrink-0 rounded-xl bg-primary/10 group-hover:bg-primary/20 transition-colors">
-                <preset.icon className="w-6 h-6 text-primary" />
-              </div>
+          <TooltipProvider>
+            {presetPrompts.map((preset, index) => (
+              <Tooltip key={index} delayDuration={300}>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => {
+                      console.log("[HomeLanding] 点击预设消息:", preset.title);
+                      setInput(preset.prompt);
+                      // 聚焦输入框
+                      setTimeout(() => inputRef.current?.focus(), 0);
+                    }}
+                    className="group relative flex items-start gap-4 rounded-lg border border-border bg-card p-5 text-left transition-all hover:shadow-md hover:bg-accent hover:border-primary w-full"
+                  >
+                    {/* 图标 */}
+                    <div className="flex items-center justify-center w-12 h-12 shrink-0 rounded-xl bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                      <preset.icon className="w-6 h-6 text-primary" />
+                    </div>
 
-              {/* 标题和描述 */}
-              <div className="flex-1 space-y-2">
-                <h3 className="font-semibold text-base group-hover:text-primary transition-colors">
-                  {preset.title}
-                </h3>
-                <p className="text-sm text-muted-foreground leading-relaxed">
-                  {preset.prompt}
-                </p>
-              </div>
-            </button>
-          ))}
+                    {/* 标题和描述 */}
+                    <div className="flex-1 space-y-1">
+                      <h3 className="font-semibold text-base group-hover:text-primary transition-colors">
+                        {preset.title}
+                      </h3>
+                      <p className="text-sm text-muted-foreground line-clamp-2">
+                        {preset.description}
+                      </p>
+                    </div>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-sm">
+                  <p className="text-sm">{preset.prompt}</p>
+                </TooltipContent>
+              </Tooltip>
+            ))}
+          </TooltipProvider>
         </div>
 
         {/* 输入框区域 */}
         <div className="relative">
           <InputBar
+            ref={inputRef}
             value={input}
             onChange={setInput}
             onSubmit={handleSubmit}

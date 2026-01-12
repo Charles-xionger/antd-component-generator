@@ -3,7 +3,7 @@ import "dotenv/config";
 import { START, END, StateGraph } from "@langchain/langgraph";
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import { StateAnnotations } from "./state";
-import { architect, coder } from "./nodes";
+import { sceneDetector, architect, coder } from "./nodes";
 import type { AgentState } from "./state";
 
 // 创建 checkpointer 并初始化
@@ -48,13 +48,15 @@ function shouldContinueToCoder(state: AgentState): "coder" | typeof END {
 }
 
 /**
- * 创建主图 (Architect → 条件路由 → Coder/END)
+ * 创建主图 (SceneDetector → Architect → 条件路由 → Coder/END)
  */
 export async function createGraph() {
   const workflow = new StateGraph(StateAnnotations)
+    .addNode("sceneDetector", sceneDetector)
     .addNode("architect", architect)
     .addNode("coder", coder)
-    .addEdge(START, "architect")
+    .addEdge(START, "sceneDetector")
+    .addEdge("sceneDetector", "architect")
     .addConditionalEdges("architect", shouldContinueToCoder)
     .addEdge("coder", END);
 

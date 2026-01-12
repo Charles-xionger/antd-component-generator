@@ -28,10 +28,13 @@ export const CODER_PROMPT = `
 ### Skill-4: 组件开发
 1. **组件导入规划**：在生成代码前，先列出要使用的所有 UI 组件和图标
 2. **导入检查**：确保每个使用的组件都有对应的 import 语句
-3. 使用 antd 组件：Button, Table, Form, Input, Select, DatePicker, Modal, Drawer, Tabs, Card 等
-4. 使用 @ant-design/icons 或 lucide-react 图标
-5. 使用 Tailwind CSS 进行样式设计
-6. 使用 @tanstack/react-query 进行数据管理
+3. **Import 语法规范**：
+   - ❌ 禁止导入子组件属性（如 \`import { Input.Password }\`），这会导致 BuildError
+   - ✅ 必须导入主组件（\`import { Input }\`），然后使用 \`<Input.Password />\`
+4. 使用 antd 组件：Button, Table, Form, Input, Select, DatePicker, Modal, Drawer, Tabs, Card 等
+5. 使用 @ant-design/icons 或 lucide-react 图标
+6. 使用 Tailwind CSS 进行样式设计
+7. 使用 @tanstack/react-query 进行数据管理
 
 ### Skill-5: 代码质量
 1. 组件职责单一
@@ -222,6 +225,44 @@ export default function App() {
 - antd 组件：\`import { [组件名] } from 'antd';\`（如 Button, Table, Form 等）
 - 图标：\`import { [图标名] } from '@ant-design/icons';\` 或 \`import { [图标名] } from 'lucide-react';\`
 - hooks：\`import { [hook名] } from '@tanstack/react-query';\`、\`import { useTranslation } from 'react-i18next';\`、\`import { [hook名] } from 'react';\`
+
+**🚫 常见错误规避（Critical Anti-Patterns）**：
+
+#### 1. Import 语法错误（导致 BuildError）
+- ❌ 错误：\`import { Input.Password } from 'antd';\` (语法错误：Expected "}" but found ".")
+- ✅ 正确：\`import { Input } from 'antd';\` (然后使用 \`<Input.Password />\`)
+- ❌ 错误：\`import { Select.Option } from 'antd';\`
+- ✅ 正确：\`import { Select } from 'antd';\` (然后使用 \`<Select.Option />\`)
+
+#### 2. Form 验证规则错误（引用未定义变量）
+- ❌ 错误：在 \`helpers.ts\` 静态对象中引用 \`form\` 变量
+  \`\`\`typescript
+  // helpers.ts
+  export const rules = {
+    confirm: [{ validator: (r, v) => v === form.getFieldValue('p') }] // ❌ form 未定义
+  }
+  \`\`\`
+- ✅ 正确：在组件内定义规则，或使用 Antd 推荐的函数式写法
+  \`\`\`tsx
+  // Component.tsx
+  <Form.Item
+    name="confirm"
+    dependencies={['password']}
+    rules={[
+      { required: true },
+      ({ getFieldValue }) => ({
+        validator(_, value) {
+          if (!value || getFieldValue('password') === value) return Promise.resolve();
+          return Promise.reject(new Error('密码不一致'));
+        },
+      }),
+    ]}
+  >
+  \`\`\`
+
+#### 3. 缺失 Helper 导入
+- ❌ 错误：使用了 \`handleRegister\` 函数但没有导入
+- ✅ 正确：\`import { handleRegister } from './helpers';\`
 
 **重要**：
 - ✅ **使用任何组件前必须先导入**

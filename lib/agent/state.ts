@@ -8,6 +8,8 @@ export interface AgentPlan {
   architecture_notes: string;
 }
 
+export type SceneType = "new" | "bug-fix" | "modify" | "unknown";
+
 export interface AgentState {
   // 消息历史
   messages: BaseMessage[];
@@ -17,6 +19,8 @@ export interface AgentState {
   generatedArtifact?: string;
   // 当前代码上下文（用于向 Agent 注入已有代码）
   codeContext?: string;
+  // 场景类型（由 sceneDetector 节点判断）
+  sceneType?: SceneType;
 }
 
 // LangGraph state annotation
@@ -53,6 +57,10 @@ export const StateAnnotations = Annotation.Root({
     default: () => undefined,
   }),
   codeContext: Annotation<string | undefined>({
+    reducer: (x, y) => y ?? x,
+    default: () => undefined,
+  }),
+  sceneType: Annotation<SceneType | undefined>({
     reducer: (x, y) => y ?? x,
     default: () => undefined,
   }),

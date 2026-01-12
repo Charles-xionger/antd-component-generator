@@ -4,7 +4,7 @@ import {
   HumanMessage,
   SystemMessage,
 } from "@langchain/core/messages";
-import type { AgentState } from "./state";
+import type { AgentState, SceneType } from "./state";
 import { ARCHITECT_PROMPT, CODER_PROMPT } from "./prompts";
 import { createLLM } from "./models";
 import { parseXmlToFiles } from "./utils";
@@ -23,6 +23,106 @@ function compressPrompt(prompt: string): string {
     .join("\n")
     .replace(/\n{3,}/g, "\n\n") // 连续3个以上换行压缩为2个
     .replace(/ {2,}/g, " "); // 连续多个空格压缩为1个
+}
+
+/**
+ * Scene Detector Node: 判断用户意图场景
+ * 根据用户消息和代码上下文，智能判断场景类型
+ */
+export async function sceneDetector(
+  state: AgentState,
+  config?: { configurable?: { model?: string } }
+): Promise<Partial<AgentState>> {
+  console.log("[SceneDetector] 🎯 开始场景判断", {
+    messagesCount: state.messages.length,
+    hasCodeContext: !!state.codeContext,
+  });
+
+  // 获取最新的用户消息
+  const lastUserMessage = state.messages
+    .slice()
+    .reverse()
+    .find((msg) => msg._getType() === "human");
+
+  if (!lastUserMessage) {
+    console.log("[SceneDetector] 没有用户消息，默认为 new 场景");
+    return { sceneType: "new" };
+  }
+
+  const userContent =
+    typeof lastUserMessage.content === "string"
+      ? lastUserMessage.content
+      : Array.isArray(lastUserMessage.content)
+      ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        lastUserMessage.content.map((c: any) => c.text || "").join("")
+      : "";
+
+  const contentLower = userContent.toLowerCase();
+
+  // 判断是否有现有代码
+  const hasExistingCode = !!state.codeContext && state.codeContext.trim().length > 0;
+
+  // 场景判断逻辑
+  let sceneType: SceneType = "unknown";
+
+  // 1. Bug 修复场景：用户提到错误、报错、bug、修复等，且有现有代码
+  const isBugFixKeywords =
+    contentLower.includes("报错") ||
+    contentLower.includes("错误") ||
+    contentLower.includes("bug") ||
+    contentLower.includes("修复") ||
+    contentLower.includes("builderror") ||
+    contentLower.includes("error") ||
+    contentLower.includes("exception") ||
+    contentLower.includes("异常") ||
+    contentLower.includes("问题") ||
+    contentLower.includes("查看代码") ||
+    contentLower.includes("定位") ||
+    contentLower.includes("诊断");
+
+  if (isBugFixKeywords && hasExistingCode) {
+    sceneType = "bug-fix";
+    console.log("[SceneDetector] ✅ 判断为 bug-fix 场景");
+  }
+  // 2. 修改场景：用户要求修改、优化、增加功能等，且有现有代码
+  else if (
+    (contentLower.includes("修改") ||
+      contentLower.includes("优化") ||
+      contentLower.includes("增加") ||
+      contentLower.includes("添加") ||
+      contentLower.includes("调整") ||
+      contentLower.includes("改进")) &&
+    hasExistingCode
+  ) {
+    sceneType = "modify";
+    console.log("[SceneDetector] ✅ 判断为 modify 场景");
+  }
+  // 3. 新项目场景：没有现有代码，或用户明确要求重写
+  else if (
+    !hasExistingCode ||
+    contentLower.includes("重写") ||
+    contentLower.includes("重新生成") ||
+    contentLower.includes("不基于现有代码")
+  ) {
+    sceneType = "new";
+    console.log("[SceneDetector] ✅ 判断为 new 场景");
+  }
+  // 4. 默认：如果有现有代码，可能是修改场景
+  else if (hasExistingCode) {
+    sceneType = "modify";
+    console.log("[SceneDetector] ✅ 默认判断为 modify 场景（有现有代码）");
+  } else {
+    sceneType = "new";
+    console.log("[SceneDetector] ✅ 默认判断为 new 场景（无现有代码）");
+  }
+
+  console.log("[SceneDetector] 📊 场景判断结果:", {
+    sceneType,
+    hasExistingCode,
+    userContentPreview: userContent.substring(0, 100),
+  });
+
+  return { sceneType };
 }
 
 // Architect Node: 生成开发计划
@@ -124,19 +224,29 @@ export async function architect(
     过滤后消息数: relevantMessages.length,
   });
 
-  // 🔴 优化：Architect 减少历史代码干扰
-  // 仅提取每个文件的头几行，让 Architect 知道结构即可
-  let simplifiedCodeContext = "";
+  // 🔴 根据场景类型决定代码上下文
+  // - bug-fix 场景：提供完整代码，便于诊断问题
+  // - 其他场景：提供简化代码（前5行），减少干扰和 token 消耗
+  let codeContextForArchitect = "";
   if (state.codeContext) {
-    // 简单的正则匹配 <boltAction filePath="xxx">...</boltAction>
-    const fileMatches = state.codeContext.matchAll(
-      /<boltAction\s+type="file"\s+filePath="([^"]+)">([\s\S]*?)<\/boltAction>/g
-    );
-    for (const match of fileMatches) {
-      const filePath = match[1];
-      const content = match[2];
-      const firstLines = content.trim().split("\n").slice(0, 5).join("\n");
-      simplifiedCodeContext += `File: ${filePath}\n${firstLines}\n...\n\n`;
+    const sceneType = state.sceneType || "new";
+    
+    if (sceneType === "bug-fix") {
+      // Bug 修复场景：提供完整代码
+      console.log("[Architect] 🐛 Bug 修复场景，使用完整代码上下文");
+      codeContextForArchitect = state.codeContext;
+    } else {
+      // 新项目/修改场景：提供简化代码（前5行）
+      console.log("[Architect] 📝 非 Bug 修复场景，使用简化代码上下文");
+      const fileMatches = state.codeContext.matchAll(
+        /<boltAction\s+type="file"\s+filePath="([^"]+)">([\s\S]*?)<\/boltAction>/g
+      );
+      for (const match of fileMatches) {
+        const filePath = match[1];
+        const content = match[2];
+        const firstLines = content.trim().split("\n").slice(0, 5).join("\n");
+        codeContextForArchitect += `File: ${filePath}\n${firstLines}\n...\n\n`;
+      }
     }
   }
 
@@ -150,8 +260,8 @@ export async function architect(
   const messages = [
     new SystemMessage(
       promptWithContext +
-        (simplifiedCodeContext
-          ? `\n\n### 现有文件结构参考：\n${simplifiedCodeContext}`
+        (codeContextForArchitect
+          ? `\n\n### 现有文件结构参考：\n${codeContextForArchitect}`
           : "")
     ),
     // 如果相关消息中没有第一条用户消息，添加它（提供图片等视觉参考）
