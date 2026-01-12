@@ -230,15 +230,15 @@ export function MessageItem({
 
         {/* 操作按钮 */}
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-          {/* 重新生成按钮 */}
-          <button
+          {/* 重新生成按钮 - 已暂时隐藏 */}
+          {/* <button
             onClick={() => onRegenerate?.(message.id)}
             disabled={isDeleting}
             className="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
             title="重新生成"
           >
             <RotateCcw className="w-4 h-4" />
-          </button>
+          </button> */}
 
           {/* 🔥 删除按钮已暂时隐藏 */}
           {/* <AlertDialog
