@@ -101,6 +101,8 @@ export async function POST(request: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         let heartbeatInterval: NodeJS.Timeout | undefined;
+        let isClosed = false; // 追踪流是否已关闭
+
         try {
           // 构建多模态消息内容（只包含用户输入）
           // codeContext 通过 state.codeContext 传递，agent 会从消息历史中获取代码上下文
@@ -175,24 +177,34 @@ export async function POST(request: NextRequest) {
           let lastHeartbeat = Date.now(); // 心跳时间戳
 
           // 心跳机制：每 30 秒发送一次心跳，防止连接超时
-          heartbeatInterval = setInterval(() => {
-            const now = Date.now();
-            // 如果超过 30 秒没有发送数据，发送心跳
-            if (now - lastHeartbeat > 30000) {
-              try {
-                const heartbeatChunk = encoder.encode(
-                  `data: ${JSON.stringify({
-                    type: "heartbeat",
-                    timestamp: now,
-                  })}\n\n`
-                );
-                controller.enqueue(heartbeatChunk);
-                lastHeartbeat = now;
-              } catch (error) {
-                console.error("[心跳] 发送失败:", error);
+          // 仅在生产环境启用，开发环境禁用以避免干扰
+          if (process.env.NODE_ENV === "production") {
+            heartbeatInterval = setInterval(() => {
+              if (isClosed) return; // 如果已关闭，直接返回
+
+              const now = Date.now();
+              // 如果超过 30 秒没有发送数据，发送心跳
+              if (now - lastHeartbeat > 30000) {
+                try {
+                  const heartbeatChunk = encoder.encode(
+                    `data: ${JSON.stringify({
+                      type: "heartbeat",
+                      timestamp: now,
+                    })}\n\n`
+                  );
+                  controller.enqueue(heartbeatChunk);
+                  lastHeartbeat = now;
+                } catch (error) {
+                  console.error("[心跳] 发送失败:", error);
+                  isClosed = true; // 标记为已关闭，避免后续尝试
+                  if (heartbeatInterval) {
+                    clearInterval(heartbeatInterval);
+                    heartbeatInterval = undefined;
+                  }
+                }
               }
-            }
-          }, 30000); // 每 30 秒检查一次
+            }, 30000); // 每 30 秒检查一次
+          }
 
           for await (const event of eventStream) {
             // 流式发送 AI 消息内容
@@ -274,22 +286,34 @@ export async function POST(request: NextRequest) {
             }
 
             // 监听 architect 节点完成事件（更可靠的完成信号）
+            // 但要注意：只有在确实有 architectPlan 内容时才发送完成事件
+            // 闲聊场景下不应该发送 architect_complete，避免前端误判
             if (
               event.event === "on_chain_end" &&
               event.name === "architect" &&
               !hasArchitectCompleted
             ) {
-              hasArchitectCompleted = true;
-              console.log("[Stream] ✅ ARCHITECT 节点完成（on_chain_end）");
+              // 检查是否包含架构规划标签
+              // 只有真正的架构规划才发送 architect_complete 事件
+              if (accumulatedContent.includes("<architectPlan>")) {
+                hasArchitectCompleted = true;
+                console.log(
+                  "[Stream] ✅ ARCHITECT 节点完成（on_chain_end）- 包含架构规划"
+                );
 
-              // 发送 ARCHITECT 完成事件
-              const architectCompleteChunk = encoder.encode(
-                `data: ${JSON.stringify({
-                  type: "architect_complete",
-                  threadId: finalThreadId,
-                })}\n\n`
-              );
-              controller.enqueue(architectCompleteChunk);
+                // 发送 ARCHITECT 完成事件
+                const architectCompleteChunk = encoder.encode(
+                  `data: ${JSON.stringify({
+                    type: "architect_complete",
+                    threadId: finalThreadId,
+                  })}\n\n`
+                );
+                controller.enqueue(architectCompleteChunk);
+              } else {
+                console.log(
+                  "[Stream] ℹ️ ARCHITECT 节点完成 - 闲聊场景，不发送 architect_complete 事件"
+                );
+              }
             }
 
             // 处理工具调用开始
@@ -401,6 +425,7 @@ export async function POST(request: NextRequest) {
           controller.enqueue(errorChunk);
         } finally {
           // 清理心跳定时器
+          isClosed = true; // 标记为已关闭
           if (heartbeatInterval) {
             clearInterval(heartbeatInterval);
           }

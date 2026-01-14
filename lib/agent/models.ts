@@ -23,7 +23,7 @@ export function createLLM(
   // Gemini 模型（支持视觉）
   if (modelName.startsWith("gemini")) {
     return new ChatGoogleGenerativeAI({
-      model: modelName,
+      model: process.env.GOOGLE_MODEL_NAME || "gemini-3-pro-preview",
       apiKey: process.env.GOOGLE_API_KEY,
       temperature: config.temperature,
       streaming: true,
