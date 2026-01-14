@@ -17,6 +17,7 @@ import { type MCPConfig } from "@/components/mcp";
 import { MessageItem, InputBar } from "@/components/chat";
 import { GenerationStatusCard } from "@/components/chat/generation-status-card";
 import { CanvasPanel, FullscreenPreview } from "@/components/canvas";
+import { ErrorToast } from "@/components/canvas/error-toast";
 import {
   useIsGenerating,
   useGenerationStore,
@@ -187,12 +188,14 @@ export function UnifiedChat({
 
           // 🚀 后端已接管自动保存逻辑 (Server-Side Auto-Save)
           // 前端只需刷新版本列表即可
-          console.log("[UnifiedChat] 生成完成，后端应已自动保存，准备刷新版本列表");
-          
+          console.log(
+            "[UnifiedChat] 生成完成，后端应已自动保存，准备刷新版本列表"
+          );
+
           try {
             // 短暂延迟确保后端事务完成
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+
             // 刷新版本列表，获取后端保存的最新版本
             await canvas.refreshVersionList();
             console.log("[UnifiedChat] 版本列表刷新完成");
@@ -202,7 +205,7 @@ export function UnifiedChat({
 
             // 允许发送到沙箱渲染
             canvas.setShouldSendToSandbox(true);
-            
+
             toast.success("代码已生成并保存");
           } catch (error) {
             console.error("[UnifiedChat] 刷新版本列表失败:", error);
@@ -249,6 +252,46 @@ export function UnifiedChat({
     setIsSandboxReady(false);
     canvas.setShouldSendToSandbox(true);
   }, [canvas]);
+
+  // 处理错误修复
+  const handleFixError = useCallback(() => {
+    if (!sandboxError) return;
+
+    console.log("[错误修复] 开始修复错误:", sandboxError);
+
+    // 构建修复提示消息
+    const fixPrompt = `沙箱渲染出现错误，请帮我修复：
+
+错误信息：
+\`\`\`
+${sandboxError}
+\`\`\`
+
+当前代码：
+${canvas.artifact?.files
+  .map(
+    (file) => `
+### ${file.path}
+\`\`\`
+${file.content}
+\`\`\`
+`
+  )
+  .join("\n")}
+
+请分析错误原因并提供修复后的完整代码。`;
+
+    // 发送修复请求
+    chat.sendMessage(fixPrompt);
+
+    // 清除错误状态（因为已经开始处理）
+    setSandboxError(null);
+  }, [sandboxError, canvas.artifact, chat]);
+
+  // 处理关闭错误提示
+  const handleDismissError = useCallback(() => {
+    setSandboxError(null);
+  }, []);
 
   // 全屏时监听沙箱就绪并发送文件
   useEffect(() => {
@@ -543,6 +586,13 @@ export function UnifiedChat({
           onClose={handleFullscreenClose}
         />
       )}
+
+      {/* Error Toast */}
+      <ErrorToast
+        error={sandboxError}
+        onFix={handleFixError}
+        onDismiss={handleDismissError}
+      />
     </div>
   );
 }

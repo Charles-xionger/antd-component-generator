@@ -214,16 +214,6 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
       isRefreshing,
     ]);
 
-    // 监听沙箱错误并显示 toast
-    useEffect(() => {
-      if (sandboxError) {
-        toast.error("渲染错误", {
-          description: sandboxError,
-          duration: 5000,
-        });
-      }
-    }, [sandboxError]);
-
     // 渲染面板内容
     return (
       <div ref={ref} className="flex flex-col bg-background h-full">

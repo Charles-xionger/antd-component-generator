@@ -8,6 +8,7 @@ export { PreviewPanel } from "./preview-panel";
 export { PreviewToolbar } from "./preview-toolbar";
 export { FileIcon } from "./file-icon";
 export { FullscreenPreview } from "./fullscreen-preview";
+export { ErrorToast } from "./error-toast";
 
 // Types
 export type {

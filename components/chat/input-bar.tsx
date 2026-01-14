@@ -277,6 +277,31 @@ export const InputBar = forwardRef<HTMLTextAreaElement, InputBarProps>(
       }
     };
 
+    const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      // 遍历粘贴板中的所有项目
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+
+        // 检查是否是图片类型
+        if (item.type.startsWith("image/")) {
+          e.preventDefault(); // 阻止默认粘贴行为
+
+          const file = item.getAsFile();
+          if (file) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              const dataUrl = event.target?.result as string;
+              handleFileSelect({ dataUrl, mime_type: file.type });
+            };
+            reader.readAsDataURL(file);
+          }
+        }
+      }
+    };
+
     const handleFileSelect = (item: ImageItem) => {
       if (onImagesChange) {
         onImagesChange([...(images || []), item]);
@@ -324,6 +349,7 @@ export const InputBar = forwardRef<HTMLTextAreaElement, InputBarProps>(
               value={value}
               onChange={(e) => onChange(e.target.value)}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               placeholder={placeholder || "Ask a follow-up..."}
               disabled={isDisabled}
               className="w-full bg-transparent border-none outline-none text-foreground placeholder-muted-foreground text-sm py-1 resize-none min-h-6 max-h-50 overflow-y-auto"
