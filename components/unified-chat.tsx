@@ -170,7 +170,7 @@ export function UnifiedChat({
             (f) =>
               f.path === "App.tsx" ||
               f.path === "src/App.tsx" ||
-              f.path.endsWith("/App.tsx")
+              f.path.endsWith("/App.tsx"),
           );
 
           if (!hasClosingTag) {
@@ -189,7 +189,7 @@ export function UnifiedChat({
           // 🚀 后端已接管自动保存逻辑 (Server-Side Auto-Save)
           // 前端只需刷新版本列表即可
           console.log(
-            "[UnifiedChat] 生成完成，后端应已自动保存，准备刷新版本列表"
+            "[UnifiedChat] 生成完成，后端应已自动保存，准备刷新版本列表",
           );
 
           try {
@@ -259,34 +259,26 @@ export function UnifiedChat({
 
     console.log("[错误修复] 开始修复错误:", sandboxError);
 
-    // 构建修复提示消息
-    const fixPrompt = `沙箱渲染出现错误，请帮我修复：
+    // 构建修复提示消息（简化版：只发送错误信息，代码上下文由后端自动获取）
+    const fixPrompt = `代码运行出现错误，请帮我修复：
 
-错误信息：
 \`\`\`
 ${sandboxError}
 \`\`\`
 
-当前代码：
-${canvas.artifact?.files
-  .map(
-    (file) => `
-### ${file.path}
-\`\`\`
-${file.content}
-\`\`\`
-`
-  )
-  .join("\n")}
+请分析错误原因并修复代码。`;
 
-请分析错误原因并提供修复后的完整代码。`;
+    // 设置输入内容并发送
+    chat.setInput(fixPrompt);
 
-    // 发送修复请求
-    chat.sendMessage(fixPrompt);
+    // 短暂延迟确保输入已设置
+    setTimeout(() => {
+      chat.sendMessage();
+    }, 100);
 
     // 清除错误状态（因为已经开始处理）
     setSandboxError(null);
-  }, [sandboxError, canvas.artifact, chat]);
+  }, [sandboxError, chat]);
 
   // 处理关闭错误提示
   const handleDismissError = useCallback(() => {
@@ -553,7 +545,7 @@ ${file.content}
               onToggleCanvas={() => {
                 console.log(
                   "[UnifiedChat] 切换 Canvas 显示状态:",
-                  !isCanvasVisible
+                  !isCanvasVisible,
                 );
                 setIsCanvasVisible(!isCanvasVisible);
               }}

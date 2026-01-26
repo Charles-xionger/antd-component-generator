@@ -3,7 +3,9 @@
 // - Pro 计划：60 秒（默认），可配置到 300 秒
 // - Enterprise 计划：900 秒
 // 如果使用 Pro 计划，可以在 vercel.json 中配置 route 的 maxDuration
-export const maxDuration = 300; // 增加到 300 秒（5 分钟），适用于 Pro 计划
+import { STREAM_CONFIG } from "@/lib/agent/config";
+
+export const maxDuration = STREAM_CONFIG.MAX_DURATION; // 使用配置文件中的值
 export const dynamic = "force-dynamic";
 
 import { NextRequest } from "next/server";
@@ -26,7 +28,7 @@ export async function POST(request: NextRequest) {
     if (!message && (!images || images.length === 0)) {
       return Response.json(
         { error: "Message or images are required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -75,8 +77,8 @@ export async function POST(request: NextRequest) {
         typeof message === "string"
           ? message
           : Array.isArray(message)
-          ? message.find((m) => m.type === "text")?.text || "New Chat"
-          : "New Chat";
+            ? message.find((m) => m.type === "text")?.text || "New Chat"
+            : "New Chat";
 
       thread = await prisma.thread.create({
         data: {
@@ -167,7 +169,7 @@ export async function POST(request: NextRequest) {
               messages: [inputMessage],
               codeContext: codeContext ? codeContext.trim() : "",
             },
-            { ...config, version: "v2" }
+            { ...config, version: "v2" },
           );
 
           // 追踪 ARCHITECT 是否已完成
@@ -176,43 +178,69 @@ export async function POST(request: NextRequest) {
           let aiResponseContent = ""; // 累积AI回复用于生成标题
           let lastHeartbeat = Date.now(); // 心跳时间戳
 
-          // 心跳机制：每 30 秒发送一次心跳，防止连接超时
-          // 仅在生产环境启用，开发环境禁用以避免干扰
-          if (process.env.NODE_ENV === "production") {
-            heartbeatInterval = setInterval(() => {
-              if (isClosed) return; // 如果已关闭，直接返回
+          // 心跳机制：防止连接超时
+          // 始终启用心跳机制，确保长时间生成不中断
+          let heartbeatFailCount = 0;
+          const MAX_HEARTBEAT_FAILS = 3; // 连续失败3次才关闭
 
-              const now = Date.now();
-              // 如果超过 30 秒没有发送数据，发送心跳
-              if (now - lastHeartbeat > 30000) {
-                try {
-                  const heartbeatChunk = encoder.encode(
-                    `data: ${JSON.stringify({
-                      type: "heartbeat",
-                      timestamp: now,
-                    })}\n\n`
-                  );
-                  controller.enqueue(heartbeatChunk);
-                  lastHeartbeat = now;
-                } catch (error) {
-                  console.error("[心跳] 发送失败:", error);
-                  isClosed = true; // 标记为已关闭，避免后续尝试
+          heartbeatInterval = setInterval(() => {
+            if (isClosed) return; // 如果已关闭，直接返回
+
+            const now = Date.now();
+            // 如果超过阈值时间没有发送数据，发送心跳
+            if (now - lastHeartbeat > STREAM_CONFIG.HEARTBEAT_THRESHOLD) {
+              try {
+                const heartbeatChunk = encoder.encode(
+                  `data: ${JSON.stringify({
+                    type: "heartbeat",
+                    timestamp: now,
+                  })}\n\n`,
+                );
+                controller.enqueue(heartbeatChunk);
+                lastHeartbeat = now;
+                heartbeatFailCount = 0; // 成功后重置失败计数
+              } catch (error) {
+                heartbeatFailCount++;
+                console.error(
+                  `[心跳] ✗ 发送失败 (${heartbeatFailCount}/${MAX_HEARTBEAT_FAILS}):`,
+                  error,
+                );
+
+                // 只有连续失败多次才关闭流，避免误关
+                if (heartbeatFailCount >= MAX_HEARTBEAT_FAILS) {
+                  console.error("[心跳] ✗✗✗ 连续失败次数过多，关闭流");
+                  isClosed = true;
                   if (heartbeatInterval) {
                     clearInterval(heartbeatInterval);
                     heartbeatInterval = undefined;
                   }
                 }
               }
-            }, 30000); // 每 30 秒检查一次
-          }
+            }
+          }, STREAM_CONFIG.HEARTBEAT_INTERVAL);
 
           for await (const event of eventStream) {
+            // 检查流是否已关闭，避免在已关闭的流上继续操作
+            if (isClosed) {
+              console.log("[Stream] 流已关闭，停止处理事件");
+              break;
+            }
+
             // 流式发送 AI 消息内容
             if (
               event.event === "on_chat_model_stream" &&
               event.data?.chunk?.content
             ) {
               const content = event.data.chunk.content;
+
+              // 检查 finish_reason（用于诊断生成停止原因）
+              const finishReason =
+                event.data?.chunk?.response_metadata?.finish_reason;
+              if (finishReason === "length") {
+                console.warn(`[Stream] ⚠️ 模型因达到长度限制而停止`, {
+                  累积长度: accumulatedContent.length,
+                });
+              }
 
               // 智能过滤：基于事件元数据和内容特征
               // 定义需要过滤的节点（只过滤纯内部逻辑，不过滤有用户价值的消息）
@@ -228,7 +256,7 @@ export async function POST(request: NextRequest) {
                 (node) =>
                   eventTags.includes(node) ||
                   eventName.includes(node) ||
-                  eventName === node
+                  eventName === node,
               );
 
               // 额外的内容特征检测（只过滤纯内部逻辑）
@@ -237,10 +265,6 @@ export async function POST(request: NextRequest) {
                 content.includes("{") && content.includes('"next"');
 
               if (isFilteredNode || isInternalContent) {
-                console.log("[过滤] 内部流程消息:", {
-                  node: eventName || "unknown",
-                  contentPreview: content.substring(0, 50),
-                });
                 continue;
               }
 
@@ -252,10 +276,21 @@ export async function POST(request: NextRequest) {
                   type: "content",
                   content,
                   threadId: finalThreadId,
-                })}\n\n`
+                })}\n\n`,
               );
-              controller.enqueue(chunk);
-              lastHeartbeat = Date.now(); // 更新心跳时间戳
+
+              try {
+                controller.enqueue(chunk);
+                lastHeartbeat = Date.now(); // 更新心跳时间戳
+              } catch (enqueueError) {
+                console.error("[Stream] ✗ 发送内容失败:", enqueueError);
+                console.error(
+                  "[Stream] 当前累积长度:",
+                  accumulatedContent.length,
+                );
+                console.error("[Stream] 内容预览:", content.substring(0, 100));
+                throw enqueueError; // 重新抛出，让外层 catch 处理
+              }
 
               // 累积内容用于检测标签闭合和生成标题
               accumulatedContent += content;
@@ -268,18 +303,13 @@ export async function POST(request: NextRequest) {
                 accumulatedContent.includes("</architectPlan>")
               ) {
                 hasArchitectCompleted = true;
-                console.log("[Stream] ✅ ARCHITECT 完成检测:", {
-                  累积内容长度: accumulatedContent.length,
-                  包含闭合标签: accumulatedContent.includes("</architectPlan>"),
-                  当前chunk: content.substring(0, 50),
-                });
 
                 // 发送 ARCHITECT 完成事件
                 const architectCompleteChunk = encoder.encode(
                   `data: ${JSON.stringify({
                     type: "architect_complete",
                     threadId: finalThreadId,
-                  })}\n\n`
+                  })}\n\n`,
                 );
                 controller.enqueue(architectCompleteChunk);
               }
@@ -297,22 +327,15 @@ export async function POST(request: NextRequest) {
               // 只有真正的架构规划才发送 architect_complete 事件
               if (accumulatedContent.includes("<architectPlan>")) {
                 hasArchitectCompleted = true;
-                console.log(
-                  "[Stream] ✅ ARCHITECT 节点完成（on_chain_end）- 包含架构规划"
-                );
 
                 // 发送 ARCHITECT 完成事件
                 const architectCompleteChunk = encoder.encode(
                   `data: ${JSON.stringify({
                     type: "architect_complete",
                     threadId: finalThreadId,
-                  })}\n\n`
+                  })}\n\n`,
                 );
                 controller.enqueue(architectCompleteChunk);
-              } else {
-                console.log(
-                  "[Stream] ℹ️ ARCHITECT 节点完成 - 闲聊场景，不发送 architect_complete 事件"
-                );
               }
             }
 
@@ -325,7 +348,7 @@ export async function POST(request: NextRequest) {
                   tool_name: event.name,
                   args: event.data?.input || {},
                   threadId: finalThreadId,
-                })}\n\n`
+                })}\n\n`,
               );
               controller.enqueue(chunk);
             }
@@ -343,7 +366,7 @@ export async function POST(request: NextRequest) {
                       ? output
                       : JSON.stringify(output),
                   threadId: finalThreadId,
-                })}\n\n`
+                })}\n\n`,
               );
               controller.enqueue(chunk);
             }
@@ -352,6 +375,51 @@ export async function POST(request: NextRequest) {
           // ==========================================
           // 5. 流式响应结束
           // ==========================================
+          console.log("[Stream] 流式响应结束", {
+            长度: accumulatedContent.length,
+            完整: accumulatedContent.includes("</boltArtifact>"),
+          });
+
+          // 检查内容完整性
+          if (
+            accumulatedContent.includes("<boltArtifact") &&
+            !accumulatedContent.includes("</boltArtifact>")
+          ) {
+            console.warn(
+              "[Stream] ⚠️ 警告：检测到未闭合的 <boltArtifact> 标签，尝试自动修复",
+            );
+
+            // 尝试找到最后一个 <boltAction> 的闭合位置
+            const lastActionEndIndex =
+              accumulatedContent.lastIndexOf("</boltAction>");
+            if (lastActionEndIndex !== -1) {
+              // 在最后一个 action 后面补充闭合标签
+              const closeTag = "\n</boltArtifact>";
+              const closeChunk = encoder.encode(
+                `data: ${JSON.stringify({
+                  type: "content",
+                  content: closeTag,
+                  threadId: finalThreadId,
+                })}\n\n`,
+              );
+
+              try {
+                controller.enqueue(closeChunk);
+                accumulatedContent += closeTag;
+                aiResponseContent += closeTag;
+                console.log("[Stream] ✓ 已自动补全 </boltArtifact> 闭合标签");
+              } catch (error) {
+                console.error("[Stream] ✗ 补全闭合标签失败:", error);
+              }
+            } else {
+              console.error("[Stream] ✗ 无法找到合适的位置补全闭合标签");
+              console.warn(
+                "[Stream] 内容末尾:",
+                accumulatedContent.slice(-200),
+              );
+            }
+          }
+
           // 注意：artifact 解析和保存已移到前端处理
           // 前端会在流式完成后调用 /api/artifact/save
 
@@ -371,14 +439,14 @@ export async function POST(request: NextRequest) {
                 typeof message === "string"
                   ? message
                   : Array.isArray(message)
-                  ? message.find((m) => m.type === "text")?.text || ""
-                  : "";
+                    ? message.find((m) => m.type === "text")?.text || ""
+                    : "";
 
               // 异步生成标题（不阻塞响应完成）
               const newTitle = await generateThreadTitle(
                 userMessageText,
                 aiResponseContent,
-                model || "qwen-plus"
+                model || "qwen-plus",
               );
 
               // 更新数据库中的标题
@@ -393,13 +461,9 @@ export async function POST(request: NextRequest) {
                   type: "title_update",
                   threadId: finalThreadId,
                   title: newTitle,
-                })}\n\n`
+                })}\n\n`,
               );
               controller.enqueue(titleUpdateChunk);
-
-              console.log(
-                `[标题生成] ✅ 会话 ${finalThreadId} 标题已更新: ${newTitle}`
-              );
             } catch (error) {
               console.error("[标题生成] ❌ 生成标题失败:", error);
               // 标题生成失败不影响主流程，继续执行
@@ -407,20 +471,26 @@ export async function POST(request: NextRequest) {
           }
 
           // 发送结束信号
+
           const endChunk = encoder.encode(
             `data: ${JSON.stringify({
               type: "done",
               threadId: finalThreadId,
-            })}\n\n`
+            })}\n\n`,
           );
           controller.enqueue(endChunk);
         } catch (error) {
-          console.error("Stream error:", error);
+          console.error("[Stream] 流式响应错误:", error);
+          console.error(
+            "[Stream] 错误堆栈:",
+            error instanceof Error ? error.stack : "无堆栈信息",
+          );
           const errorChunk = encoder.encode(
             `data: ${JSON.stringify({
               type: "error",
               error: error instanceof Error ? error.message : "Unknown error",
-            })}\n\n`
+              details: error instanceof Error ? error.stack : undefined,
+            })}\n\n`,
           );
           controller.enqueue(errorChunk);
         } finally {

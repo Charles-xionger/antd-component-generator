@@ -4,6 +4,7 @@ import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { SystemMessage, HumanMessage } from "@langchain/core/messages";
 import { TITLE_GENERATION_PROMPT } from "./prompts";
+import { MODEL_API_CONFIG } from "./config";
 
 export interface ModelConfig {
   model: string;
@@ -18,7 +19,7 @@ export interface ModelConfig {
  */
 export function createLLM(
   modelName: string,
-  config: ModelConfig
+  config: ModelConfig,
 ): BaseChatModel {
   // Gemini 模型（支持视觉）
   if (modelName.startsWith("gemini")) {
@@ -39,8 +40,9 @@ export function createLLM(
       configuration: {
         baseURL: process.env.AI302_BASE_URL || "https://api.302.ai/v1",
       },
-      maxRetries: 3,
-      timeout: 30000,
+      maxRetries: MODEL_API_CONFIG.MAX_RETRIES,
+      timeout: MODEL_API_CONFIG.TIMEOUT,
+      maxTokens: MODEL_API_CONFIG.MAX_TOKENS, // 设置最大输出 token
     });
   }
 
@@ -54,8 +56,9 @@ export function createLLM(
         process.env.ALIYUN_BASE_URL ||
         "https://dashscope.aliyuncs.com/compatible-mode/v1",
     },
-    maxRetries: 3,
-    timeout: 30000,
+    maxRetries: MODEL_API_CONFIG.MAX_RETRIES,
+    timeout: MODEL_API_CONFIG.TIMEOUT,
+    maxTokens: MODEL_API_CONFIG.MAX_TOKENS, // 设置最大输出 token
   });
 }
 
@@ -69,19 +72,19 @@ export function createLLM(
 export async function generateThreadTitle(
   userMessage: string,
   aiResponse: string = "",
-  modelName: string = "qwen-plus"
+  modelName: string = "qwen-plus",
 ): Promise<string> {
   try {
     // 创建一个专门用于标题生成的 LLM，使用较低的 temperature
     const llm = createLLM(modelName, {
       model: modelName,
-      temperature: 0.3, // 使用较低的温度以获得更稳定的输出
+      temperature: MODEL_API_CONFIG.TEMPERATURE.TITLE_GENERATION,
     });
 
     // 构建提示内容
     const content = `用户消息：${userMessage}\n\nAI回复：${aiResponse.slice(
       0,
-      200
+      200,
     )}`;
 
     const response = await llm.invoke([

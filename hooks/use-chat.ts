@@ -1,9 +1,11 @@
-"use client";
-
 import { useState, useRef, useCallback, useEffect } from "react";
 import { toast } from "sonner";
 import { MessageBuffer } from "@/lib/message-filter";
-import { useGenerationStore, GenerationStage } from "@/stores/use-generation-store";
+import {
+  useGenerationStore,
+  GenerationStage,
+} from "@/stores/use-generation-store";
+import { ERROR_CONFIG } from "@/lib/agent/config";
 
 export interface Message {
   id: string;
@@ -71,10 +73,10 @@ export function useChat(options: UseChatOptions = {}) {
   const [images, setImages] = useState<
     Array<{ dataUrl: string; mime_type: string }>
   >([]);
-    const [isLoading, setIsLoading] = useState(false);
-    // 增加 history 加载状态，分离出页面级 loading
-    const [isHistoryLoading, setIsHistoryLoading] = useState(false);
-    const [error, setError] = useState<Error | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  // 增加 history 加载状态，分离出页面级 loading
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // 使用 ref 存储回调，避免依赖变化导致死循环
@@ -121,7 +123,7 @@ export function useChat(options: UseChatOptions = {}) {
         if (response.ok) {
           const data = await response.json();
           const formattedMessages = formatMessagesFromHistory(
-            data.messages || []
+            data.messages || [],
           );
           setMessages(formattedMessages);
 
@@ -215,9 +217,28 @@ export function useChat(options: UseChatOptions = {}) {
       let needNewMessageForCoder = false;
 
       // Process streaming response
+      let totalChunks = 0;
+      let totalBytes = 0;
+      console.log("[useChat] 开始接收流式响应");
+
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+
+        if (value) {
+          totalChunks++;
+          totalBytes += value.length;
+        }
+
+        if (done) {
+          console.log("[useChat] 流式响应结束", {
+            totalChunks,
+            totalBytes,
+            contentLength: assistantContent.length,
+            hasBoltArtifact: assistantContent.includes("<boltArtifact"),
+            hasBoltArtifactEnd: assistantContent.includes("</boltArtifact>"),
+          });
+          break;
+        }
 
         const chunk = new TextDecoder().decode(value);
         const lines = chunk.split("\n");
@@ -234,7 +255,7 @@ export function useChat(options: UseChatOptions = {}) {
                 if (needNewMessageForCoder && content) {
                   console.log(
                     "[useChat] Coder 开始输出，创建新消息:",
-                    content.substring(0, 20)
+                    content.substring(0, 20),
                   );
 
                   const newAssistantMessage: Message = {
@@ -259,14 +280,14 @@ export function useChat(options: UseChatOptions = {}) {
                 if (!shouldShow) {
                   console.log(
                     "[useChat] 过滤 chunk:",
-                    content.substring(0, 20)
+                    content.substring(0, 20),
                   );
                   continue;
                 }
 
                 // 累积显示的内容
                 assistantContent += content;
-                
+
                 // 🔥 检测是否进入 Architect 阶段
                 const currentStage = useGenerationStore.getState().stage;
                 if (
@@ -274,7 +295,9 @@ export function useChat(options: UseChatOptions = {}) {
                   currentStage !== GenerationStage.GENERATING
                 ) {
                   console.log("[useChat] 检测到 Architect 标签，切换状态");
-                  useGenerationStore.getState().startGenerating(assistantMessage.id);
+                  useGenerationStore
+                    .getState()
+                    .startGenerating(assistantMessage.id);
                 }
 
                 const hasArtifact = assistantContent.includes("<boltArtifact");
@@ -287,8 +310,8 @@ export function useChat(options: UseChatOptions = {}) {
                           content: assistantContent,
                           hasArtifact,
                         }
-                      : msg
-                  )
+                      : msg,
+                  ),
                 );
 
                 if (hasArtifact && onArtifactDetectedRef.current) {
@@ -312,7 +335,7 @@ export function useChat(options: UseChatOptions = {}) {
                 needNewMessageForCoder = true;
 
                 console.log(
-                  "[useChat] Architect 完成，等待 Coder 输出时创建新消息"
+                  "[useChat] Architect 完成，等待 Coder 输出时创建新消息",
                 );
 
                 // 继续处理后续的 content chunks
@@ -335,8 +358,8 @@ export function useChat(options: UseChatOptions = {}) {
                           ...msg,
                           toolCalls: [...(msg.toolCalls || []), toolCall],
                         }
-                      : msg
-                  )
+                      : msg,
+                  ),
                 );
 
                 if (onToolCallRef.current) {
@@ -356,11 +379,11 @@ export function useChat(options: UseChatOptions = {}) {
                                   status: "success" as const,
                                   result: data.result || data.output,
                                 }
-                              : tc
+                              : tc,
                           ),
                         }
-                      : msg
-                  )
+                      : msg,
+                  ),
                 );
               } else if (data.type === "tool_error") {
                 const toolCallId = data.tool_call_id || data.run_id;
@@ -376,11 +399,11 @@ export function useChat(options: UseChatOptions = {}) {
                                   status: "error" as const,
                                   error: data.error,
                                 }
-                              : tc
+                              : tc,
                           ),
                         }
-                      : msg
-                  )
+                      : msg,
+                  ),
                 );
               } else if (data.type === "title_update") {
                 // 标题更新事件
@@ -405,6 +428,25 @@ export function useChat(options: UseChatOptions = {}) {
       // 流式响应完成，触发回调
       // 注意：即使 assistantContent 为空也要触发，因为可能是 architect 完成后创建的新消息
       // artifact 内容可能在前一条消息中
+
+      // 检查内容完整性
+      if (
+        assistantContent.includes("<boltArtifact") &&
+        !assistantContent.includes("</boltArtifact>")
+      ) {
+        console.error(
+          "[useChat] ⚠️ 警告：检测到未闭合的 <boltArtifact> 标签！",
+        );
+        console.error("[useChat] 内容长度:", assistantContent.length);
+        console.error("[useChat] 内容末尾:", assistantContent.slice(-300));
+        console.error(
+          "[useChat] 总接收: chunks=",
+          totalChunks,
+          "bytes=",
+          totalBytes,
+        );
+      }
+
       if (onStreamCompleteRef.current) {
         onStreamCompleteRef.current(assistantContent || "");
       }
@@ -424,26 +466,53 @@ export function useChat(options: UseChatOptions = {}) {
                   content: assistantContent,
                   hasArtifact,
                 }
-              : msg
-          )
+              : msg,
+          ),
         );
       }
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
         // 请求被取消，重置状态
+        console.log("[useChat] 请求被用户取消");
         useGenerationStore.getState().reset();
         return;
       }
+
       const error = err instanceof Error ? err : new Error("未知错误");
+      console.error("[useChat] 发生错误:", error);
+      console.error("[useChat] 错误详情:", {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+        assistantContentLength: assistantContent.length,
+        messageCount: messages.length,
+      });
+
       setError(error);
+
+      // 根据错误类型提供更友好的提示
+      let errorMessage = ERROR_CONFIG.DEFAULT_MESSAGE;
+      if (error.message.includes("timeout") || error.message.includes("超时")) {
+        errorMessage = ERROR_CONFIG.TIMEOUT_MESSAGE;
+      } else if (
+        error.message.includes("network") ||
+        error.message.includes("网络")
+      ) {
+        errorMessage = ERROR_CONFIG.NETWORK_MESSAGE;
+      } else if (error.message.includes("abort")) {
+        errorMessage = ERROR_CONFIG.ABORT_MESSAGE;
+      }
+
       setMessages((prev) => [
         ...prev,
         {
           id: (Date.now() + 2).toString(),
           role: "assistant",
-          content: "抱歉，发生了错误。请重试。",
+          content: errorMessage,
         },
       ]);
+
+      toast.error(errorMessage);
       onErrorRef.current?.(error);
       // 🔥 错误时重置生成状态
       useGenerationStore.getState().reset();
@@ -468,7 +537,7 @@ export function useChat(options: UseChatOptions = {}) {
       e?.preventDefault();
       sendMessage();
     },
-    [sendMessage]
+    [sendMessage],
   );
 
   /** 停止当前请求 */
@@ -498,7 +567,7 @@ export function useChat(options: UseChatOptions = {}) {
       if (response.ok) {
         const data = await response.json();
         const formattedMessages = formatMessagesFromHistory(
-          data.messages || []
+          data.messages || [],
         );
         setMessages(formattedMessages);
         historyLoadedRef.current = threadId;
@@ -622,7 +691,7 @@ export function useChat(options: UseChatOptions = {}) {
                 // 使用缓冲区过滤
                 const shouldShow = messageBuffer.append(
                   data.content,
-                  data.metadata
+                  data.metadata,
                 );
                 if (!shouldShow) {
                   continue;
@@ -637,15 +706,17 @@ export function useChat(options: UseChatOptions = {}) {
                   currentStage !== GenerationStage.GENERATING
                 ) {
                   console.log("[useChat] 检测到 Architect 标签，切换状态");
-                  useGenerationStore.getState().startGenerating(assistantMessage.id);
+                  useGenerationStore
+                    .getState()
+                    .startGenerating(assistantMessage.id);
                 }
 
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === assistantMessage.id
                       ? { ...msg, content: assistantContent }
-                      : msg
-                  )
+                      : msg,
+                  ),
                 );
 
                 const hasArtifact = assistantContent.includes("<boltArtifact");
@@ -672,8 +743,8 @@ export function useChat(options: UseChatOptions = {}) {
                           ...msg,
                           toolCalls: [...(msg.toolCalls || []), toolCall],
                         }
-                      : msg
-                  )
+                      : msg,
+                  ),
                 );
 
                 if (onToolCallRef.current) {
@@ -693,11 +764,11 @@ export function useChat(options: UseChatOptions = {}) {
                                   status: "success" as const,
                                   result: data.result || data.output,
                                 }
-                              : tc
+                              : tc,
                           ),
                         }
-                      : msg
-                  )
+                      : msg,
+                  ),
                 );
               } else if (data.type === "error") {
                 setError(new Error(data.error));
@@ -734,7 +805,7 @@ export function useChat(options: UseChatOptions = {}) {
       onArtifactDetectedRef,
       onToolCallRef,
       onStreamCompleteRef,
-    ]
+    ],
   );
 
   return {
@@ -798,8 +869,8 @@ function formatMessagesFromHistory(rawMessages: RawMessage[]): Message[] {
         typeof msg.content === "string"
           ? msg.content
           : Array.isArray(msg.content)
-          ? msg.content.map((c) => c.text || "").join("")
-          : "";
+            ? msg.content.map((c) => c.text || "").join("")
+            : "";
       toolResponses.set(msg.tool_call_id, { result: content });
     }
   }
@@ -833,7 +904,7 @@ function formatMessagesFromHistory(rawMessages: RawMessage[]): Message[] {
 
       // 提取图片内容
       const imageParts = msg.content.filter(
-        (c) => c.type === "image" && c.source_type === "base64" && c.data
+        (c) => c.type === "image" && c.source_type === "base64" && c.data,
       );
 
       if (imageParts.length > 0) {

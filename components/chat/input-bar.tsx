@@ -185,8 +185,8 @@ function ModelSelector({
   onModelChange?: (model: string) => void;
 }) {
   const models = [
-    // { id: "qwen-plus", name: "Qwen 3", icon: "Q" },
-    // { id: "claud-sonnet-4-20250514", name: "Claude 4.5", icon: "C" },
+    { id: "qwen-plus", name: "Qwen 3", icon: "Q" },
+    { id: "claud-sonnet-4-20250514", name: "Claude 4.5", icon: "C" },
     { id: "gemini-3-pro-preview", name: "Gemini 3 pro", icon: "G" },
   ];
 
@@ -245,7 +245,7 @@ export const InputBar = forwardRef<HTMLTextAreaElement, InputBarProps>(
       isCanvasVisible,
       onToggleCanvas,
     }: InputBarProps,
-    ref
+    ref,
   ) {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const internalRef =
@@ -401,8 +401,8 @@ export const InputBar = forwardRef<HTMLTextAreaElement, InputBarProps>(
                 isDisabled
                   ? "bg-red-500/10 text-red-600 hover:bg-red-500/20"
                   : !value.trim() && images.length === 0
-                  ? "bg-muted text-muted-foreground cursor-not-allowed"
-                  : "bg-muted text-foreground hover:bg-accent"
+                    ? "bg-muted text-muted-foreground cursor-not-allowed"
+                    : "bg-muted text-foreground hover:bg-accent"
               }`}
               title={isDisabled ? "停止生成" : "发送"}
             >
@@ -417,5 +417,5 @@ export const InputBar = forwardRef<HTMLTextAreaElement, InputBarProps>(
         </div>
       </div>
     );
-  }
+  },
 );

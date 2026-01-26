@@ -31,7 +31,7 @@ function compressPrompt(prompt: string): string {
  */
 export async function sceneDetector(
   state: AgentState,
-  config?: { configurable?: { model?: string } }
+  config?: { configurable?: { model?: string } },
 ): Promise<Partial<AgentState>> {
   console.log("[SceneDetector] 🎯 开始场景判断", {
     messagesCount: state.messages.length,
@@ -53,14 +53,15 @@ export async function sceneDetector(
     typeof lastUserMessage.content === "string"
       ? lastUserMessage.content
       : Array.isArray(lastUserMessage.content)
-      ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        lastUserMessage.content.map((c: any) => c.text || "").join("")
-      : "";
+        ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          lastUserMessage.content.map((c: any) => c.text || "").join("")
+        : "";
 
   const contentLower = userContent.toLowerCase();
 
   // 判断是否有现有代码
-  const hasExistingCode = !!state.codeContext && state.codeContext.trim().length > 0;
+  const hasExistingCode =
+    !!state.codeContext && state.codeContext.trim().length > 0;
 
   // 场景判断逻辑
   let sceneType: SceneType = "unknown";
@@ -128,7 +129,7 @@ export async function sceneDetector(
 // Architect Node: 生成开发计划
 export async function architect(
   state: AgentState,
-  config?: { configurable?: { model?: string } }
+  config?: { configurable?: { model?: string } },
 ): Promise<Partial<AgentState>> {
   console.log("[Architect] 🏗️  开始执行 architect 节点");
 
@@ -138,7 +139,7 @@ export async function architect(
     return (
       Array.isArray(content) &&
       content.some(
-        (block) => block.type === "image" || block.type === "image_url"
+        (block) => block.type === "image" || block.type === "image_url",
       )
     );
   });
@@ -161,7 +162,7 @@ export async function architect(
   console.log(
     "[Architect] 使用模型:",
     modelName,
-    hasImageMessages ? "(视觉模型)" : "(文本模型)"
+    hasImageMessages ? "(视觉模型)" : "(文本模型)",
   );
 
   // 压缩 prompt 以节省 token
@@ -219,7 +220,7 @@ export async function architect(
 
   console.log("[Architect] 📊 消息过滤结果:", {
     原始消息数: state.messages.slice(
-      lastArchitectIndex === -1 ? 0 : lastArchitectIndex
+      lastArchitectIndex === -1 ? 0 : lastArchitectIndex,
     ).length,
     过滤后消息数: relevantMessages.length,
   });
@@ -230,7 +231,7 @@ export async function architect(
   let codeContextForArchitect = "";
   if (state.codeContext) {
     const sceneType = state.sceneType || "new";
-    
+
     if (sceneType === "bug-fix") {
       // Bug 修复场景：提供完整代码
       console.log("[Architect] 🐛 Bug 修复场景，使用完整代码上下文");
@@ -239,7 +240,7 @@ export async function architect(
       // 新项目/修改场景：提供简化代码（前5行）
       console.log("[Architect] 📝 非 Bug 修复场景，使用简化代码上下文");
       const fileMatches = state.codeContext.matchAll(
-        /<boltAction\s+type="file"\s+filePath="([^"]+)">([\s\S]*?)<\/boltAction>/g
+        /<boltAction\s+type="file"\s+filePath="([^"]+)">([\s\S]*?)<\/boltAction>/g,
       );
       for (const match of fileMatches) {
         const filePath = match[1];
@@ -253,7 +254,7 @@ export async function architect(
   // 确保包含第一条用户消息（含图片），作为视觉参考
   const firstUserMessage = state.messages.find((m) => m._getType() === "human");
   const hasFirstUserInRelevant = relevantMessages.some(
-    (m) => m === firstUserMessage
+    (m) => m === firstUserMessage,
   );
 
   // 构建消息列表
@@ -262,14 +263,14 @@ export async function architect(
       promptWithContext +
         (codeContextForArchitect
           ? `\n\n### 现有文件结构参考：\n${codeContextForArchitect}`
-          : "")
+          : ""),
     ),
     // 如果相关消息中没有第一条用户消息，添加它（提供图片等视觉参考）
     ...(hasFirstUserInRelevant
       ? []
       : firstUserMessage
-      ? [firstUserMessage]
-      : []),
+        ? [firstUserMessage]
+        : []),
     ...relevantMessages, // 上一个 architect 之后的所有消息（排除 coder 消息）
   ];
 
@@ -287,7 +288,7 @@ export async function architect(
     const content = msg.content.toString();
     const preview = content.substring(0, 150).replace(/\n/g, " ");
     console.log(
-      `  ${idx}. [${msgType}] 长度:${content.length}, 预览:${preview}...`
+      `  ${idx}. [${msgType}] 长度:${content.length}, 预览:${preview}...`,
     );
   });
 
@@ -305,7 +306,7 @@ export async function architect(
     // 🚨 边界检查：Architect 绝对不能输出代码
     if (content.includes("<boltArtifact") || content.includes("<boltAction")) {
       console.error(
-        "[Architect] ❌ 检测到越界行为：Architect 输出了代码标签！"
+        "[Architect] ❌ 检测到越界行为：Architect 输出了代码标签！",
       );
       console.error("[Architect] 🔍 违规内容预览:", content.substring(0, 500));
 
@@ -323,12 +324,12 @@ export async function architect(
         };
       } else {
         console.error(
-          "[Architect] ❌ 无法清理越界内容，未找到 </architectPlan> 标签"
+          "[Architect] ❌ 无法清理越界内容，未找到 </architectPlan> 标签",
         );
         return {
           messages: [
             new AIMessage(
-              "⚠️ 架构师输出格式错误：不能输出代码。请确保只输出 architectPlan 标签内的架构方案。"
+              "⚠️ 架构师输出格式错误：不能输出代码。请确保只输出 architectPlan 标签内的架构方案。",
             ),
           ],
         };
@@ -343,11 +344,11 @@ export async function architect(
       if (afterContent.length > 0) {
         console.warn(
           "[Architect] ⚠️ 检测到 </architectPlan> 后有额外内容，长度:",
-          afterContent.length
+          afterContent.length,
         );
         console.warn(
           "[Architect] 🔍 额外内容预览:",
-          afterContent.substring(0, 200)
+          afterContent.substring(0, 200),
         );
 
         // 自动截断
@@ -363,7 +364,7 @@ export async function architect(
     // 检查是否包含架构方案
     if (!content.includes("<architectPlan")) {
       console.log(
-        "[Architect] ℹ️ 响应中没有 <architectPlan> 标签 (可能是闲聊或拒绝)"
+        "[Architect] ℹ️ 响应中没有 <architectPlan> 标签 (可能是闲聊或拒绝)",
       );
       // 不再强制返回错误，允许 Architect 进行闲聊或拒绝生成
       return {
@@ -388,7 +389,7 @@ export async function architect(
 // Artifact Saver Node: 保存生成的代码到数据库
 export async function artifactSaver(
   state: AgentState,
-  config?: { configurable?: { thread_id?: string } }
+  config?: { configurable?: { thread_id?: string } },
 ): Promise<Partial<AgentState>> {
   console.log("[ArtifactSaver] 💾 开始执行保存节点");
 
@@ -423,7 +424,7 @@ export async function artifactSaver(
 
     // 2. 检查完整性 (简单检查)
     const hasAppTsx = files.some(
-      (f) => f.path === "App.tsx" || f.path.endsWith("/App.tsx")
+      (f) => f.path === "App.tsx" || f.path.endsWith("/App.tsx"),
     );
     if (!hasAppTsx) {
       console.warn("[ArtifactSaver] ⚠️ 警告：生成的代码缺少 App.tsx");
@@ -431,7 +432,7 @@ export async function artifactSaver(
     }
 
     console.log(
-      `[ArtifactSaver] 准备保存 ${files.length} 个文件到 Thread: ${threadId}`
+      `[ArtifactSaver] 准备保存 ${files.length} 个文件到 Thread: ${threadId}`,
     );
 
     // 3. 数据库操作 (复用 api/artifact/save 的逻辑)
@@ -473,7 +474,7 @@ export async function artifactSaver(
     } else {
       // 合并逻辑：旧文件 + 新文件 = 新快照
       const currentFilesMap = new Map(
-        currentFiles.map((f) => [f.path, f.content])
+        currentFiles.map((f) => [f.path, f.content]),
       );
 
       // 用新文件覆盖旧文件
@@ -485,7 +486,7 @@ export async function artifactSaver(
         ([path, content]) => ({
           path,
           content,
-        })
+        }),
       );
 
       // 重新查询最新版本号
@@ -509,7 +510,7 @@ export async function artifactSaver(
       console.log(
         "[ArtifactSaver] ✅ 创建新版本:",
         newVersion.id,
-        "v" + nextVersionNumber
+        "v" + nextVersionNumber,
       );
     }
 
@@ -525,7 +526,7 @@ export async function artifactSaver(
 // Coder Node: 生成代码
 export async function coder(
   state: AgentState,
-  config?: { configurable?: { model?: string; thread_id?: string } }
+  config?: { configurable?: { model?: string; thread_id?: string } },
 ): Promise<Partial<AgentState>> {
   console.log("[Coder] 💻 开始执行 coder 节点", {
     messagesCount: state.messages.length,
@@ -548,7 +549,7 @@ export async function coder(
     return (
       Array.isArray(content) &&
       content.some(
-        (block) => block.type === "image" || block.type === "image_url"
+        (block) => block.type === "image" || block.type === "image_url",
       )
     );
   });
@@ -571,7 +572,7 @@ export async function coder(
   console.log(
     "[Coder] 使用模型:",
     modelName,
-    hasImageMessages ? "(视觉模型)" : "(文本模型)"
+    hasImageMessages ? "(视觉模型)" : "(文本模型)",
   );
 
   // 找到上一个 coder 消息的位置（包含 <boltArtifact> 的 AI 消息）
@@ -621,7 +622,7 @@ export async function coder(
   // 确保包含第一条用户消息（含图片），作为视觉参考
   const firstUserMessage = state.messages.find((m) => m._getType() === "human");
   const hasFirstUserInRelevant = relevantMessages.some(
-    (m) => m === firstUserMessage
+    (m) => m === firstUserMessage,
   );
 
   // 🛡️ 将 Architect 的 Plan 转换为 HumanMessage 指令
@@ -633,26 +634,26 @@ export async function coder(
       typeof lastArchitectMessage.content === "string"
         ? lastArchitectMessage.content
         : Array.isArray(lastArchitectMessage.content)
-        ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          lastArchitectMessage.content.map((c: any) => c.text || "").join("")
-        : "";
+          ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            lastArchitectMessage.content.map((c: any) => c.text || "").join("")
+          : "";
 
     architectPlanInstruction = new HumanMessage(
-      `👉 **Architect Design Plan**:\n\n${planContent}\n\n🚨 **Instruction**: Please implement the above design plan immediately. Generate the full code structure as specified.`
+      `👉 **Architect Design Plan**:\n\n${planContent}\n\n🚨 **Instruction**: Please implement the above design plan immediately. Generate the full code structure as specified.`,
     );
   }
 
   // 构建消息列表
   const messages = [
     new SystemMessage(
-      promptWithContext.replace("{codeContext}", optimizedCodeContext)
+      promptWithContext.replace("{codeContext}", optimizedCodeContext),
     ),
     // 如果相关消息中没有第一条用户消息，添加它（提供图片等视觉参考）
     ...(hasFirstUserInRelevant
       ? []
       : firstUserMessage
-      ? [firstUserMessage]
-      : []),
+        ? [firstUserMessage]
+        : []),
     // 过滤掉原始的 Architect 消息（因为它会被包装成指令放在最后）
     ...relevantMessages.filter((msg) => msg !== lastArchitectMessage),
     // 将 Architect Plan 作为最新的用户指令添加
@@ -693,15 +694,15 @@ export async function coder(
           console.log(
             `    [${i}] image: mime=${item.mime_type}, data=${data.substring(
               0,
-              30
-            )}...`
+              30,
+            )}...`,
           );
         } else {
           console.log(
             `    [${i}] ${item.type}: ${JSON.stringify(item).substring(
               0,
-              50
-            )}...`
+              50,
+            )}...`,
           );
         }
       });
@@ -746,11 +747,23 @@ export async function coder(
     const response = await llm.invoke(messages);
     const content = response.content.toString();
 
+    // 检查 finish_reason
+    const finishReason = response.response_metadata?.finish_reason;
+    const usage = response.response_metadata?.usage;
+
     console.log("[Coder] ✅ 代码生成完成", {
       contentLength: content.length,
       hasBoltArtifact: content.includes("<boltArtifact"),
       contentPreview: content.substring(0, 200),
+      finishReason: finishReason || "unknown",
+      usage: usage || "N/A",
     });
+
+    // ⚠️ 检查是否因为长度限制被截断
+    if (finishReason === "length") {
+      console.warn("[Coder] ⚠️ 警告：代码生成因达到最大 token 限制而被截断！");
+      console.warn("[Coder] 建议：增加 MAX_TOKENS 配置或简化需求");
+    }
 
     // 创建新的 AIMessage 带上修改后的内容
     const messageWithVersion = new AIMessage(content);
@@ -767,7 +780,7 @@ export async function coder(
         const threadId = config?.configurable?.thread_id;
         if (threadId) {
           console.log(
-            `[Coder] 💾 自动保存生成结果到数据库... Thread: ${threadId}`
+            `[Coder] 💾 自动保存生成结果到数据库... Thread: ${threadId}`,
           );
 
           // 2. 解析文件
@@ -776,7 +789,7 @@ export async function coder(
           if (files.length > 0) {
             // 3. 检查入口文件完整性
             const hasAppTsx = files.some(
-              (f) => f.path === "App.tsx" || f.path.endsWith("/App.tsx")
+              (f) => f.path === "App.tsx" || f.path.endsWith("/App.tsx"),
             );
 
             if (hasAppTsx) {
@@ -818,13 +831,13 @@ export async function coder(
               } else {
                 // 合并文件
                 const currentFilesMap = new Map(
-                  currentFiles.map((f) => [f.path, f.content])
+                  currentFiles.map((f) => [f.path, f.content]),
                 );
                 files.forEach((file) => {
                   currentFilesMap.set(file.path, file.content);
                 });
                 const mergedFiles = Array.from(currentFilesMap.entries()).map(
-                  ([path, content]) => ({ path, content })
+                  ([path, content]) => ({ path, content }),
                 );
 
                 // 创建新版本
@@ -841,7 +854,7 @@ export async function coder(
                   },
                 });
                 console.log(
-                  `[Coder] ✅ Artifact v${nextVersionNumber} 更新成功`
+                  `[Coder] ✅ Artifact v${nextVersionNumber} 更新成功`,
                 );
               }
             } else {
