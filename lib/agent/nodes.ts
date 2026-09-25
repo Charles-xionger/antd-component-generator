@@ -8,7 +8,7 @@ import type { AgentState, SceneType } from "./state";
 import { ARCHITECT_PROMPT, CODER_PROMPT } from "./prompts";
 import { createLLM } from "./models";
 import { parseXmlToFiles } from "./utils";
-import prisma from "@/lib/database/prisma";
+import { saveProjectArtifactVersion } from "@/lib/projects/artifact-service";
 
 /**
  * 压缩 prompt 以节省 token
@@ -385,13 +385,18 @@ export async function architect(
 // Artifact Saver Node: 保存生成的代码到数据库
 export async function artifactSaver(
   state: AgentState,
-  config?: { configurable?: { thread_id?: string } },
+  config?: {
+    configurable?: {
+      project_id?: string;
+      generation_request_id?: string;
+    };
+  },
 ): Promise<Partial<AgentState>> {
   console.log("[ArtifactSaver] 💾 开始执行保存节点");
 
-  const threadId = config?.configurable?.thread_id;
-  if (!threadId) {
-    console.error("[ArtifactSaver] ❌ 缺少 thread_id，无法保存");
+  const projectId = config?.configurable?.project_id;
+  if (!projectId) {
+    console.error("[ArtifactSaver] ❌ 缺少 project_id，无法保存");
     return {};
   }
 
@@ -428,87 +433,16 @@ export async function artifactSaver(
     }
 
     console.log(
-      `[ArtifactSaver] 准备保存 ${files.length} 个文件到 Thread: ${threadId}`,
+      `[ArtifactSaver] 准备保存 ${files.length} 个文件到 Project: ${projectId}`,
     );
 
-    // 3. 数据库操作 (复用 api/artifact/save 的逻辑)
-    // 查找该 thread 下的 artifact
-    const artifact = await prisma.artifact.findUnique({
-      where: { threadId },
-      include: {
-        versions: {
-          orderBy: { versionNumber: "desc" },
-          take: 1,
-          include: { files: true },
-        },
-      },
+    const version = await saveProjectArtifactVersion({
+      projectId,
+      files,
+      generationRequestId: config?.configurable?.generation_request_id,
+      description: "自动保存",
     });
-
-    const currentVersion = artifact?.versions[0];
-    const currentFiles = currentVersion?.files || [];
-
-    if (!artifact) {
-      // 创建新的 Artifact 和第一个版本
-      const newArtifact = await prisma.artifact.create({
-        data: {
-          threadId,
-          versions: {
-            create: {
-              versionNumber: 1,
-              description: "初始版本 (Auto-Saved)",
-              files: {
-                create: files.map((file) => ({
-                  path: file.path,
-                  content: file.content,
-                })),
-              },
-            },
-          },
-        },
-      });
-      console.log("[ArtifactSaver] ✅ 创建新 Artifact:", newArtifact.id);
-    } else {
-      // 合并逻辑：旧文件 + 新文件 = 新快照
-      const currentFilesMap = new Map(
-        currentFiles.map((f) => [f.path, f.content]),
-      );
-
-      // 用新文件覆盖旧文件
-      files.forEach((file) => {
-        currentFilesMap.set(file.path, file.content);
-      });
-
-      const mergedFiles = Array.from(currentFilesMap.entries()).map(
-        ([path, content]) => ({
-          path,
-          content,
-        }),
-      );
-
-      // 重新查询最新版本号
-      const latestVersion = await prisma.artifactVersion.findFirst({
-        where: { artifactId: artifact.id },
-        orderBy: { versionNumber: "desc" },
-        select: { versionNumber: true },
-      });
-      const nextVersionNumber = (latestVersion?.versionNumber || 0) + 1;
-
-      const newVersion = await prisma.artifactVersion.create({
-        data: {
-          artifactId: artifact.id,
-          versionNumber: nextVersionNumber,
-          description: `自动保存于 ${new Date().toLocaleString()}`,
-          files: {
-            create: mergedFiles,
-          },
-        },
-      });
-      console.log(
-        "[ArtifactSaver] ✅ 创建新版本:",
-        newVersion.id,
-        "v" + nextVersionNumber,
-      );
-    }
+    console.log("[ArtifactSaver] ✅ 保存版本:", version.id);
 
     // 可以返回一个系统消息通知保存成功，或者不做任何事
     // return { messages: [new SystemMessage("代码已自动保存到数据库。")] };
@@ -522,7 +456,14 @@ export async function artifactSaver(
 // Coder Node: 生成代码
 export async function coder(
   state: AgentState,
-  config?: { configurable?: { model?: string; thread_id?: string } },
+  config?: {
+    configurable?: {
+      model?: string;
+      thread_id?: string;
+      project_id?: string;
+      generation_request_id?: string;
+    };
+  },
 ): Promise<Partial<AgentState>> {
   console.log("[Coder] 💻 开始执行 coder 节点", {
     messagesCount: state.messages.length,
@@ -767,10 +708,10 @@ export async function coder(
         content.includes("<boltArtifact") &&
         content.includes("</boltArtifact>")
       ) {
-        const threadId = config?.configurable?.thread_id;
-        if (threadId) {
+        const projectId = config?.configurable?.project_id;
+        if (projectId) {
           console.log(
-            `[Coder] 💾 自动保存生成结果到数据库... Thread: ${threadId}`,
+            `[Coder] 💾 自动保存生成结果到数据库... Project: ${projectId}`,
           );
 
           // 2. 解析文件
@@ -783,70 +724,14 @@ export async function coder(
             );
 
             if (hasAppTsx) {
-              // 4. 执行保存操作 (模拟 api/artifact/save 逻辑)
-              const artifact = await prisma.artifact.findUnique({
-                where: { threadId },
-                include: {
-                  versions: {
-                    orderBy: { versionNumber: "desc" },
-                    take: 1,
-                    include: { files: true },
-                  },
-                },
+              const version = await saveProjectArtifactVersion({
+                projectId,
+                files,
+                generationRequestId:
+                  config?.configurable?.generation_request_id,
+                description: "AI 自动生成",
               });
-
-              const currentVersion = artifact?.versions[0];
-              const currentFiles = currentVersion?.files || [];
-
-              if (!artifact) {
-                // 创建新 Artifact
-                await prisma.artifact.create({
-                  data: {
-                    threadId,
-                    versions: {
-                      create: {
-                        versionNumber: 1,
-                        description: "初始版本 (Auto-Saved by Coder)",
-                        files: {
-                          create: files.map((file) => ({
-                            path: file.path,
-                            content: file.content,
-                          })),
-                        },
-                      },
-                    },
-                  },
-                });
-                console.log("[Coder] ✅ 新 Artifact 创建成功");
-              } else {
-                // 合并文件
-                const currentFilesMap = new Map(
-                  currentFiles.map((f) => [f.path, f.content]),
-                );
-                files.forEach((file) => {
-                  currentFilesMap.set(file.path, file.content);
-                });
-                const mergedFiles = Array.from(currentFilesMap.entries()).map(
-                  ([path, content]) => ({ path, content }),
-                );
-
-                // 创建新版本
-                const nextVersionNumber =
-                  (currentVersion?.versionNumber || 0) + 1;
-                await prisma.artifactVersion.create({
-                  data: {
-                    artifactId: artifact.id,
-                    versionNumber: nextVersionNumber,
-                    description: `自动更新于 ${new Date().toLocaleString()} (Auto-Saved)`,
-                    files: {
-                      create: mergedFiles,
-                    },
-                  },
-                });
-                console.log(
-                  `[Coder] ✅ Artifact v${nextVersionNumber} 更新成功`,
-                );
-              }
+              console.log(`[Coder] ✅ Artifact v${version.versionNumber} 保存成功`);
             } else {
               console.warn("[Coder] ⚠️ 生成结果缺少 App.tsx，跳过自动保存");
             }

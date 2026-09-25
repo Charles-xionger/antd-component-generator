@@ -25,6 +25,7 @@ import {
 } from "@/stores/use-generation-store";
 
 interface UnifiedChatProps {
+  projectId?: string;
   threadId?: string;
   onThreadUpdate?: () => void;
   initialMessage?: string;
@@ -32,6 +33,7 @@ interface UnifiedChatProps {
 }
 
 export function UnifiedChat({
+  projectId,
   threadId,
   onThreadUpdate,
   initialMessage,
@@ -88,6 +90,7 @@ export function UnifiedChat({
   }>({});
 
   const chat = useChat({
+    projectId,
     threadId,
     mcpConfigId: selectedMcpId,
     model: selectedModel,
@@ -337,6 +340,7 @@ ${sandboxError}
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.origin !== SANDBOX_ORIGIN) return;
+      if (event.data?.protocolVersion !== 1) return;
 
       const { type, payload } = event.data || {};
 
@@ -563,6 +567,7 @@ ${sandboxError}
         <Pane minSize="300px">
           <div className="flex h-full flex-col">
             <CanvasPanel
+              projectId={projectId}
               canvas={canvas}
               iframeRef={iframeRef}
               isSandboxReady={isSandboxReady}

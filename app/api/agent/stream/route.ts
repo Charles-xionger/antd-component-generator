@@ -16,6 +16,7 @@ import prisma from "@/lib/database/prisma";
 import { formatCodeContext } from "@/lib/agent/utils";
 import { auth } from "@/lib/auth";
 import { generateThreadTitle } from "@/lib/agent/models";
+import { getOwnedProject, getOwnedThread } from "@/lib/projects/ownership";
 
 export async function POST(request: NextRequest) {
   try {
@@ -24,7 +25,14 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { message, images, threadId, model } = await request.json();
+    const {
+      message,
+      images,
+      threadId,
+      projectId,
+      generationRequestId,
+      model,
+    } = await request.json();
 
     if (!message && (!images || images.length === 0)) {
       return Response.json(
@@ -33,11 +41,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 使用 threadId 作为会话标识，支持多轮对话
-    const finalThreadId = threadId || crypto.randomUUID();
+    if (!threadId) {
+      return Response.json({ error: "Thread not found" }, { status: 404 });
+    }
+
+    const ownedThread = await getOwnedThread(threadId, session.user.id);
+    if (!ownedThread || (projectId && ownedThread.projectId !== projectId)) {
+      return Response.json({ error: "Thread not found" }, { status: 404 });
+    }
+
+    const ownedProject = await getOwnedProject(
+      ownedThread.projectId,
+      session.user.id,
+    );
+    if (!ownedProject) {
+      return Response.json({ error: "Project not found" }, { status: 404 });
+    }
+
+    const finalThreadId = ownedThread.id;
+    const finalProjectId = ownedProject.id;
+    const finalGenerationRequestId =
+      generationRequestId || crypto.randomUUID();
     const config = {
       configurable: {
         thread_id: finalThreadId,
+        project_id: finalProjectId,
+        generation_request_id: finalGenerationRequestId,
         model: model || "qwen3.7-flash-2026-07-15", // 传递模型参数到 graph
       },
     };
@@ -46,9 +75,9 @@ export async function POST(request: NextRequest) {
     // 1. 获取上下文 (Pre-computation)
     // ==========================================
 
-    // 尝试查找该 thread 下的最新代码快照
+    // 查找 Project 的最新代码快照
     const artifact = await prisma.artifact.findUnique({
-      where: { threadId: finalThreadId },
+      where: { projectId: finalProjectId },
       include: {
         versions: {
           orderBy: { versionNumber: "desc" }, // 取最新版本
@@ -64,32 +93,7 @@ export async function POST(request: NextRequest) {
     // 格式化当前代码为上下文字符串
     const codeContext = formatCodeContext(currentFiles);
 
-    // ==========================================
-    // 2. 获取或创建 Thread 记录
-    // ==========================================
-
-    let thread = await prisma.thread.findUnique({
-      where: { id: finalThreadId },
-    });
-
-    if (!thread) {
-      // 确保 message 是字符串后再截取
-      const messageText =
-        typeof message === "string"
-          ? message
-          : Array.isArray(message)
-            ? message.find((m) => m.type === "text")?.text || "New Chat"
-            : "New Chat";
-
-      thread = await prisma.thread.create({
-        data: {
-          id: finalThreadId,
-          title:
-            messageText.slice(0, 50) + (messageText.length > 50 ? "..." : ""),
-          userId: session.user.id,
-        },
-      });
-    }
+    const thread = ownedThread;
 
     // ==========================================
     // 3. 创建 Graph
@@ -453,15 +457,15 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // 注意：artifact 解析和保存已移到前端处理
-          // 前端会在流式完成后调用 /api/artifact/save
+          // Artifact 已由 Coder 节点通过统一服务端入口保存。
 
           // ==========================================
           // 6. 自动生成会话标题（如果是新会话）
           // ==========================================
           const shouldGenerateTitle =
             thread &&
-            (thread.title === "新会话" ||
+            (thread.title === "新项目" ||
+              thread.title === "新会话" ||
               thread.title === "New Chat" ||
               thread.title.endsWith("..."));
 
@@ -482,10 +486,13 @@ export async function POST(request: NextRequest) {
                 model || "qwen3.7-flash-2026-07-15",
               );
 
-              // 更新数据库中的标题
-              await prisma.thread.update({
-                where: { id: finalThreadId },
-                data: { title: newTitle },
+              // Project 是用户可见名称；Primary Thread 同步标题用于兼容旧数据。
+              await prisma.project.update({
+                where: { id: finalProjectId },
+                data: {
+                  name: newTitle,
+                  thread: { update: { title: newTitle } },
+                },
               });
 
               // 发送标题更新事件到前端
@@ -493,6 +500,7 @@ export async function POST(request: NextRequest) {
                 `data: ${JSON.stringify({
                   type: "title_update",
                   threadId: finalThreadId,
+                  projectId: finalProjectId,
                   title: newTitle,
                 })}\n\n`,
               );

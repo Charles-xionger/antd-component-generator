@@ -8,6 +8,7 @@ import {
   Tablet,
   Smartphone,
   Share2,
+  Rocket,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -33,6 +34,9 @@ interface PreviewToolbarProps {
   onLanguageChange: (language: "zh" | "en") => void;
   currentLanguage: "zh" | "en";
   onShare?: () => void;
+  isSharing?: boolean;
+  onPublish?: () => void;
+  isPublishing?: boolean;
 }
 
 export function PreviewToolbar({
@@ -48,6 +52,9 @@ export function PreviewToolbar({
   onLanguageChange,
   currentLanguage,
   onShare,
+  isSharing = false,
+  onPublish,
+  isPublishing = false,
 }: PreviewToolbarProps) {
   return (
     <div className="flex items-center justify-between px-4 py-2 bg-background border-b">
@@ -98,10 +105,27 @@ export function PreviewToolbar({
 
       {/* 右侧：分享、语言切换、刷新和全屏 */}
       <div className="flex items-center gap-2">
+        {onPublish && (
+          <Button
+            size="sm"
+            onClick={onPublish}
+            disabled={isPublishing}
+            title="发布当前版本"
+          >
+            <Rocket className="h-4 w-4 mr-1" />
+            {isPublishing ? "发布中" : "发布"}
+          </Button>
+        )}
         {onShare && (
-          <Button variant="ghost" size="sm" onClick={onShare} title="分享预览">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onShare}
+            disabled={isSharing}
+            title="分享预览"
+          >
             <Share2 className="h-4 w-4 mr-1" />
-            分享
+            {isSharing ? "生成中" : "分享"}
           </Button>
         )}
 

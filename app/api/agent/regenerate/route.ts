@@ -1,11 +1,10 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
 import { NextRequest } from "next/server";
 import { createGraph } from "@/lib/agent";
 import { auth } from "@/lib/auth";
-import prisma from "@/lib/database/prisma";
+import { getOwnedThread } from "@/lib/projects/ownership";
 
 /**
  * 重新生成消息：从指定消息之后重新执行 LangGraph
@@ -28,12 +27,10 @@ export async function POST(request: NextRequest) {
     }
 
     // 验证该 thread 属于当前用户
-    const thread = await prisma.thread.findUnique({
-      where: { id: threadId },
-    });
+    const thread = await getOwnedThread(threadId, session.user.id);
 
-    if (!thread || thread.userId !== session.user.id) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    if (!thread) {
+      return Response.json({ error: "Not found" }, { status: 404 });
     }
 
     // 从消息 ID 中提取索引
@@ -47,6 +44,8 @@ export async function POST(request: NextRequest) {
     const config = {
       configurable: {
         thread_id: threadId,
+        project_id: thread.projectId,
+        generation_request_id: crypto.randomUUID(),
       },
     };
 
@@ -74,7 +73,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 删除该消息之后的所有消息和对应的 artifact 版本
+    // 消息状态可以回退，但 ArtifactVersion 是发布和回滚依据，必须保持不可变。
     const messagesToDelete = currentState.values.messages.slice(
       messageIndex + 1
     );
@@ -85,76 +84,9 @@ export async function POST(request: NextRequest) {
       messagesToDeleteCount: messagesToDelete.length,
     });
 
-    // 删除 artifact 版本
-    const versionNumbersToDelete: number[] = [];
-    for (const msg of messagesToDelete) {
-      const content =
-        typeof msg.content === "string"
-          ? msg.content
-          : Array.isArray(msg.content)
-          ? msg.content.map((c: any) => c.text || "").join("")
-          : "";
-
-      console.log("[Regenerate] 检查消息:", {
-        msgType: msg.type,
-        contentLength: content.length,
-        hasBoltArtifact: content.includes("<boltArtifact"),
-        contentPreview: content.substring(0, 200),
-      });
-
-      if (content.includes("<boltArtifact")) {
-        const versionMatch = content.match(/version="(\d+)"/);
-        console.log("[Regenerate] 版本匹配结果:", {
-          versionMatch,
-          extractedVersion: versionMatch ? versionMatch[1] : null,
-        });
-
-        if (versionMatch) {
-          const versionNumber = parseInt(versionMatch[1], 10);
-          versionNumbersToDelete.push(versionNumber);
-          console.log(`[Regenerate] 找到版本号: ${versionNumber}`);
-        }
-      }
-    }
-
-    console.log("[Regenerate] 收集到的版本号:", versionNumbersToDelete);
-
-    // 如果有需要删除的版本，批量删除
-    if (versionNumbersToDelete.length > 0) {
-      try {
-        const minVersion = Math.min(...versionNumbersToDelete);
-        const artifact = await prisma.artifact.findUnique({
-          where: { threadId },
-        });
-
-        console.log("[Regenerate] 查找 artifact:", {
-          threadId,
-          artifactFound: !!artifact,
-          artifactId: artifact?.id,
-        });
-
-        if (artifact) {
-          // 删除版本号 >= minVersion 的所有版本
-          const result = await prisma.artifactVersion.deleteMany({
-            where: {
-              artifactId: artifact.id,
-              versionNumber: { gte: minVersion },
-            },
-          });
-          console.log(
-            `[Regenerate] ✅ 删除 artifact 版本 >= ${minVersion}，共删除 ${result.count} 个版本`
-          );
-        } else {
-          console.warn(
-            `[Regenerate] ⚠️ 未找到 threadId=${threadId} 的 artifact`
-          );
-        }
-      } catch (error) {
-        console.error("[Regenerate] ❌ 删除 artifact 版本失败:", error);
-      }
-    } else {
-      console.log("[Regenerate] ⚠️ 没有找到需要删除的版本号");
-    }
+    console.log("[Regenerate] 保留历史 ArtifactVersion:", {
+      messagesBeingReplaced: messagesToDelete.length,
+    });
 
     // 保留到目标消息为止的所有消息
     const updatedMessages = currentState.values.messages.slice(

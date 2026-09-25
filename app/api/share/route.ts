@@ -1,10 +1,15 @@
 // app/api/share/route.ts
 import { NextRequest } from "next/server";
 import prisma from "@/lib/database/prisma";
+import { auth } from "@/lib/auth";
 
 // 创建分享
 export async function POST(request: NextRequest) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const body = await request.json();
     const { artifactVersionId } = body;
 
@@ -16,8 +21,11 @@ export async function POST(request: NextRequest) {
     }
 
     // 验证版本是否存在
-    const version = await prisma.artifactVersion.findUnique({
-      where: { id: artifactVersionId },
+    const version = await prisma.artifactVersion.findFirst({
+      where: {
+        id: artifactVersionId,
+        artifact: { project: { userId: session.user.id, status: "ACTIVE" } },
+      },
     });
 
     if (!version) {

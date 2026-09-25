@@ -43,6 +43,7 @@ import {
   Edit,
   Star,
   Home,
+  Rocket,
 } from "lucide-react";
 
 interface Thread {
@@ -51,6 +52,7 @@ interface Thread {
   favorite?: boolean;
   createdAt: string;
   updatedAt: string;
+  published?: boolean;
   artifact?: {
     _count: {
       versions: number;
@@ -94,7 +96,7 @@ export function ChatSidebar({
 
   return (
     <div className="h-full flex flex-col bg-background border-r">
-      {/* Home and New Chat Buttons */}
+      {/* Project navigation */}
       <div className="p-4 border-b space-y-2">
         <Button
           onClick={onHomeClick}
@@ -102,7 +104,7 @@ export function ChatSidebar({
           variant={showingHome ? "secondary" : "ghost"}
         >
           <Home className="h-4 w-4" />
-          首页
+          新项目
         </Button>
         <Button
           onClick={onNewThread}
@@ -110,7 +112,13 @@ export function ChatSidebar({
           variant="default"
         >
           <Plus className="h-4 w-4" />
-          新建会话
+          输入需求创建
+        </Button>
+        <Button asChild className="w-full justify-start gap-2" variant="ghost">
+          <a href="/deployments">
+            <Rocket className="h-4 w-4" />
+            发布中心
+          </a>
         </Button>
       </div>
 
@@ -127,7 +135,7 @@ export function ChatSidebar({
                   <ChevronRight className="h-4 w-4" />
                 )}
                 <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                <span className="text-sm font-medium">收藏</span>
+                <span className="text-sm font-medium">收藏项目</span>
                 <span className="ml-auto text-xs text-muted-foreground">
                   {favoriteThreads.length}
                 </span>
@@ -163,7 +171,7 @@ export function ChatSidebar({
               ) : (
                 <ChevronRight className="h-4 w-4" />
               )}
-              <span className="text-sm font-medium">近期会话</span>
+              <span className="text-sm font-medium">我的项目</span>
               <span className="ml-auto text-xs text-muted-foreground">
                 {recentThreads.length}
               </span>
@@ -176,10 +184,10 @@ export function ChatSidebar({
               ) : recentThreads.length === 0 ? (
                 <div className="p-4 text-center">
                   <div className="text-sm text-muted-foreground mb-1">
-                    暂无会话
+                    暂无项目
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    点击新建会话开始
+                    输入需求创建第一个项目
                   </div>
                 </div>
               ) : (
@@ -258,7 +266,18 @@ function ChatItem({
           className="flex items-center justify-between p-2 cursor-pointer"
         >
           <div className="flex-1 min-w-0 mr-2">
-            <div className="font-medium text-sm truncate">{thread.title}</div>
+            <div className="flex items-center gap-2">
+              <div className="font-medium text-sm truncate">{thread.title}</div>
+              <span
+                className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] ${
+                  thread.published
+                    ? "bg-emerald-100 text-emerald-700"
+                    : "bg-muted text-muted-foreground"
+                }`}
+              >
+                {thread.published ? "已上线" : "草稿"}
+              </span>
+            </div>
           </div>
 
           {/* More Options Menu */}
@@ -325,12 +344,12 @@ function ChatItem({
       <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>重命名会话</DialogTitle>
-            <DialogDescription>为该会话输入一个新名称</DialogDescription>
+            <DialogTitle>重命名项目</DialogTitle>
+            <DialogDescription>项目域名不会随名称变化</DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <Label htmlFor="title" className="mb-2 block">
-              会话名称
+              项目名称
             </Label>
             <Input
               id="title"
@@ -360,9 +379,9 @@ function ChatItem({
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>删除会话</AlertDialogTitle>
+            <AlertDialogTitle>归档项目</AlertDialogTitle>
             <AlertDialogDescription>
-              确定要删除这个会话吗？删除后将无法恢复，包括所有聊天记录和生成的代码。
+              归档后项目将从列表中隐藏并停止线上访问，但代码和历史版本会保留。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -371,7 +390,7 @@ function ChatItem({
               onClick={onDelete}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              确认删除
+              确认归档
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

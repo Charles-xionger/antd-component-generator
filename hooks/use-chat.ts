@@ -33,6 +33,8 @@ export interface UseChatOptions {
   api?: string;
   /** 初始 threadId，用于恢复对话 */
   threadId?: string;
+  /** 当前项目 */
+  projectId?: string;
   /** MCP 配置 ID */
   mcpConfigId?: string | null;
   /** 选中的模型名称 */
@@ -57,6 +59,7 @@ export function useChat(options: UseChatOptions = {}) {
   const {
     api = "/api/agent/stream",
     threadId,
+    projectId,
     mcpConfigId,
     model,
     onArtifactDetected,
@@ -185,6 +188,8 @@ export function useChat(options: UseChatOptions = {}) {
           message: payloadMessage,
           images: currentImages,
           threadId,
+          projectId,
+          generationRequestId: crypto.randomUUID(),
           mcpConfigId,
           model,
         }),
@@ -526,6 +531,7 @@ export function useChat(options: UseChatOptions = {}) {
     input,
     isLoading,
     threadId,
+    projectId,
     mcpConfigId,
     model,
     images,

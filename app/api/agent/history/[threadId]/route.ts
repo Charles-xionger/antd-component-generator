@@ -2,6 +2,8 @@ import { NextRequest } from "next/server";
 import prisma from "@/lib/database/prisma";
 import { createGraph } from "@/lib/agent";
 import { BaseMessage } from "@langchain/core/messages";
+import { auth } from "@/lib/auth";
+import { getOwnedThread } from "@/lib/projects/ownership";
 
 // 获取单个会话的消息历史和代码文件
 export async function GET(
@@ -9,10 +11,19 @@ export async function GET(
   { params }: { params: Promise<{ threadId: string }> }
 ) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const { threadId } = await params;
 
     if (!threadId) {
       return Response.json({ error: "Thread ID is required" }, { status: 400 });
+    }
+
+    const ownedThread = await getOwnedThread(threadId, session.user.id);
+    if (!ownedThread) {
+      return Response.json({ error: "Thread not found" }, { status: 404 });
     }
 
     // 从 LangGraph checkpointer 获取消息历史
@@ -45,15 +56,17 @@ export async function GET(
       })) || [];
 
     // 获取 Thread 及其关联的 Artifact 和所有版本
-    const thread = await prisma.thread.findUnique({
-      where: { id: threadId },
+    const thread = await prisma.thread.findFirst({
+      where: { id: threadId, userId: session.user.id },
       include: {
-        artifact: {
+        project: {
           include: {
-            versions: {
-              orderBy: { versionNumber: "desc" }, // 按版本号降序排列
+            artifact: {
               include: {
-                files: true,
+                versions: {
+                  orderBy: { versionNumber: "desc" },
+                  include: { files: true },
+                },
               },
             },
           },
@@ -61,7 +74,7 @@ export async function GET(
       },
     });
 
-    const allVersions = thread?.artifact?.versions || [];
+    const allVersions = thread?.project.artifact?.versions || [];
     const currentVersion = allVersions[0]; // 最新版本
     const files = currentVersion?.files || [];
 
@@ -76,9 +89,10 @@ export async function GET(
             updatedAt: thread.updatedAt,
           }
         : null,
-      artifact: thread?.artifact
+      projectId: thread?.projectId || null,
+      artifact: thread?.project.artifact
         ? {
-            id: thread.artifact.id,
+            id: thread.project.artifact.id,
             versions: allVersions.map((version) => ({
               id: version.id,
               versionNumber: version.versionNumber,
@@ -121,12 +135,21 @@ export async function PATCH(
   { params }: { params: Promise<{ threadId: string }> }
 ) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const { threadId } = await params;
     const body = await request.json().catch(() => ({})); // 允许空 body
     const { title, favorite } = body;
 
     if (!threadId) {
       return Response.json({ error: "Thread ID is required" }, { status: 400 });
+    }
+
+    const ownedThread = await getOwnedThread(threadId, session.user.id);
+    if (!ownedThread) {
+      return Response.json({ error: "Thread not found" }, { status: 404 });
     }
 
     // 构建更新数据：支持 title 和 favorite
@@ -143,12 +166,16 @@ export async function PATCH(
       updateData.favorite = favorite;
     }
 
-    const thread = await prisma.thread.update({
-      where: { id: threadId },
-      data: updateData,
+    const project = await prisma.project.update({
+      where: { id: ownedThread.projectId },
+      data: {
+        ...(title !== undefined ? { name: title } : {}),
+        thread: { update: updateData },
+      },
+      include: { thread: true },
     });
 
-    return Response.json({ thread });
+    return Response.json({ thread: project.thread, project });
   } catch (error) {
     console.error("Failed to update thread:", error);
     return Response.json({ error: "Failed to update thread" }, { status: 500 });
@@ -161,16 +188,32 @@ export async function DELETE(
   { params }: { params: Promise<{ threadId: string }> }
 ) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const { threadId } = await params;
 
     if (!threadId) {
       return Response.json({ error: "Thread ID is required" }, { status: 400 });
     }
 
-    // 删除 thread 及其关联的 artifact 和版本数据
-    // 由于数据库设置了 CASCADE 删除，删除 thread 会自动删除相关数据
-    await prisma.thread.delete({
-      where: { id: threadId },
+    const ownedThread = await getOwnedThread(threadId, session.user.id);
+    if (!ownedThread) {
+      return Response.json({ error: "Thread not found" }, { status: 404 });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      if (ownedThread.project.activeDeploymentId) {
+        await tx.deployment.update({
+          where: { id: ownedThread.project.activeDeploymentId },
+          data: { status: "DISABLED" },
+        });
+      }
+      await tx.project.update({
+        where: { id: ownedThread.projectId },
+        data: { status: "ARCHIVED", activeDeploymentId: null },
+      });
     });
 
     return Response.json({

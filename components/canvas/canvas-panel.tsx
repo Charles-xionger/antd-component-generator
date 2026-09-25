@@ -20,6 +20,7 @@ import { PreviewToolbar } from "./preview-toolbar";
 import type { UseCanvasReturn } from "@/hooks/use-canvas";
 
 interface CanvasPanelProps {
+  projectId?: string;
   canvas: UseCanvasReturn;
   onClose?: () => void;
   iframeRef?: React.RefObject<HTMLIFrameElement | null>;
@@ -34,6 +35,7 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
   function CanvasPanel(
     {
       canvas,
+      projectId,
       iframeRef,
       isSandboxReady = false,
       sandboxError = null,
@@ -71,6 +73,7 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
     const [shareUrl, setShareUrl] = useState("");
     const [isCreatingShare, setIsCreatingShare] = useState(false);
     const [copiedShareUrl, setCopiedShareUrl] = useState(false);
+    const [isPublishing, setIsPublishing] = useState(false);
 
     // 切换全屏 - 调用父组件回调
     const toggleFullscreen = useCallback(() => {
@@ -125,6 +128,7 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
         if (iframeRef?.current?.contentWindow) {
           iframeRef.current.contentWindow.postMessage(
             {
+              protocolVersion: 1,
               type: "CHANGE_LANGUAGE",
               lng: language,
             },
@@ -186,6 +190,37 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
       toast.success("链接已复制到剪贴板");
       setTimeout(() => setCopiedShareUrl(false), 2000);
     }, [shareUrl]);
+
+    const handlePublish = useCallback(async () => {
+      if (!projectId || !selectedVersion) {
+        toast.error("请先生成代码");
+        return;
+      }
+      const version = versions.find(
+        (item) => item.versionNumber === selectedVersion,
+      );
+      if (!version) return;
+      if (!window.confirm("发布后任何知道地址的人都可以访问，确认发布当前版本？")) {
+        return;
+      }
+
+      setIsPublishing(true);
+      try {
+        const response = await fetch(`/api/projects/${projectId}/deployments`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ artifactVersionId: version.id }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "发布失败");
+        toast.success("发布成功");
+        window.open(data.publishedUrl, "_blank", "noopener,noreferrer");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "发布失败");
+      } finally {
+        setIsPublishing(false);
+      }
+    }, [projectId, selectedVersion, versions]);
 
     // 沙箱就绪且应该发送文件时才发送（审查通过后）
     useEffect(() => {
@@ -255,6 +290,9 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
             onLanguageChange={handleLanguageChange}
             currentLanguage={currentLanguage}
             onShare={handleShare}
+            isSharing={isCreatingShare}
+            onPublish={projectId ? handlePublish : undefined}
+            isPublishing={isPublishing}
           />
         )}
 
@@ -265,6 +303,7 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
             ref={isFullscreen ? null : iframeRef}
             isVisible={activeTab === "preview"}
             isSandboxReady={isSandboxReady}
+            sandboxError={sandboxError}
             selectedDevice={selectedDevice}
           />
           {/* Code Panel */}

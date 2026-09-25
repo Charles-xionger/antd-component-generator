@@ -538,6 +538,7 @@ export function useCanvas({
       // 发送文件到 sandbox
       iframe.contentWindow.postMessage(
         {
+          protocolVersion: 1,
           type: "artifacts",
           payload: { files, entryFile: entryFileName },
         },

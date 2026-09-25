@@ -16,10 +16,45 @@ model User {
   image         String?
   accounts      Account[]
   sessions      Session[]
-  threads       Thread[]  // 用户的所有会话
-  
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  threads       Thread[] // 用户的所有会话
+  projects      Project[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum DeploymentStatus {
+  BUILDING
+  ACTIVE
+  FAILED
+  SUPERSEDED
+  DISABLED
+}
+
+model Project {
+  id                 String        @id @default(uuid())
+  userId             String
+  name               String
+  description        String?
+  slug               String        @unique
+  status             ProjectStatus @default(ACTIVE)
+  activeDeploymentId String?       @unique
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  thread           Thread?
+  artifact         Artifact?
+  deployments      Deployment[] @relation("ProjectDeployments")
+  activeDeployment Deployment?  @relation("ActiveDeployment", fields: [activeDeploymentId], references: [id], onDelete: SetNull)
+
+  @@index([userId, updatedAt])
+  @@index([status, updatedAt])
 }
 
 model Account {
@@ -67,34 +102,54 @@ model Thread {
 
   // 关联用户
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  // 关联：一个对话对应一个项目工件
-  artifact  Artifact?
-  
   @@index([userId])
+  @@index([projectId])
 }
 
 model Artifact {
   id        String            @id @default(uuid())
-  threadId  String            @unique
+  projectId String            @unique
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
-  thread    Thread            @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   versions  ArtifactVersion[]
 }
 
 model ArtifactVersion {
-  id            String   @id @default(uuid())
-  artifactId    String
-  versionNumber Int
-  description   String?
-  createdAt     DateTime @default(now())
-  artifact      Artifact @relation(fields: [artifactId], references: [id], onDelete: Cascade)
-  files         File[]
-  shares        Share[]  // 分享记录
+  id                  String       @id @default(uuid())
+  artifactId          String
+  versionNumber       Int
+  description         String?
+  generationRequestId String?      @unique
+  createdAt           DateTime     @default(now())
+  artifact            Artifact     @relation(fields: [artifactId], references: [id], onDelete: Cascade)
+  files               File[]
+  shares              Share[] // 分享记录
+  deployments         Deployment[]
 
-  @@index([artifactId, versionNumber])
+  @@unique([artifactId, versionNumber])
+}
+
+model Deployment {
+  id                String           @id @default(uuid())
+  projectId         String
+  artifactVersionId String
+  status            DeploymentStatus @default(BUILDING)
+  buildPath         String?
+  errorMessage      String?          @db.Text
+  createdAt         DateTime         @default(now())
+  activatedAt       DateTime?
+
+  project          Project         @relation("ProjectDeployments", fields: [projectId], references: [id], onDelete: Cascade)
+  artifactVersion  ArtifactVersion @relation(fields: [artifactVersionId], references: [id], onDelete: Restrict)
+  activeForProject Project?        @relation("ActiveDeployment")
+
+  @@index([projectId, createdAt])
+  @@index([status, createdAt])
 }
 
 model File {

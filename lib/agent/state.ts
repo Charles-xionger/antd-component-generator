@@ -29,10 +29,15 @@ export const StateAnnotations = Annotation.Root({
     reducer: (x, y) => {
       // 特殊处理：如果 y 的第一个元素有 __replace__ 标记，则直接替换
       // 这用于删除消息等需要完全替换消息列表的场景
-      if (y && y.length > 0 && (y[0] as any).__replace__) {
+      if (
+        y &&
+        y.length > 0 &&
+        typeof y[0] === "object" &&
+        y[0] !== null &&
+        "__replace__" in y[0]
+      ) {
         // 移除标记并返回实际消息列表
-        const [_marker, ...actualMessages] = y;
-        return actualMessages;
+        return y.slice(1);
       }
 
       // 如果 y 是空数组，返回 x
