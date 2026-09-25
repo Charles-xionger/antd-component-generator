@@ -105,6 +105,16 @@ createRoot(root).render(<React.StrictMode><App /></React.StrictMode>);`,
             if (args.kind === "entry-point" || args.path.startsWith(".")) {
               return undefined;
             }
+            // 白名单约束平台接收的用户源码。已进入 node_modules 后的
+            // 间接依赖由锁定的生产镜像负责信任和复现。
+            const importer = args.importer ? path.resolve(args.importer) : "";
+            if (
+              importer &&
+              importer !== sourceRoot &&
+              !importer.startsWith(`${sourceRoot}${path.sep}`)
+            ) {
+              return undefined;
+            }
             if (args.path.startsWith("/")) {
               return { errors: [{ text: `不允许的绝对路径导入: ${args.path}` }] };
             }
