@@ -4,7 +4,11 @@ import { NextResponse } from "next/server";
 export default auth((req) => {
   const publishedRoot =
     process.env.PUBLISHED_APPS_DOMAIN || "apps.xiongerer.xyz";
-  const hostname = req.nextUrl.hostname.toLowerCase();
+  // Auth.js 会依据 NEXTAUTH_URL 归一化 nextUrl；反向代理下必须使用原始
+  // Host/X-Forwarded-Host 才能识别公开应用子域名。
+  const forwardedHost = req.headers.get("x-forwarded-host");
+  const hostHeader = forwardedHost || req.headers.get("host") || "";
+  const hostname = hostHeader.split(",")[0].trim().split(":")[0].toLowerCase();
   if (hostname.endsWith(`.${publishedRoot}`)) {
     const slug = hostname.slice(0, -(publishedRoot.length + 1));
     if (/^[a-z0-9-]+$/.test(slug)) {
