@@ -1,4 +1,6 @@
 import { build } from "esbuild";
+import postcss from "postcss";
+import tailwindcss from "@tailwindcss/postcss";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -125,9 +127,17 @@ void i18n
   });`,
     "utf8",
   );
+  const tailwindResult = await postcss([
+    tailwindcss({ base: process.cwd(), optimize: true }),
+  ]).process(
+    `@import "tailwindcss" source(none);\n@source ${JSON.stringify(
+      sourceRoot.replaceAll("\\", "/"),
+    )};`,
+    { from: path.join(process.cwd(), "published-app.css") },
+  );
   await writeFile(
     path.join(sourceRoot, "__published_base.css"),
-    "html,body,#root{min-height:100%;margin:0}*{box-sizing:border-box}body{font-family:Inter,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}",
+    `${tailwindResult.css}\nhtml,body,#root{min-height:100%;margin:0}*{box-sizing:border-box}body{font-family:Inter,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}`,
     "utf8",
   );
 
