@@ -6,13 +6,25 @@ import { StateAnnotations } from "./state";
 import { sceneDetector, architect, coder } from "./nodes";
 import type { AgentState } from "./state";
 
-// 创建 checkpointer 并初始化
-const postgresCheckpointer = PostgresSaver.fromConnString(
-  process.env.DATABASE_URL!
-);
+// 延迟初始化 checkpointer，避免在 Next.js 构建期间连接数据库。
+let postgresCheckpointerPromise: Promise<PostgresSaver> | undefined;
 
-// 初始化数据库表
-await postgresCheckpointer.setup();
+function getPostgresCheckpointer() {
+  if (!postgresCheckpointerPromise) {
+    postgresCheckpointerPromise = (async () => {
+      const databaseUrl = process.env.DATABASE_URL;
+      if (!databaseUrl) {
+        throw new Error("DATABASE_URL is required to initialize LangGraph");
+      }
+
+      const checkpointer = PostgresSaver.fromConnString(databaseUrl);
+      await checkpointer.setup();
+      return checkpointer;
+    })();
+  }
+
+  return postgresCheckpointerPromise;
+}
 
 /**
  * 条件路由：判断 Architect 是否生成了架构方案
@@ -51,6 +63,7 @@ function shouldContinueToCoder(state: AgentState): "coder" | typeof END {
  * 创建主图 (SceneDetector → Architect → 条件路由 → Coder/END)
  */
 export async function createGraph() {
+  const postgresCheckpointer = await getPostgresCheckpointer();
   const workflow = new StateGraph(StateAnnotations)
     .addNode("sceneDetector", sceneDetector)
     .addNode("architect", architect)

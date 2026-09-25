@@ -4,6 +4,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useArtifactParser } from "./use-artifact-parser";
 import { parseArtifactFromContent } from "./use-message-parser";
+import { SANDBOX_ORIGIN } from "@/lib/sandbox-config";
 import type { Message } from "./use-chat";
 import type {
   ArtifactVersion,
@@ -540,7 +541,7 @@ export function useCanvas({
           type: "artifacts",
           payload: { files, entryFile: entryFileName },
         },
-        process.env.NEXT_PUBLIC_SANDBOX_URL || "http://localhost:5174"
+        SANDBOX_ORIGIN
       );
     },
     [artifact]

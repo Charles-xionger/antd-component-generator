@@ -175,6 +175,8 @@ export function useChat(options: UseChatOptions = {}) {
     // Build payloadMessage: 始终发送字符串格式给后端
     const payloadMessage: string = userMessage.content;
 
+    let assistantContent = "";
+
     try {
       const response = await fetch(api, {
         method: "POST",
@@ -196,7 +198,6 @@ export function useChat(options: UseChatOptions = {}) {
       const reader = response.body?.getReader();
       if (!reader) throw new Error("No reader available");
 
-      let assistantContent = "";
       let assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
@@ -491,7 +492,7 @@ export function useChat(options: UseChatOptions = {}) {
       setError(error);
 
       // 根据错误类型提供更友好的提示
-      let errorMessage = ERROR_CONFIG.DEFAULT_MESSAGE;
+      let errorMessage: string = ERROR_CONFIG.DEFAULT_MESSAGE;
       if (error.message.includes("timeout") || error.message.includes("超时")) {
         errorMessage = ERROR_CONFIG.TIMEOUT_MESSAGE;
       } else if (

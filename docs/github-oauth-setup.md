@@ -37,8 +37,9 @@ NEXTAUTH_URL="http://localhost:3000"
 GITHUB_ID="your-github-client-id"
 GITHUB_SECRET="your-github-client-secret"
 
-# OpenAI
-OPENAI_API_KEY="your-openai-api-key"
+# 默认 Qwen 模型
+ALIYUN_API_KEY="your-dashscope-api-key"
+ALIYUN_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
 ```
 
 **生成 AUTH_SECRET：**
@@ -51,13 +52,10 @@ openssl rand -base64 32
 
 ```bash
 # 生成 Prisma Client
-pnpm prisma generate
+pnpm prisma:generate
 
-# 创建数据库迁移
-pnpm prisma migrate dev --name add_auth_tables
-
-# 或者直接推送 schema（开发环境）
-pnpm prisma db push
+# 应用仓库中已有的数据库迁移
+pnpm prisma:migrate:dev
 ```
 
 ### 4. 启动项目

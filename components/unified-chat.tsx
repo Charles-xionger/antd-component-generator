@@ -11,6 +11,7 @@ import "@/app/split-pane.css";
 // Hooks
 import { useChat } from "@/hooks/use-chat";
 import { useCanvas } from "@/hooks/use-canvas";
+import { SANDBOX_ORIGIN } from "@/lib/sandbox-config";
 
 // Components
 import { type MCPConfig } from "@/components/mcp";
@@ -57,9 +58,12 @@ export function UnifiedChat({
   // 🔧 修复：在初始化时直接从 localStorage 读取，避免时序问题
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     if (typeof window !== "undefined") {
-      return localStorage.getItem("selectedModel") || "qwen-plus";
+      const savedModel = localStorage.getItem("selectedModel");
+      return !savedModel || savedModel === "qwen-plus"
+        ? "qwen3.7-flash-2026-07-15"
+        : savedModel;
     }
-    return "qwen-plus";
+    return "qwen3.7-flash-2026-07-15";
   });
 
   // Persist model selection to localStorage
@@ -332,6 +336,8 @@ ${sandboxError}
   // Sandbox message listener
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== SANDBOX_ORIGIN) return;
+
       const { type, payload } = event.data || {};
 
       switch (type) {

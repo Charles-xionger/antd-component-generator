@@ -3,6 +3,7 @@
 
 import { forwardRef } from "react";
 import { X } from "lucide-react";
+import { SANDBOX_URL } from "@/lib/sandbox-config";
 
 interface FullscreenPreviewProps {
   isSandboxReady: boolean;
@@ -76,10 +77,9 @@ export const FullscreenPreview = forwardRef<
           )}
           <iframe
             ref={ref}
-            src={
-              process.env.NEXT_PUBLIC_SANDBOX_URL ||
-              "http://localhost:5174/sandbox.html"
-            }
+            src={SANDBOX_URL}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-downloads"
+            referrerPolicy="no-referrer"
             className="w-full h-full border-0"
             title="Code Sandbox Fullscreen"
           />

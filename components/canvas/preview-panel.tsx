@@ -3,6 +3,7 @@
 
 import { forwardRef } from "react";
 import type { DeviceType } from "./types";
+import { SANDBOX_URL } from "@/lib/sandbox-config";
 
 interface PreviewPanelProps {
   isVisible: boolean;
@@ -86,10 +87,9 @@ export const PreviewPanel = forwardRef<HTMLIFrameElement, PreviewPanelProps>(
           )}
           <iframe
             ref={ref}
-            src={
-              process.env.NEXT_PUBLIC_SANDBOX_URL ||
-              "http://localhost:5174/sandbox.html"
-            }
+            src={SANDBOX_URL}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-downloads"
+            referrerPolicy="no-referrer"
             className="w-full h-full border-0"
             title="Code Sandbox"
             onLoad={onSandboxReady}

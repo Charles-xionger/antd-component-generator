@@ -76,9 +76,12 @@ export function HomeLanding({ onSubmit }: HomeLandingProps) {
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     // Initialize from localStorage on mount (client-side only)
     if (typeof window !== "undefined") {
-      return localStorage.getItem("selectedModel") || "qwen-plus";
+      const savedModel = localStorage.getItem("selectedModel");
+      return !savedModel || savedModel === "qwen-plus"
+        ? "qwen3.7-flash-2026-07-15"
+        : savedModel;
     }
-    return "qwen-plus";
+    return "qwen3.7-flash-2026-07-15";
   });
 
   // 持久化模型选择

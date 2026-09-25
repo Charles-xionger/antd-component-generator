@@ -11,6 +11,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     GitHub({
       clientId: process.env.GITHUB_ID!,
       clientSecret: process.env.GITHUB_SECRET!,
+      // GitHub implements RFC 9207 and returns this issuer in OAuth callbacks.
+      issuer: "https://github.com/login/oauth",
     }),
   ],
   pages: {

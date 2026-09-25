@@ -17,13 +17,13 @@
 
 ### 🎯 技术栈
 
-- **前端框架**：Next.js 15 + React 19 + TypeScript
+- **前端框架**：Next.js 16 + React 19 + TypeScript
 - **AI 框架**：LangGraph（Architect → Coder 工作流）
 - **UI 组件**：Ant Design + Tailwind CSS + Shadcn/ui
 - **状态管理**：Zustand
 - **数据库**：PostgreSQL (Supabase) + Prisma ORM
 - **图表库**：Recharts
-- **沙箱环境**：Browser Sandpack（实时代码执行）
+- **沙箱环境**：独立 Vite 应用 + esbuild-wasm（实时代码执行）
 
 ### 🚀 功能亮点
 
@@ -83,8 +83,8 @@
 - Thread: 会话（自动生成标题）
 - Artifact: 代码版本
 - ArtifactVersion: 版本历史
-- ArtifactFile: 文件内容
-- SharedArtifact: 分享记录
+- File: 文件内容
+- Share: 分享记录
 ```
 
 ## 📦 快速开始
@@ -93,21 +93,23 @@
 
 确保你的开发环境满足以下条件：
 
-- **Node.js** >= 18.0.0 ([下载地址](https://nodejs.org/))
-- **pnpm** >= 8.0.0 (推荐使用 pnpm，也可用 npm/yarn)
+- **Node.js** >= 20.19.0（Vite 7 的最低要求，推荐 Node.js 22）
+- **pnpm** >= 9.0.0
 - **PostgreSQL** >= 14 (本地安装或使用 [Supabase](https://supabase.com/) 云数据库)
+- **GitHub OAuth App**（当前登录页只提供 GitHub 登录）
+- **antd-sandbox**（独立运行在 `http://localhost:5174`）
 - **AI API Key** (至少需要一个)：
-  - [302.AI](https://302.ai) (推荐，支持多种模型)
+  - 阿里云 DashScope：用于界面默认的 Qwen 模型
+  - [302.AI](https://302.ai)：用于 Claude 模型
   - [Google Gemini](https://aistudio.google.com/app/apikey)
-  - [OpenAI](https://platform.openai.com)
 
 ---
 
 ### 第一步：克隆项目
 
 ```bash
-git clone https://github.com/your-username/antd-component-generator.git
-cd antd-component-generator
+git clone https://github.com/Charles-xionger/antd-component-generator.git
+git clone https://github.com/Charles-xionger/antd-sandbox.git
 ```
 
 ---
@@ -115,11 +117,13 @@ cd antd-component-generator
 ### 第二步：安装依赖
 
 ```bash
-# 如果没有 pnpm，先安装
-npm install -g pnpm
+# 主应用
+cd antd-component-generator
+pnpm install --frozen-lockfile
 
-# 安装项目依赖
-pnpm install
+# 独立沙箱
+cd ../antd-sandbox
+pnpm install --frozen-lockfile
 ```
 
 ---
@@ -129,6 +133,7 @@ pnpm install
 1. **复制环境变量模板**
 
 ```bash
+cd ../antd-component-generator
 cp .env.example .env
 ```
 
@@ -153,35 +158,42 @@ AUTH_SECRET="your-random-secret-here-replace-this"
 NEXTAUTH_URL="http://localhost:3000"
 
 # ==========================================
-# 【可选】GitHub OAuth 登录
+# 【必需】GitHub OAuth 登录
 # ==========================================
-# 如需 GitHub 登录，在 https://github.com/settings/developers 创建 OAuth App
-# GITHUB_ID="your-github-oauth-client-id"
-# GITHUB_SECRET="your-github-oauth-client-secret"
+# 在 https://github.com/settings/developers 创建 OAuth App
+# Callback URL: http://localhost:3000/api/auth/callback/github
+GITHUB_ID="your-github-oauth-client-id"
+GITHUB_SECRET="your-github-oauth-client-secret"
 
 # ==========================================
 # 【必需】AI 模型配置 (至少配置一个)
 # ==========================================
 
-# 选项 1: 302.AI (推荐，一个 Key 支持多个模型)
-AI302_API_KEY="sk-xxx"
-AI302_BASE_URL="https://api.302.ai/v1"
+# 选项 1: Qwen（界面默认模型）
+ALIYUN_API_KEY="your-dashscope-api-key"
+ALIYUN_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
 
-# 选项 2: Google Gemini
+# 选项 2: Claude（通过 302.AI）
+# AI302_API_KEY="sk-xxx"
+# AI302_BASE_URL="https://api.302.ai/v1"
+
+# 选项 3: Google Gemini
 # GOOGLE_API_KEY="your-google-api-key"
-
-# 选项 3: OpenAI
-# OPENAI_API_KEY="sk-xxx"
+# GOOGLE_MODEL_NAME="gemini-3-pro-preview"
 ```
+
+完整字段和注意事项见 [`.env.example`](./.env.example)。本地使用默认端口时无需设置
+`NEXT_PUBLIC_SANDBOX_URL`；主应用会自动访问 `http://localhost:5174/sandbox.html`。
 
 > 💡 **提示**: 如果使用 Docker 启动本地 PostgreSQL：
 >
 > ```bash
 > docker run -d \
->   --name postgres \
+>   --name antd-generator-postgres \
 >   -e POSTGRES_PASSWORD=password \
 >   -e POSTGRES_DB=ai_generator \
 >   -p 5432:5432 \
+>   -v antd-generator-postgres-data:/var/lib/postgresql/data \
 >   postgres:15
 > ```
 
@@ -190,11 +202,11 @@ AI302_BASE_URL="https://api.302.ai/v1"
 ### 第四步：初始化数据库
 
 ```bash
-# 生成 Prisma 客户端
-pnpm prisma generate
+# 在 antd-component-generator 目录执行
+pnpm prisma:generate
 
 # 运行数据库迁移（创建表结构）
-pnpm prisma migrate dev
+pnpm prisma:migrate:dev
 
 # (可选) 打开 Prisma Studio 查看数据库
 pnpm prisma studio
@@ -202,13 +214,16 @@ pnpm prisma studio
 
 ---
 
-### 第五步：启动项目
+### 第五步：启动两个服务
 
 ```bash
-# 开发模式
+# 终端 1：沙箱，运行在 http://localhost:5174
+cd antd-sandbox
 pnpm dev
 
-# 项目将运行在 http://localhost:3000
+# 终端 2：主应用，运行在 http://localhost:3000
+cd antd-component-generator
+pnpm dev
 ```
 
 打开浏览器访问 **[http://localhost:3000](http://localhost:3000)** 🎉
@@ -220,9 +235,10 @@ pnpm dev
 如果一切正常，你应该能看到：
 
 1. ✅ 登录页面正常显示
-2. ✅ 可以创建新会话
-3. ✅ 输入消息后 AI 开始生成代码
-4. ✅ 右侧沙箱实时预览代码效果
+2. ✅ GitHub OAuth 登录成功
+3. ✅ 可以创建新会话
+4. ✅ 输入消息后 AI 开始生成代码
+5. ✅ 右侧沙箱实时预览代码效果
 
 ---
 
@@ -250,7 +266,7 @@ pnpm dev
 pnpm prisma migrate reset
 
 # 重新运行迁移
-pnpm prisma migrate dev
+pnpm prisma:migrate:dev
 ```
 
 </details>
@@ -264,6 +280,17 @@ pnpm prisma migrate dev
 2. 检查 API Key 是否有效（访问对应平台确认）
 3. 查看终端日志是否有错误信息
 4. 确认网络可以访问对应的 API 端点
+5. 默认 Qwen 必须配置 `ALIYUN_API_KEY`；`AI302_API_KEY` 只用于 Claude 路径
+</details>
+
+<details>
+<summary><b>❌ 预览区域一直加载</b></summary>
+
+**解决方案**:
+
+1. 确认 `antd-sandbox` 已在 `http://localhost:5174` 启动
+2. 访问 `http://localhost:5174/sandbox.html`，确认页面可加载
+3. 本地运行时删除错误的 `NEXT_PUBLIC_SANDBOX_URL`，使用代码默认值
 </details>
 
 <details>
@@ -281,6 +308,10 @@ PORT=3001 pnpm dev
 ---
 
 ### 生产环境部署
+
+主应用与沙箱是两个独立 Web 服务，生产环境需要分别构建和部署。当前
+`NEXT_PUBLIC_SANDBOX_URL` 同时用于 iframe 地址和 `postMessage` 的目标 origin，正式跨域部署前
+应先拆分成两个环境变量，并限制消息来源。
 
 推荐部署平台：
 
@@ -482,8 +513,8 @@ export const SUPERVISOR_PROMPT = `你需要判断用户请求...`;
 
 ## 📞 联系方式
 
-- **问题反馈**: [GitHub Issues](https://github.com/your-username/antd-component-generator/issues)
-- **功能建议**: [GitHub Discussions](https://github.com/your-username/antd-component-generator/discussions)
+- **问题反馈**: [GitHub Issues](https://github.com/Charles-xionger/antd-component-generator/issues)
+- **功能建议**: [GitHub Discussions](https://github.com/Charles-xionger/antd-component-generator/discussions)
 
 ---
 

@@ -185,9 +185,16 @@ function ModelSelector({
   onModelChange?: (model: string) => void;
 }) {
   const models = [
-    { id: "qwen-plus", name: "Qwen 3", icon: "Q" },
-    { id: "claud-sonnet-4-20250514", name: "Claude 4.5", icon: "C" },
-    { id: "gemini-3-pro-preview", name: "Gemini 3 pro", icon: "G" },
+    {
+      id: "qwen3.7-flash-2026-07-15",
+      name: "Qwen 3.7 Flash",
+      icon: "Q",
+    },
+    {
+      id: "deepseek-v4-flash-0731",
+      name: "DeepSeek V4 Flash",
+      icon: "D",
+    },
   ];
 
   const currentModel = models.find((m) => m.id === selectedModel) || models[0];

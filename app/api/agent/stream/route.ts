@@ -5,7 +5,8 @@
 // 如果使用 Pro 计划，可以在 vercel.json 中配置 route 的 maxDuration
 import { STREAM_CONFIG } from "@/lib/agent/config";
 
-export const maxDuration = STREAM_CONFIG.MAX_DURATION; // 使用配置文件中的值
+// Next.js requires route segment config values to be statically analyzable literals.
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 import { NextRequest } from "next/server";
@@ -37,7 +38,7 @@ export async function POST(request: NextRequest) {
     const config = {
       configurable: {
         thread_id: finalThreadId,
-        model: model || "qwen-plus", // 传递模型参数到 graph
+        model: model || "qwen3.7-flash-2026-07-15", // 传递模型参数到 graph
       },
     };
 
@@ -176,6 +177,7 @@ export async function POST(request: NextRequest) {
           let hasArchitectCompleted = false;
           let accumulatedContent = ""; // 累积内容用于检测标签闭合
           let aiResponseContent = ""; // 累积AI回复用于生成标题
+          let finalAiContent = ""; // 非流式模型/提供商的最终响应兜底
           let lastHeartbeat = Date.now(); // 心跳时间戳
 
           // 心跳机制：防止连接超时
@@ -323,6 +325,21 @@ export async function POST(request: NextRequest) {
               event.name === "architect" &&
               !hasArchitectCompleted
             ) {
+              const outputMessages = event.data?.output?.messages;
+              const finalMessage = Array.isArray(outputMessages)
+                ? outputMessages[outputMessages.length - 1]
+                : undefined;
+              if (finalMessage?.content) {
+                finalAiContent =
+                  typeof finalMessage.content === "string"
+                    ? finalMessage.content
+                    : Array.isArray(finalMessage.content)
+                      ? finalMessage.content
+                          .map((block: { text?: string }) => block.text || "")
+                          .join("")
+                      : String(finalMessage.content);
+              }
+
               // 检查是否包含架构规划标签
               // 只有真正的架构规划才发送 architect_complete 事件
               if (accumulatedContent.includes("<architectPlan>")) {
@@ -370,6 +387,22 @@ export async function POST(request: NextRequest) {
               );
               controller.enqueue(chunk);
             }
+          }
+
+          // 某些 OpenAI 兼容服务不产生 on_chat_model_stream 事件，但会在
+          // 节点结束时给出完整消息。此时仍把结果返回给前端，避免空白响应。
+          if (!accumulatedContent && finalAiContent) {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  type: "content",
+                  content: finalAiContent,
+                  threadId: finalThreadId,
+                })}\n\n`,
+              ),
+            );
+            accumulatedContent = finalAiContent;
+            aiResponseContent = finalAiContent;
           }
 
           // ==========================================
@@ -446,7 +479,7 @@ export async function POST(request: NextRequest) {
               const newTitle = await generateThreadTitle(
                 userMessageText,
                 aiResponseContent,
-                model || "qwen-plus",
+                model || "qwen3.7-flash-2026-07-15",
               );
 
               // 更新数据库中的标题

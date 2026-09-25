@@ -13,7 +13,7 @@ export interface ModelConfig {
 
 /**
  * 创建 LLM 实例的工厂函数
- * @param modelName 模型名称（如 "qwen-plus", "gemini-2.0-flash-exp"）
+ * @param modelName 模型名称（如 "qwen3.7-flash-2026-07-15"）
  * @param config 模型配置
  * @returns LLM 实例
  */
@@ -46,9 +46,10 @@ export function createLLM(
     });
   }
 
-  // 默认使用 Qwen 视觉模型（qwen-vl-max-latest 支持图片理解）
+  // 通义模型：严格使用调用方选择的模型。
+  // 模型名称由界面选择并原样传给百炼 OpenAI 兼容接口。
   return new ChatOpenAI({
-    model: "qwen-vl-max-latest", // 使用支持视觉的模型
+    model: modelName,
     temperature: config.temperature,
     apiKey: process.env.ALIYUN_API_KEY,
     configuration: {
@@ -59,6 +60,7 @@ export function createLLM(
     maxRetries: MODEL_API_CONFIG.MAX_RETRIES,
     timeout: MODEL_API_CONFIG.TIMEOUT,
     maxTokens: MODEL_API_CONFIG.MAX_TOKENS, // 设置最大输出 token
+    streaming: true,
   });
 }
 
@@ -72,7 +74,7 @@ export function createLLM(
 export async function generateThreadTitle(
   userMessage: string,
   aiResponse: string = "",
-  modelName: string = "qwen-plus",
+  modelName: string = "qwen3.7-flash-2026-07-15",
 ): Promise<string> {
   try {
     // 创建一个专门用于标题生成的 LLM，使用较低的 temperature

@@ -3,6 +3,7 @@
 
 import { useEffect, useState, use, useRef } from "react";
 import { PreviewPanel } from "@/components/canvas/preview-panel";
+import { SANDBOX_ORIGIN } from "@/lib/sandbox-config";
 
 interface FileData {
   path: string;
@@ -106,7 +107,7 @@ export default function SharePreviewPage({
           type: "artifacts",
           payload: { files, entryFile },
         },
-        process.env.NEXT_PUBLIC_SANDBOX_URL || "http://localhost:5174"
+        SANDBOX_ORIGIN
       );
       console.log("[Share] 代码已发送到沙箱");
     }, 500);

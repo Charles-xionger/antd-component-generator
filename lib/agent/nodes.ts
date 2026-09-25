@@ -144,15 +144,10 @@ export async function architect(
     );
   });
 
-  // 从 config 中获取模型名称
-  // 如果有图片，默认使用视觉模型 (qwen-vl-max-latest)
-  // 否则使用纯文本模型 (qwen-plus)
-  let modelName = config?.configurable?.model || "qwen-plus";
-
-  if (hasImageMessages && modelName === "qwen-plus") {
-    console.log("[Architect] 🖼️  检测到图片消息，自动切换到视觉模型");
-    modelName = "qwen-vl-max-latest";
-  }
+  // 从 config 中获取模型名称。图片能力由当前所选模型直接处理，
+  // 不再静默切换到已经下线的旧 Qwen 模型。
+  const modelName =
+    config?.configurable?.model || "qwen3.7-flash-2026-07-15";
 
   const llm = createLLM(modelName, {
     model: modelName,
@@ -301,6 +296,7 @@ export async function architect(
       contentLength: content.length,
       hasArchitectPlan: content.includes("<architectPlan"),
       hasBoltArtifact: content.includes("<boltArtifact"),
+      contentPreview: content.substring(0, 300).replace(/\n/g, " "),
     });
 
     // 🚨 边界检查：Architect 绝对不能输出代码
@@ -554,15 +550,9 @@ export async function coder(
     );
   });
 
-  // 从 config 中获取模型名称
-  // 如果有图片，默认使用视觉模型 (qwen-vl-max-latest)
-  // 否则使用纯文本模型 (qwen-plus)
-  let modelName = config?.configurable?.model || "qwen-plus";
-
-  if (hasImageMessages && modelName === "qwen-plus") {
-    console.log("[Coder] 🖼️  检测到图片消息，自动切换到视觉模型");
-    modelName = "qwen-vl-max-latest";
-  }
+  // 使用用户明确选择的模型，不再静默切换旧 Qwen 模型。
+  const modelName =
+    config?.configurable?.model || "qwen3.7-flash-2026-07-15";
 
   const llm = createLLM(modelName, {
     model: modelName,
