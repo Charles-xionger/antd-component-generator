@@ -17,7 +17,6 @@ const ALLOWED_IMPORTS = [
   "@tanstack/react-query",
   "recharts",
   "zod",
-  "react-hook-form",
 ];
 
 function validatePath(filePath: string) {

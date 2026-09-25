@@ -286,6 +286,7 @@ export default function App() {
 - 使用前必须导入：\`import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';\`
 - 根据架构师方案选择合适的图表类型和配置
 - 不要硬编码数据，使用动态数据源
+- \`ResponsiveContainer\` 必须设置 \`minWidth={0}\`，并放在具有明确高度（例如 \`h-[350px]\`）的父容器内，避免首次测量出现无效尺寸
 
 ## Context
 
