@@ -3,7 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // 发布构建在 Node.js 运行时调用 esbuild 的原生二进制，不能被
   // Next/Turbopack 打入服务端路由 bundle。
-  serverExternalPackages: ["esbuild"],
+  serverExternalPackages: ["esbuild", "@tailwindcss/postcss"],
   images: {
     remotePatterns: [
       {

@@ -6,8 +6,12 @@ RUN corepack enable && corepack prepare pnpm@10.14.0 --activate
 WORKDIR /app
 
 FROM base AS dependencies
+ARG PNPM_REGISTRY=https://registry.npmjs.org
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=prompt-web-pnpm,target=/pnpm/store \
+    pnpm config set store-dir /pnpm/store \
+    && pnpm config set registry "$PNPM_REGISTRY" \
+    && pnpm install --frozen-lockfile
 
 FROM dependencies AS builder
 COPY . .
