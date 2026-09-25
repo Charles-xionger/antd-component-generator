@@ -69,15 +69,60 @@ export async function buildPublishedApp(
   }
 
   const appImport = `./${validatePath(appFile.path).replace(/\.(tsx|ts|jsx|js)$/, "")}`;
+  const i18nFile = files.find(
+    (file) => file.path === "i18n.ts" || file.path.endsWith("/i18n.ts"),
+  );
+  const i18nImport = i18nFile
+    ? `import { i18n_resources as publishedResources } from ${JSON.stringify(
+        `./${validatePath(i18nFile.path).replace(/\.(tsx|ts|jsx|js)$/, "")}`,
+      )};`
+    : `const publishedResources = {
+  en: { translation: {} },
+  zh: { translation: {} },
+};`;
   await writeFile(
     path.join(sourceRoot, "__published_entry.tsx"),
     `import React from "react";
 import { createRoot } from "react-dom/client";
+import { ConfigProvider } from "antd";
+import zhCN from "antd/locale/zh_CN";
+import enUS from "antd/locale/en_US";
+import i18n from "i18next";
+import { initReactI18next } from "react-i18next";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from ${JSON.stringify(appImport)};
 import "./__published_base.css";
+${i18nImport}
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing root element");
-createRoot(root).render(<React.StrictMode><App /></React.StrictMode>);`,
+const language = navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { retry: false, refetchOnWindowFocus: false },
+  },
+});
+const renderApp = () => createRoot(root).render(
+  <React.StrictMode>
+    <QueryClientProvider client={queryClient}>
+      <ConfigProvider locale={language === "zh" ? zhCN : enUS}>
+        <App />
+      </ConfigProvider>
+    </QueryClientProvider>
+  </React.StrictMode>,
+);
+void i18n
+  .use(initReactI18next)
+  .init({
+    resources: publishedResources,
+    lng: language,
+    fallbackLng: "en",
+    interpolation: { escapeValue: false },
+  })
+  .then(renderApp)
+  .catch((error) => {
+    console.error("Failed to initialize published app i18n", error);
+    renderApp();
+  });`,
     "utf8",
   );
   await writeFile(
@@ -95,6 +140,8 @@ createRoot(root).render(<React.StrictMode><App /></React.StrictMode>);`,
     format: "esm",
     platform: "browser",
     target: ["es2020"],
+    jsx: "automatic",
+    jsxImportSource: "react",
     // 源文件位于临时目录，显式回到应用自己的依赖目录解析白名单包。
     nodePaths: [path.join(process.cwd(), "node_modules")],
     plugins: [
