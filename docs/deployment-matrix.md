@@ -3,6 +3,8 @@
 | 环境 | Generator | Sandbox | 协议 | 状态 |
 | --- | --- | --- | --- | --- |
 | 回退基线 | `baseline-2026-09-25` / `ed5af46` | `baseline-2026-09-25` / `db5ee9b` | 旧协议 | 已备份，可回退 |
-| Project 与发布中心 | `codex/project-publishing` | `codex/project-publishing` | `protocolVersion: 1` | 待生产验收后填写 commit 与镜像 digest |
+| Project 与发布中心 | `4467683` / `sha256:d1550e933e27056033444118a6f1036985154bc8820d732f052d95123c1a44d9` | `32e5343` / `sha256:a7a674f3d8092bfa79eee48ddf56d21dba65b8ae0ec9d3adf13f42585aaf86da` | `protocolVersion: 1` | 已部署；Project、历史迁移、预览和发布入口已验收 |
 
 生产发布必须同时记录两个镜像 digest。只更新其中一个仓库会造成 postMessage 协议不兼容。
+
+公网通配符路由配置已经写入生产 Compose，但在 AliDNS RAM 凭据和通配符 A 记录就绪前，`*.apps.xiongerer.xyz` 不作为已验收入口。
