@@ -15,7 +15,8 @@
     "prisma:format": "prisma format",
     "prisma:validate": "prisma validate",
     "prisma:push": "prisma db push",
-    "prisma:seed": "prisma db seed"
+    "prisma:seed": "prisma db seed",
+    "test:data-gateway": "tsx --test lib/data-gateway/*.test.ts"
   },
   "dependencies": {
     "@ant-design/icons": "6.1.0",

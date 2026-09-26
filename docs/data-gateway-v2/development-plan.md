@@ -11,7 +11,7 @@
 | 版本 | 目标 | 预计时间 | 状态 |
 | --- | --- | ---: | --- |
 | DG-0.1 | 方案、协议和数据模型冻结 | 1～2 天 | 已完成 |
-| DG-0.2 | Prisma 模型、Schema Diff 和只读 DRAFT API | 3～4 天 | 准备开始 |
+| DG-0.2 | Prisma 模型、Schema Diff 和只读 DRAFT API | 3～4 天 | 已完成 |
 | DG-0.3 | Runtime SDK、Sandbox V2 和 DRAFT CRUD | 4～5 天 | 未开始 |
 | DG-0.4 | 发布时生产 Schema 升级与 PRODUCTION Gateway | 4～5 天 | 未开始 |
 | DG-0.5 | 历史项目迁移、审计、软删除和回归测试 | 3～4 天 | 未开始 |
@@ -40,16 +40,16 @@
 
 ### 开发内容
 
-- [ ] 新增 DataCollection。
-- [ ] 新增 DataSchemaVersion。
-- [ ] 新增 DataRecord 与 DataEnvironment。
-- [ ] 新增 DataMigration。
-- [ ] 新增 DataRecordRevision。
-- [ ] 两阶段 Prisma migration。
-- [ ] Data Manifest Zod 校验。
-- [ ] Schema Diff 服务。
-- [ ] DRAFT 集合列表和记录查询 API。
-- [ ] 所有权与环境隔离测试。
+- [x] 新增 DataCollection。
+- [x] 新增 DataSchemaVersion。
+- [x] 新增 DataRecord 与 DataEnvironment。
+- [x] 新增 DataMigration。
+- [x] 新增 DataRecordRevision。
+- [x] 完成两阶段迁移中的 expand migration；本阶段不执行 contract 删除。
+- [x] Data Manifest Zod 校验。
+- [x] Schema Diff 服务。
+- [x] DRAFT 集合列表和记录查询 API。
+- [x] 所有权与环境隔离测试。
 
 ### 完成标准
 

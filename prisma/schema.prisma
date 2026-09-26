@@ -9,15 +9,18 @@ datasource db {
 
 // ===== Auth.js 认证表 =====
 model User {
-  id            String    @id @default(uuid())
-  name          String?
-  email         String?   @unique
-  emailVerified DateTime?
-  image         String?
-  accounts      Account[]
-  sessions      Session[]
-  threads       Thread[] // 用户的所有会话
-  projects      Project[]
+  id                  String               @id @default(uuid())
+  name                String?
+  email               String?              @unique
+  emailVerified       DateTime?
+  image               String?
+  accounts            Account[]
+  sessions            Session[]
+  threads             Thread[] // 用户的所有会话
+  projects            Project[]
+  createdDataRecords  DataRecord[]         @relation("DataRecordCreatedBy")
+  updatedDataRecords  DataRecord[]         @relation("DataRecordUpdatedBy")
+  dataRecordRevisions DataRecordRevision[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -36,6 +39,31 @@ enum DeploymentStatus {
   DISABLED
 }
 
+enum DataEnvironment {
+  DRAFT
+  PRODUCTION
+}
+
+enum DataSchemaStatus {
+  DRAFT
+  ACTIVE
+  SUPERSEDED
+}
+
+enum DataMigrationStatus {
+  PENDING
+  APPLYING
+  SUCCEEDED
+  FAILED
+}
+
+enum DataRecordOperation {
+  CREATE
+  UPDATE
+  DELETE
+  RESTORE
+}
+
 model Project {
   id                 String        @id @default(uuid())
   userId             String
@@ -47,11 +75,14 @@ model Project {
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
-  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   thread           Thread?
   artifact         Artifact?
-  deployments      Deployment[] @relation("ProjectDeployments")
-  activeDeployment Deployment?  @relation("ActiveDeployment", fields: [activeDeploymentId], references: [id], onDelete: SetNull)
+  deployments      Deployment[]     @relation("ProjectDeployments")
+  activeDeployment Deployment?      @relation("ActiveDeployment", fields: [activeDeploymentId], references: [id], onDelete: SetNull)
+  dataCollections  DataCollection[]
+  dataRecords      DataRecord[]
+  dataMigrations   DataMigration[]
 
   @@index([userId, updatedAt])
   @@index([status, updatedAt])
@@ -147,8 +178,105 @@ model Deployment {
   project          Project         @relation("ProjectDeployments", fields: [projectId], references: [id], onDelete: Cascade)
   artifactVersion  ArtifactVersion @relation(fields: [artifactVersionId], references: [id], onDelete: Restrict)
   activeForProject Project?        @relation("ActiveDeployment")
+  dataMigrations   DataMigration[]
 
   @@index([projectId, createdAt])
+  @@index([status, createdAt])
+}
+
+model DataCollection {
+  id                       String   @id @default(uuid())
+  projectId                String
+  key                      String
+  name                     String
+  activeDraftSchemaId      String?  @unique
+  activeProductionSchemaId String?  @unique
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  project                Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  schemas                DataSchemaVersion[] @relation("CollectionSchemas")
+  activeDraftSchema      DataSchemaVersion?  @relation("ActiveDraftSchema", fields: [activeDraftSchemaId], references: [id], onDelete: SetNull)
+  activeProductionSchema DataSchemaVersion?  @relation("ActiveProductionSchema", fields: [activeProductionSchemaId], references: [id], onDelete: SetNull)
+  records                DataRecord[]
+
+  @@unique([projectId, key])
+  @@index([projectId, updatedAt])
+}
+
+model DataSchemaVersion {
+  id            String           @id @default(uuid())
+  collectionId  String
+  versionNumber Int
+  schema        Json
+  status        DataSchemaStatus @default(DRAFT)
+  createdAt     DateTime         @default(now())
+  activatedAt   DateTime?
+
+  collection              DataCollection  @relation("CollectionSchemas", fields: [collectionId], references: [id], onDelete: Cascade)
+  draftForCollection      DataCollection? @relation("ActiveDraftSchema")
+  productionForCollection DataCollection? @relation("ActiveProductionSchema")
+
+  @@unique([collectionId, versionNumber])
+  @@index([collectionId, status, createdAt])
+}
+
+model DataRecord {
+  id            String          @id @default(uuid())
+  projectId     String
+  collectionId  String
+  environment   DataEnvironment
+  data          Json
+  recordVersion Int             @default(1)
+  createdById   String?
+  updatedById   String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  deletedAt     DateTime?
+
+  project    Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  collection DataCollection       @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  createdBy  User?                @relation("DataRecordCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy  User?                @relation("DataRecordUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  revisions  DataRecordRevision[]
+
+  @@index([projectId, collectionId, environment, deletedAt, createdAt])
+  @@index([projectId, collectionId, environment, updatedAt])
+}
+
+model DataRecordRevision {
+  id         String              @id @default(uuid())
+  recordId   String
+  operation  DataRecordOperation
+  beforeData Json?
+  afterData  Json?
+  actorId    String?
+  createdAt  DateTime            @default(now())
+
+  record DataRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  actor  User?      @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([recordId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model DataMigration {
+  id                   String              @id @default(uuid())
+  projectId            String
+  deploymentId         String?
+  fromSchemaVersionIds Json
+  toSchemaVersionIds   Json
+  changes              Json
+  status               DataMigrationStatus @default(PENDING)
+  errorMessage         String?             @db.Text
+  createdAt            DateTime            @default(now())
+  completedAt          DateTime?
+
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  deployment Deployment? @relation(fields: [deploymentId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, createdAt])
+  @@index([deploymentId])
   @@index([status, createdAt])
 }
 

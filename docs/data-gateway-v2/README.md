@@ -1,6 +1,6 @@
 # Data Gateway 与生成协议 V2
 
-> 状态：拓扑 V1 已冻结，准备进入 DG-0.2
+> 状态：DG-0.2 数据底座已完成，准备进入 DG-0.3
 > 建档时间：2026-09-26  
 > 当前协议：`protocolVersion: 1`  
 > 目标协议：`protocolVersion: 2`
@@ -18,6 +18,7 @@
 - [architecture.md](./architecture.md)：产品边界、数据模型、数据生命周期、发布与回滚设计。
 - [topology-v1.md](./topology-v1.md)：第一版容器、网络、路由、数据流和未来拆分边界。
 - [protocol-v2.md](./protocol-v2.md)：Generator、Sandbox、Runtime SDK 和 Data Gateway 的协议约定。
+- [dg-0.2-foundation.md](./dg-0.2-foundation.md)：已实现的数据表、Manifest 规则、Schema Diff 和只读 DRAFT API。
 - [development-plan.md](./development-plan.md)：实施顺序、预计时间、验收条件和风险控制。
 - [CHANGELOG.md](./CHANGELOG.md)：方案与开发版本的时间记录。
 

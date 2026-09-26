@@ -2,6 +2,48 @@
 
 本文件同时记录方案决策、开发进度、测试结论和生产版本。最新记录放在最上方。
 
+## 2026-09-26 · DG-0.2
+
+### 完成
+
+- 新增 DataCollection、DataSchemaVersion、DataRecord、DataRecordRevision 和 DataMigration 数据模型。
+- 增加 expand-only Prisma migration，不修改或删除 V1 表与数据。
+- 实现 Data Manifest V1 严格校验、稳定 ID 补全和系统保留字段保护。
+- 实现 Schema Diff，将兼容变更和危险变更分开处理。
+- 实现 Project Owner 限定的只读 DRAFT 集合、记录列表和记录详情 API。
+- 查询固定限定 Project、Collection、DRAFT 环境和未删除记录。
+
+### API
+
+- `GET /api/projects/:projectId/data`
+- `GET /api/projects/:projectId/data/:collectionKey`
+- `GET /api/projects/:projectId/data/:collectionKey/:recordId`
+
+### 验证
+
+- 在一次性 PostgreSQL 16 数据库完整应用现有 3 个 migration，结果通过。
+- Manifest 与 Schema Diff 单元测试 8 项通过。
+- 数据库集成测试验证 Project 所有权、DRAFT / PRODUCTION 隔离、过滤器白名单与危险 Schema 拒绝，结果通过。
+- Prisma validate、TypeScript、ESLint 和 Next.js 生产构建通过；保留 15 个既有 ESLint warning，无新增 error。
+
+### 决策
+
+- DG-0.2 只开放读取 API；集合结构写入暂时只作为内部服务，等 DG-0.3 由生成协议统一驱动。
+- 数据库迁移继续采用 expand-and-contract；本次只有 expand，不执行字段或表删除。
+- 无权限和资源不存在统一为 404；非法查询参数返回 400。
+
+### 风险 / 未决
+
+- 生产数据库尚未应用 DG-0.2 migration，V1 线上行为保持不变。
+- DRAFT 写入、幂等、乐观锁和 Runtime SDK 属于 DG-0.3。
+
+### 版本
+
+- Generator branch：`codex/data-gateway-v2`
+- Sandbox branch：`codex/data-gateway-v2`（DG-0.2 无代码变更）
+- Migration：`20260926190000_add_data_gateway_foundation`
+- 当前生产协议：`protocolVersion: 1`
+
 ## 2026-09-26 · DG-0.1 Topology V1
 
 ### 完成
