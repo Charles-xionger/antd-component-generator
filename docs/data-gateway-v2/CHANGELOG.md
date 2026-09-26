@@ -2,6 +2,31 @@
 
 本文件同时记录方案决策、开发进度、测试结论和生产版本。最新记录放在最上方。
 
+## 2026-09-26 · DG-0.1 Topology V1
+
+### 完成
+
+- 冻结第一版容器、网络、Host 路由和存储拓扑。
+- 确认第一版不增加 Project 专属容器和数据库。
+- 确认 Data Gateway 首版作为 Generator 内部服务模块运行。
+- 确认 Sandbox 通过受信任 postMessage RPC 访问 DRAFT API。
+- 确认公开应用使用同源 Runtime API 访问 PRODUCTION 数据。
+- DG-0.1 标记完成，准备进入 DG-0.2。
+
+### 冻结默认值
+
+- 字段类型：string、number、boolean、date、datetime、enum、受限 json。
+- 公开读取按 Collection 能力开启；公开写入默认关闭。
+- 历史 Mock 项目必须显式升级，默认不导入 Mock 数据。
+- DRAFT 和 PRODUCTION 共用 PostgreSQL 物理实例，通过环境字段隔离。
+- 发布只提升 Schema，不自动复制或覆盖业务记录。
+
+### 开发基线
+
+- 第二阶段分支：`codex/data-gateway-v2`
+- 起点提交：以本次拓扑 V1 文档提交为准。
+- 第一个开发目标：Prisma expand migration、Manifest 校验、Schema Diff 和只读 DRAFT API。
+
 ## 2026-09-26 · DG-0.1
 
 ### 完成
@@ -45,4 +70,3 @@
 - 评审并冻结 Prisma 初始模型。
 - 在两个仓库定义共享 Protocol V2 类型。
 - 编写 Schema Diff 单元测试，再开始数据库迁移。
-
