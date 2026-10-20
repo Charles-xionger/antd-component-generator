@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { CodePanel } from "./code-panel";
 import { PreviewPanel } from "./preview-panel";
 import { PreviewToolbar } from "./preview-toolbar";
+import { PublishFlowDialog } from "@/components/publishing/publish-flow-dialog";
 import type { UseCanvasReturn } from "@/hooks/use-canvas";
 
 interface CanvasPanelProps {
@@ -73,7 +74,7 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
     const [shareUrl, setShareUrl] = useState("");
     const [isCreatingShare, setIsCreatingShare] = useState(false);
     const [copiedShareUrl, setCopiedShareUrl] = useState(false);
-    const [isPublishing, setIsPublishing] = useState(false);
+    const [publishDialogOpen, setPublishDialogOpen] = useState(false);
     const [fullstackPreview, setFullstackPreview] = useState<{ status: string; previewUrl?: string | null; errorMessage?: string | null } | null>(null);
     const [fullstackPreviewOpen, setFullstackPreviewOpen] = useState(false);
 
@@ -213,39 +214,13 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
       setTimeout(() => setCopiedShareUrl(false), 2000);
     }, [shareUrl]);
 
-    const handlePublish = useCallback(async () => {
+    const handlePublish = useCallback(() => {
       if (!projectId || !selectedVersion) {
         toast.error("请先生成代码");
         return;
       }
-      const version = versions.find(
-        (item) => item.versionNumber === selectedVersion,
-      );
-      if (!version) return;
-      if (!window.confirm("发布后任何知道地址的人都可以访问，确认发布当前版本？")) {
-        return;
-      }
-
-      setIsPublishing(true);
-      try {
-        const response = await fetch(`/api/projects/${projectId}/deployments`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ artifactVersionId: version.id }),
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "发布失败");
-        if (response.status === 202) toast.success("发布任务已创建，通过健康检查后自动上线");
-        else {
-          toast.success("发布成功");
-          window.open(data.publishedUrl, "_blank", "noopener,noreferrer");
-        }
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "发布失败");
-      } finally {
-        setIsPublishing(false);
-      }
-    }, [projectId, selectedVersion, versions]);
+      setPublishDialogOpen(true);
+    }, [projectId, selectedVersion]);
 
     // 沙箱就绪且应该发送文件时才发送（审查通过后）
     useEffect(() => {
@@ -317,7 +292,6 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
             onShare={handleShare}
             isSharing={isCreatingShare}
             onPublish={projectId ? handlePublish : undefined}
-            isPublishing={isPublishing}
             fullstackPreview={fullstackPreview}
             onOpenFullstackPreview={() => setFullstackPreviewOpen(true)}
           />
@@ -375,6 +349,21 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
             </div>
           </DialogContent>
         </Dialog>
+
+        {projectId && selectedVersion && (() => {
+          const version = versions.find((item) => item.versionNumber === selectedVersion);
+          return version ? (
+            <PublishFlowDialog
+              open={publishDialogOpen}
+              onOpenChange={setPublishDialogOpen}
+              projectId={projectId}
+              artifactVersionId={version.id}
+              versionNumber={version.versionNumber}
+              fileCount={version.files.length}
+              fullstackPreview={fullstackPreview}
+            />
+          ) : null;
+        })()}
         <Dialog open={fullstackPreviewOpen} onOpenChange={setFullstackPreviewOpen}>
           <DialogContent className="max-w-[95vw] h-[90vh] p-0 overflow-hidden">
             <DialogHeader className="sr-only">

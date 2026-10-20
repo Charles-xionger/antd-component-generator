@@ -17,7 +17,7 @@
     "prisma:push": "prisma db push",
     "prisma:seed": "prisma db seed",
     "test:data-gateway": "tsx --test lib/data-gateway/*.test.ts",
-    "test:app-runtime": "tsx --test lib/app-contracts.test.ts lib/agent/product-nodes.test.ts lib/chat/item-presentation.test.ts lib/chat/structured-message.test.ts lib/go-runtime/schema.test.ts lib/go-runtime/acceptance.test.ts lib/go-runtime/artifact-validator.test.ts lib/go-runtime/builder.test.ts lib/data-gateway/manifest.test.ts lib/data-gateway/schema-diff.test.ts",
+    "test:app-runtime": "tsx --test lib/app-contracts.test.ts lib/agent/product-nodes.test.ts lib/chat/item-presentation.test.ts lib/chat/structured-message.test.ts lib/publishing/publish-flow.test.ts lib/go-runtime/schema.test.ts lib/go-runtime/acceptance.test.ts lib/go-runtime/artifact-validator.test.ts lib/go-runtime/builder.test.ts lib/data-gateway/manifest.test.ts lib/data-gateway/schema-diff.test.ts",
     "test:fullstack-e2e": "tsx test/fullstack-runtime-e2e.ts",
     "worker:build": "tsx lib/build-jobs/worker.ts"
   },
@@ -61,6 +61,7 @@
     "next-themes": "^0.4.6",
     "pg": "^8.16.3",
     "postcss": "8.5.6",
+    "qrcode": "^1.5.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-hook-form": "7.69.0",
@@ -77,6 +78,7 @@
   "devDependencies": {
     "@types/node": "^20",
     "@types/pg": "^8.16.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
