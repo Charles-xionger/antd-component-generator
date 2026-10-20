@@ -1,7 +1,7 @@
 // components/unified-chat.tsx
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { SplitPane, Pane } from "react-split-pane";
 import { toast } from "sonner";
 import "react-split-pane/styles.css";
@@ -108,6 +108,20 @@ export function UnifiedChat({
 
   // Canvas hook - 传入 messages 用于实时监听
   const canvas = useCanvas({ threadId, messages: chat.messages });
+  const latestArtifactMessageId = useMemo(
+    () =>
+      [...chat.messages]
+        .reverse()
+        .find((message) =>
+          message.role === "assistant" && message.content.includes("<boltArtifact"),
+        )?.id,
+    [chat.messages],
+  );
+  const latestVersionNumber =
+    canvas.selectedVersion ??
+    (canvas.versions.length > 0
+      ? Math.max(...canvas.versions.map((version) => version.versionNumber))
+      : undefined);
 
   // 用 ref 跟踪是否已经处理过 initialMessage
   const initialMessageSentRef = useRef(false);
@@ -441,6 +455,7 @@ ${sandboxError}
             <div
               ref={messagesContainerRef}
               className="flex-1 space-y-4 overflow-y-auto p-4 custom-scrollbar"
+              aria-label="项目活动"
             >
               {chat.messages.map((message) => (
                 <MessageItem
@@ -457,6 +472,29 @@ ${sandboxError}
                   onRegenerate={(messageId) => {
                     chat.regenerateFromMessage(messageId);
                   }}
+                  versionNumber={
+                    message.id === latestArtifactMessageId
+                      ? latestVersionNumber
+                      : undefined
+                  }
+                  onViewChanges={
+                    message.id === latestArtifactMessageId
+                      ? () => {
+                          setIsCanvasVisible(true);
+                          canvas.setActiveTab("code");
+                        }
+                      : undefined
+                  }
+                  onUndo={
+                    message.id === latestArtifactMessageId &&
+                    latestVersionNumber &&
+                    latestVersionNumber > 1
+                      ? () => {
+                          setIsCanvasVisible(true);
+                          canvas.selectVersion(latestVersionNumber - 1);
+                        }
+                      : undefined
+                  }
                 />
               ))}
 

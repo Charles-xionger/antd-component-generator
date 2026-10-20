@@ -1,12 +1,10 @@
 // components/chat/message-item.tsx
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import Image from "next/image";
 import { Streamdown } from "streamdown";
-import { Trash2, RotateCcw } from "lucide-react";
-import { toast } from "sonner";
-import type { Message } from "@/hooks/use-chat";
+import type { Message, ToolCall } from "@/hooks/use-chat";
 import type { Artifact } from "@/components/canvas";
 import { ThinkingCard } from "./thinking-card";
 import { CodeGenerationCard } from "./code-generation-card";
@@ -22,17 +20,7 @@ import {
   StructuredMessageCard,
   StructuredMessageLoadingCard,
 } from "./structured-message-card";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+import { ToolActivityGroup } from "./tool-call-card";
 
 // 辅助函数：查找前一条 artifact 消息
 function findPreviousArtifact(
@@ -63,81 +51,57 @@ interface MessageItemProps {
   threadId: string; // 用于删除消息
   onMessageDeleted?: () => void; // 删除成功回调
   onRegenerate?: (messageId: string) => void; // 重新生成回调
+  versionNumber?: number;
+  onViewChanges?: () => void;
+  onUndo?: () => void;
+}
+
+function AssistantItemFrame({
+  toolCalls,
+  children,
+}: {
+  toolCalls?: ToolCall[];
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="group flex justify-start">
+      <div className="w-full max-w-[92%] space-y-3">
+        {toolCalls && toolCalls.length > 0 && (
+          <ToolActivityGroup toolCalls={toolCalls} />
+        )}
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function AssistantText({
+  children,
+  isAnimating,
+}: {
+  children: string;
+  isAnimating?: boolean;
+}) {
+  return (
+    <div className="px-1 py-1 text-foreground">
+      <Streamdown
+        className="prose prose-sm max-w-none text-sm"
+        isAnimating={isAnimating}
+      >
+        {children}
+      </Streamdown>
+    </div>
+  );
 }
 
 export function MessageItem({
   message,
   messages,
-  threadId,
-  onMessageDeleted,
-  onRegenerate,
+  versionNumber,
+  onViewChanges,
+  onUndo,
 }: MessageItemProps) {
   const isUser = message.role === "user";
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-
-  // 删除消息（暂时注释掉，待优化后再启用）
-  const handleDeleteMessage = async () => {
-    toast.info("删除功能暂时禁用，正在优化中");
-    setShowDeleteDialog(false);
-    return;
-
-    // setIsDeleting(true);
-    // setShowDeleteDialog(false);
-
-    // try {
-    //   const response = await fetch("/api/agent/delete-message", {
-    //     method: "POST",
-    //     headers: { "Content-Type": "application/json" },
-    //     body: JSON.stringify({ threadId, messageId: message.id }),
-    //   });
-
-    //   if (!response.ok) {
-    //     const error = await response.json();
-    //     throw new Error(error.error || "删除失败");
-    //   }
-
-    //   console.log("[MessageItem] 消息删除成功:", message.id);
-    //   toast.success("消息已删除");
-    //   onMessageDeleted?.();
-    // } catch (error) {
-    //   console.error("[MessageItem] 删除消息失败:", error);
-    //   toast.error(
-    //     error instanceof Error ? error.message : "删除失败，请稍后重试"
-    //   );
-    // } finally {
-    //   setIsDeleting(false);
-    // }
-  };
-
-  // 删除按钮组件（AI 消息使用）
-  const DeleteButton = () => (
-    <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-      <AlertDialogTrigger asChild>
-        <button
-          disabled={isDeleting}
-          className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive disabled:opacity-50 disabled:cursor-not-allowed"
-          title="删除消息"
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>确认删除</AlertDialogTitle>
-          <AlertDialogDescription>
-            确定要删除这条消息吗？此操作无法撤销。
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>取消</AlertDialogCancel>
-          <AlertDialogAction onClick={handleDeleteMessage}>
-            删除
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
 
   // 将 base64 data URL 转换为 Blob URL（优化性能）
   const imageBlobUrls = useMemo(() => {
@@ -289,11 +253,19 @@ export function MessageItem({
   }
 
   if (structuredMessage) {
-    return <StructuredMessageCard payload={structuredMessage} />;
+    return (
+      <AssistantItemFrame toolCalls={message.toolCalls}>
+        <StructuredMessageCard payload={structuredMessage} />
+      </AssistantItemFrame>
+    );
   }
 
   if (pendingStructuredKind) {
-    return <StructuredMessageLoadingCard kind={pendingStructuredKind} />;
+    return (
+      <AssistantItemFrame toolCalls={message.toolCalls}>
+        <StructuredMessageLoadingCard kind={pendingStructuredKind} />
+      </AssistantItemFrame>
+    );
   }
 
   // AI 消息 - 同时包含 Architect 和 Coding（完整流程）
@@ -307,18 +279,12 @@ export function MessageItem({
       !message.content.includes("</boltArtifact>");
 
     return (
-      <div className="flex justify-start group">
-        <div className="w-full max-w-[85%] space-y-3">
+      <AssistantItemFrame toolCalls={message.toolCalls}>
           {/* Architect 开场白 */}
           {architectOpeningText && (
-            <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-              <Streamdown
-                className="prose prose-sm max-w-none text-sm"
-                isAnimating={architectStreaming}
-              >
-                {architectOpeningText}
-              </Streamdown>
-            </div>
+            <AssistantText isAnimating={architectStreaming}>
+              {architectOpeningText}
+            </AssistantText>
           )}
 
           {/* Architect 规划卡片 */}
@@ -332,23 +298,12 @@ export function MessageItem({
 
           {/* Architect 结束语 */}
           {architectClosingText && !architectStreaming && (
-            <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-              <Streamdown className="prose prose-sm max-w-none text-sm">
-                {architectClosingText}
-              </Streamdown>
-            </div>
+            <AssistantText>{architectClosingText}</AssistantText>
           )}
 
           {/* Coding 开场白 */}
           {openingText && (
-            <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-              <Streamdown
-                className="prose prose-sm max-w-none text-sm"
-                isAnimating={codingStreaming}
-              >
-                {openingText}
-              </Streamdown>
-            </div>
+            <AssistantText isAnimating={codingStreaming}>{openingText}</AssistantText>
           )}
 
           {/* 代码生成卡片 */}
@@ -356,22 +311,20 @@ export function MessageItem({
             <CodeGenerationCard
               artifact={artifact}
               isStreaming={codingStreaming}
+              versionNumber={versionNumber}
+              onViewChanges={onViewChanges}
+              onUndo={onUndo}
             />
           )}
 
           {/* Coding 结束语 */}
           {closingText && !codingStreaming && (
-            <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-              <Streamdown className="prose prose-sm max-w-none text-sm">
-                {closingText}
-              </Streamdown>
-            </div>
+            <AssistantText>{closingText}</AssistantText>
           )}
 
           {/* 删除按钮 - 已暂时隐藏 */}
           {/* <DeleteButton /> */}
-        </div>
-      </div>
+      </AssistantItemFrame>
     );
   }
 
@@ -383,38 +336,31 @@ export function MessageItem({
       !message.content.includes("</boltArtifact>");
 
     return (
-      <div className="flex justify-start group">
-        <div className="w-full max-w-[85%] space-y-3">
+      <AssistantItemFrame toolCalls={message.toolCalls}>
           {/* 开场白 - 即使没有 artifact 标签也显示 */}
           {openingText && (
-            <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-              <Streamdown
-                className="prose prose-sm max-w-none text-sm"
-                isAnimating={isStreaming}
-              >
-                {openingText}
-              </Streamdown>
-            </div>
+            <AssistantText isAnimating={isStreaming}>{openingText}</AssistantText>
           )}
 
           {/* 代码生成卡片 - 只在有标签时显示 */}
           {message.content.includes("<boltArtifact") && (
-            <CodeGenerationCard artifact={artifact} isStreaming={isStreaming} />
+            <CodeGenerationCard
+              artifact={artifact}
+              isStreaming={isStreaming}
+              versionNumber={versionNumber}
+              onViewChanges={onViewChanges}
+              onUndo={onUndo}
+            />
           )}
 
           {/* 结束语 */}
           {closingText && !isStreaming && (
-            <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-              <Streamdown className="prose prose-sm max-w-none text-sm">
-                {closingText}
-              </Streamdown>
-            </div>
+            <AssistantText>{closingText}</AssistantText>
           )}
 
           {/* 删除按钮 - 已暂时隐藏 */}
           {/* <DeleteButton /> */}
-        </div>
-      </div>
+      </AssistantItemFrame>
     );
   }
 
@@ -428,32 +374,19 @@ export function MessageItem({
     // 如果没有 <architectPlan> 标签，说明是纯对话（需求不清楚的情况）
     if (!message.content.includes("<architectPlan")) {
       return (
-        <div className="flex justify-start group">
-          <div className="max-w-[85%] space-y-2">
-            <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-              <Streamdown className="prose prose-sm max-w-none">
-                {message.content}
-              </Streamdown>
-            </div>
-            {/* <DeleteButton /> */}
-          </div>
-        </div>
+        <AssistantItemFrame toolCalls={message.toolCalls}>
+          <AssistantText>{message.content}</AssistantText>
+        </AssistantItemFrame>
       );
     }
 
     return (
-      <div className="flex justify-start group">
-        <div className="w-full max-w-[85%] space-y-3">
+      <AssistantItemFrame toolCalls={message.toolCalls}>
           {/* 开场白 */}
           {architectOpeningText && (
-            <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-              <Streamdown
-                className="prose prose-sm max-w-none text-sm"
-                isAnimating={isStreaming}
-              >
-                {architectOpeningText}
-              </Streamdown>
-            </div>
+            <AssistantText isAnimating={isStreaming}>
+              {architectOpeningText}
+            </AssistantText>
           )}
 
           {/* 规划方案卡片 - 使用解析好的内容，流式时即使为空也显示 */}
@@ -465,33 +398,21 @@ export function MessageItem({
 
           {/* 结束语 */}
           {architectClosingText && !isStreaming && (
-            <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-              <Streamdown className="prose prose-sm max-w-none text-sm">
-                {architectClosingText}
-              </Streamdown>
-            </div>
+            <AssistantText>{architectClosingText}</AssistantText>
           )}
 
           {/* 删除按钮 - 已暂时隐藏 */}
           {/* <DeleteButton /> */}
-        </div>
-      </div>
+      </AssistantItemFrame>
     );
   }
 
   // AI 消息 - 普通聊天回复（非代码生成，非architect）
   if (!isCodingMessage && !isArchitectMessage) {
     return (
-      <div className="flex justify-start group">
-        <div className="max-w-[85%] space-y-2">
-          <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-            <Streamdown className="prose prose-sm max-w-none">
-              {message.content}
-            </Streamdown>
-          </div>
-          {/* <DeleteButton /> */}
-        </div>
-      </div>
+      <AssistantItemFrame toolCalls={message.toolCalls}>
+        <AssistantText>{message.content}</AssistantText>
+      </AssistantItemFrame>
     );
   }
 
@@ -500,15 +421,8 @@ export function MessageItem({
   console.warn("[MessageItem] 进入兜底分支，消息ID:", message.id);
 
   return (
-    <div className="flex justify-start group">
-      <div className="max-w-[85%] space-y-2">
-        <div className="rounded-lg bg-secondary px-4 py-2 text-secondary-foreground">
-          <Streamdown className="prose prose-sm max-w-none">
-            {message.content}
-          </Streamdown>
-        </div>
-        {/* <DeleteButton /> */}
-      </div>
-    </div>
+    <AssistantItemFrame toolCalls={message.toolCalls}>
+      <AssistantText>{message.content}</AssistantText>
+    </AssistantItemFrame>
   );
 }

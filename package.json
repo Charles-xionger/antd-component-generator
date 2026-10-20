@@ -17,7 +17,7 @@
     "prisma:push": "prisma db push",
     "prisma:seed": "prisma db seed",
     "test:data-gateway": "tsx --test lib/data-gateway/*.test.ts",
-    "test:app-runtime": "tsx --test lib/app-contracts.test.ts lib/agent/product-nodes.test.ts lib/chat/structured-message.test.ts lib/go-runtime/schema.test.ts lib/go-runtime/acceptance.test.ts lib/go-runtime/artifact-validator.test.ts lib/go-runtime/builder.test.ts lib/data-gateway/manifest.test.ts lib/data-gateway/schema-diff.test.ts",
+    "test:app-runtime": "tsx --test lib/app-contracts.test.ts lib/agent/product-nodes.test.ts lib/chat/item-presentation.test.ts lib/chat/structured-message.test.ts lib/go-runtime/schema.test.ts lib/go-runtime/acceptance.test.ts lib/go-runtime/artifact-validator.test.ts lib/go-runtime/builder.test.ts lib/data-gateway/manifest.test.ts lib/data-gateway/schema-diff.test.ts",
     "test:fullstack-e2e": "tsx test/fullstack-runtime-e2e.ts",
     "worker:build": "tsx lib/build-jobs/worker.ts"
   },
