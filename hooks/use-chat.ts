@@ -28,6 +28,14 @@ export interface ToolCall {
   error?: string;
 }
 
+interface SendMessagePayload {
+  message?: string;
+  images?: Array<{
+    dataUrl: string;
+    mime_type: string;
+  }>;
+}
+
 export interface UseChatOptions {
   /** API 端点，默认 /api/agent/stream */
   api?: string;
@@ -55,6 +63,17 @@ export interface UseChatOptions {
   onTitleUpdate?: (threadId: string, title: string) => void;
 }
 
+const EVENT_STAGE_MAP: Record<string, GenerationStage> = {
+  intent: GenerationStage.INTENT,
+  requirements: GenerationStage.REQUIREMENTS,
+  awaiting_confirmation: GenerationStage.AWAITING_CONFIRMATION,
+  responding: GenerationStage.RESPONDING,
+  architecture: GenerationStage.ARCHITECTURE,
+  coding: GenerationStage.CODING,
+  validating: GenerationStage.VALIDATING,
+  repairing: GenerationStage.REPAIRING,
+};
+
 export function useChat(options: UseChatOptions = {}) {
   const {
     api = "/api/agent/stream",
@@ -81,6 +100,9 @@ export function useChat(options: UseChatOptions = {}) {
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  // 首条消息可能在历史请求返回前就开始发送。记录本地活动，避免空历史
+  // 或仅包含用户消息的历史快照覆盖正在流式更新的 assistant 消息。
+  const hasLocalActivityRef = useRef(false);
 
   // 使用 ref 存储回调，避免依赖变化导致死循环
   const onArtifactDetectedRef = useRef(onArtifactDetected);
@@ -128,7 +150,9 @@ export function useChat(options: UseChatOptions = {}) {
           const formattedMessages = formatMessagesFromHistory(
             data.messages || [],
           );
-          setMessages(formattedMessages);
+          if (!hasLocalActivityRef.current) {
+            setMessages(formattedMessages);
+          }
 
           // 标记已加载
           historyLoadedRef.current = threadId;
@@ -147,19 +171,23 @@ export function useChat(options: UseChatOptions = {}) {
   }, [threadId]);
 
   /** 发送消息 */
-  const sendMessage = useCallback(async () => {
-    if ((!input.trim() && images.length === 0) || isLoading) return;
+  const sendMessage = useCallback(async (payload?: SendMessagePayload) => {
+    const messageInput = payload?.message ?? input;
+    const messageImages = payload?.images ?? images;
+
+    if ((!messageInput.trim() && messageImages.length === 0) || isLoading) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
       role: "user",
-      content: input.trim(),
-      images: images.length > 0 ? images : undefined,
+      content: messageInput.trim(),
+      images: messageImages.length > 0 ? messageImages : undefined,
     };
 
+    hasLocalActivityRef.current = true;
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
-    const currentImages = [...images];
+    const currentImages = [...messageImages];
     setImages([]);
     setIsLoading(true);
     setError(null);
@@ -168,6 +196,10 @@ export function useChat(options: UseChatOptions = {}) {
     if (onStreamStartRef.current) {
       onStreamStartRef.current();
     }
+
+    // 首条请求在项目页面挂载后可能需要等待 Graph/checkpointer 初始化。
+    // 立即进入意图识别阶段，避免这段时间页面没有任何动态反馈。
+    useGenerationStore.getState().startThinking(userMessage.id);
 
     // 创建新的 AbortController
     if (abortControllerRef.current) {
@@ -212,7 +244,9 @@ export function useChat(options: UseChatOptions = {}) {
 
       setMessages((prev) => [...prev, assistantMessage]);
       // 🔥 启动生成状态：进入 Thinking 阶段（而不是直接进入 Architect）
-      useGenerationStore.getState().startThinking(assistantMessage.id);
+      useGenerationStore
+        .getState()
+        .updateStage(GenerationStage.INTENT, "running", assistantMessage.id);
       // 流式响应开始，移除"思考中"状态
       setIsLoading(false);
 
@@ -225,6 +259,10 @@ export function useChat(options: UseChatOptions = {}) {
       // Process streaming response
       let totalChunks = 0;
       let totalBytes = 0;
+      let activeContentStage: string | undefined;
+      let streamFailure: Error | undefined;
+      const streamDecoder = new TextDecoder();
+      let pendingSseText = "";
       console.log("[useChat] 开始接收流式响应");
 
       while (true) {
@@ -235,19 +273,13 @@ export function useChat(options: UseChatOptions = {}) {
           totalBytes += value.length;
         }
 
-        if (done) {
-          console.log("[useChat] 流式响应结束", {
-            totalChunks,
-            totalBytes,
-            contentLength: assistantContent.length,
-            hasBoltArtifact: assistantContent.includes("<boltArtifact"),
-            hasBoltArtifactEnd: assistantContent.includes("</boltArtifact>"),
-          });
-          break;
+        if (value) {
+          pendingSseText += streamDecoder.decode(value, { stream: !done });
         }
+        if (done) pendingSseText += streamDecoder.decode();
 
-        const chunk = new TextDecoder().decode(value);
-        const lines = chunk.split("\n");
+        const lines = pendingSseText.split(/\r?\n/);
+        pendingSseText = done ? "" : lines.pop() || "";
 
         for (const line of lines) {
           if (line.startsWith("data: ") && line !== "data: [DONE]") {
@@ -256,11 +288,19 @@ export function useChat(options: UseChatOptions = {}) {
 
               if (data.type === "content" || data.content) {
                 const content = data.content || "";
+                const contentStage = String(data.stage || "responding");
 
-                // 🔥 如果是 Coder 阶段的第一个内容，创建新消息
-                if (needNewMessageForCoder && content) {
+                const shouldStartNewMessage =
+                  Boolean(assistantContent) &&
+                  (needNewMessageForCoder ||
+                    (activeContentStage &&
+                      activeContentStage !== contentStage));
+
+                // 不同 Agent 的输出使用独立消息承载，避免需求规格、应用蓝图
+                // 和代码生成内容被拼成一个超长气泡。
+                if (shouldStartNewMessage && content) {
                   console.log(
-                    "[useChat] Coder 开始输出，创建新消息:",
+                    "[useChat] 新阶段开始输出，创建新消息:",
                     content.substring(0, 20),
                   );
 
@@ -277,7 +317,9 @@ export function useChat(options: UseChatOptions = {}) {
                   assistantMessage = newAssistantMessage;
                   assistantContent = "";
                   needNewMessageForCoder = false;
+                  messageBuffer.reset();
                 }
+                activeContentStage = contentStage;
 
                 // 使用消息缓冲器判断是否应该显示
                 const shouldShow = messageBuffer.append(content, data.metadata);
@@ -297,28 +339,34 @@ export function useChat(options: UseChatOptions = {}) {
                 // 🔥 检测是否进入 Architect 阶段
                 const currentStage = useGenerationStore.getState().stage;
                 if (
-                  assistantContent.includes("<architectPlan") &&
-                  currentStage !== GenerationStage.GENERATING
+                  (assistantContent.includes("<architectPlan") ||
+                    assistantContent.includes("<appBlueprint")) &&
+                  currentStage !== GenerationStage.ARCHITECTURE
                 ) {
                   console.log("[useChat] 检测到 Architect 标签，切换状态");
                   useGenerationStore
                     .getState()
-                    .startGenerating(assistantMessage.id);
+                    .updateStage(
+                      GenerationStage.ARCHITECTURE,
+                      "running",
+                      assistantMessage.id,
+                    );
                 }
 
                 const hasArtifact = assistantContent.includes("<boltArtifact");
 
-                setMessages((prev) =>
-                  prev.map((msg) =>
-                    msg.id === assistantMessage.id
-                      ? {
-                          ...msg,
-                          content: assistantContent,
-                          hasArtifact,
-                        }
-                      : msg,
-                  ),
-                );
+                setMessages((prev) => {
+                  const nextAssistant = {
+                    ...assistantMessage,
+                    content: assistantContent,
+                    hasArtifact,
+                  };
+                  return prev.some((msg) => msg.id === assistantMessage.id)
+                    ? prev.map((msg) =>
+                        msg.id === assistantMessage.id ? nextAssistant : msg,
+                      )
+                    : [...prev, nextAssistant];
+                });
 
                 if (hasArtifact && onArtifactDetectedRef.current) {
                   onArtifactDetectedRef.current(assistantContent);
@@ -333,7 +381,9 @@ export function useChat(options: UseChatOptions = {}) {
                 });
 
                 // 🔥 确保保持在生成状态
-                useGenerationStore.getState().startGenerating();
+                useGenerationStore
+                  .getState()
+                  .updateStage(GenerationStage.ARCHITECTURE, "completed");
 
                 // ⚠️ 不要立即创建新消息和重置 assistantContent
                 // 等待 Coder 真正开始输出内容时（下一个 content chunk）再创建
@@ -346,6 +396,13 @@ export function useChat(options: UseChatOptions = {}) {
 
                 // 继续处理后续的 content chunks
                 continue;
+              } else if (data.type === "stage") {
+                const stage = EVENT_STAGE_MAP[String(data.stage)];
+                if (stage) {
+                  useGenerationStore
+                    .getState()
+                    .updateStage(stage, data.status || "running");
+                }
               } else if (data.type === "tool_start") {
                 // 使用 run_id 作为唯一标识符
                 const toolCallId =
@@ -421,6 +478,12 @@ export function useChat(options: UseChatOptions = {}) {
                 if (onTitleUpdateRef.current) {
                   onTitleUpdateRef.current(data.threadId, data.title);
                 }
+              } else if (data.type === "artifact_saved") {
+                onSavedRef.current?.();
+              } else if (data.type === "error") {
+                streamFailure = new Error(
+                  data.error || "应用生成过程中发生错误",
+                );
               }
               // 注意：移除了 data.type === "saved" 的处理
               // 现在由前端主动保存，不再依赖后端的保存信号
@@ -428,6 +491,50 @@ export function useChat(options: UseChatOptions = {}) {
               // 忽略解析错误
             }
           }
+        }
+
+        if (done) {
+          console.log("[useChat] 流式响应结束", {
+            totalChunks,
+            totalBytes,
+            contentLength: assistantContent.length,
+            hasBoltArtifact: assistantContent.includes("<boltArtifact"),
+            hasBoltArtifactEnd: assistantContent.includes("</boltArtifact>"),
+          });
+          break;
+        }
+      }
+
+      if (streamFailure) throw streamFailure;
+
+      // 代理或浏览器可能在极少数情况下丢失单个 SSE 内容事件。
+      // Graph 已完成且消息已由 checkpointer 保存，此时从历史记录恢复，
+      // 避免用户必须手动刷新页面才能看到回复。
+      if (!assistantContent && threadId) {
+        try {
+          const historyResponse = await fetch(`/api/agent/history/${threadId}`);
+          if (historyResponse.ok) {
+            const historyData = await historyResponse.json();
+            const restoredMessages = formatMessagesFromHistory(
+              historyData.messages || [],
+            );
+            const restoredAssistant = [...restoredMessages]
+              .reverse()
+              .find((message) => message.role === "assistant");
+
+            if (restoredAssistant?.content) {
+              assistantContent = restoredAssistant.content;
+              setMessages(restoredMessages);
+              if (
+                restoredAssistant.content.includes("<boltArtifact") &&
+                onArtifactDetectedRef.current
+              ) {
+                onArtifactDetectedRef.current(restoredAssistant.content);
+              }
+            }
+          }
+        } catch (historyError) {
+          console.error("[useChat] 恢复最终回复失败:", historyError);
         }
       }
 
@@ -464,17 +571,18 @@ export function useChat(options: UseChatOptions = {}) {
       // 这解决了 architectPlan 结束标签到达后状态未更新的问题
       if (assistantContent) {
         const hasArtifact = assistantContent.includes("<boltArtifact");
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === assistantMessage.id
-              ? {
-                  ...msg,
-                  content: assistantContent,
-                  hasArtifact,
-                }
-              : msg,
-          ),
-        );
+        setMessages((prev) => {
+          const nextAssistant = {
+            ...assistantMessage,
+            content: assistantContent,
+            hasArtifact,
+          };
+          return prev.some((msg) => msg.id === assistantMessage.id)
+            ? prev.map((msg) =>
+                msg.id === assistantMessage.id ? nextAssistant : msg,
+              )
+            : [...prev, nextAssistant];
+        });
       }
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
@@ -520,8 +628,7 @@ export function useChat(options: UseChatOptions = {}) {
 
       toast.error(errorMessage);
       onErrorRef.current?.(error);
-      // 🔥 错误时重置生成状态
-      useGenerationStore.getState().reset();
+      useGenerationStore.getState().fail(errorMessage);
     } finally {
       setIsLoading(false);
       abortControllerRef.current = null;
@@ -663,17 +770,22 @@ export function useChat(options: UseChatOptions = {}) {
 
         // 标记：是否需要为 Coder 创建新消息
         let needNewMessageForCoder = false;
+        const streamDecoder = new TextDecoder();
+        let pendingSseText = "";
 
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (value) {
+            pendingSseText += streamDecoder.decode(value, { stream: !done });
+          }
+          if (done) pendingSseText += streamDecoder.decode();
 
-          const chunk = new TextDecoder().decode(value);
-          const lines = chunk
-            .split("\n")
+          const lines = pendingSseText.split(/\r?\n/);
+          pendingSseText = done ? "" : lines.pop() || "";
+          const dataLines = lines
             .filter((line) => line.trim().startsWith("data:"));
 
-          for (const line of lines) {
+          for (const line of dataLines) {
             const jsonStr = line.replace(/^data:\s*/, "");
             if (!jsonStr || jsonStr === "[DONE]") continue;
 
@@ -709,13 +821,18 @@ export function useChat(options: UseChatOptions = {}) {
                 // 🔥 检测是否进入 Architect 阶段
                 const currentStage = useGenerationStore.getState().stage;
                 if (
-                  assistantContent.includes("<architectPlan") &&
-                  currentStage !== GenerationStage.GENERATING
+                  (assistantContent.includes("<architectPlan") ||
+                    assistantContent.includes("<appBlueprint")) &&
+                  currentStage !== GenerationStage.ARCHITECTURE
                 ) {
                   console.log("[useChat] 检测到 Architect 标签，切换状态");
                   useGenerationStore
                     .getState()
-                    .startGenerating(assistantMessage.id);
+                    .updateStage(
+                      GenerationStage.ARCHITECTURE,
+                      "running",
+                      assistantMessage.id,
+                    );
                 }
 
                 setMessages((prev) =>
@@ -731,7 +848,9 @@ export function useChat(options: UseChatOptions = {}) {
                   onArtifactDetectedRef.current(assistantContent);
                 }
               } else if (data.type === "architect_complete") {
-                useGenerationStore.getState().startGenerating();
+                useGenerationStore
+                  .getState()
+                  .updateStage(GenerationStage.ARCHITECTURE, "completed");
                 needNewMessageForCoder = true;
               } else if (data.type === "tool_start") {
                 const toolCallId =
@@ -784,6 +903,8 @@ export function useChat(options: UseChatOptions = {}) {
               console.error("Failed to parse SSE data:", e, jsonStr);
             }
           }
+
+          if (done) break;
         }
 
         // 🔥 完成后总是调用 onStreamComplete（不管是否检测到 end 事件）

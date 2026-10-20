@@ -119,9 +119,12 @@ export function useCanvas({
       return;
     }
 
-    // 【关键修复】只在正在生成时才监听 messages
-    // 查看历史版本时不应该被 messages 覆盖
-    if (!isGeneratingRef.current) {
+    // 正常情况下只在生成时监听消息，避免历史消息覆盖用户手动选择的版本。
+    // 但旧请求可能已经在会话中生成了 boltArtifact、后端版本保存却失败；
+    // 此时没有任何版本可选，应从最后一条历史消息恢复文件回显。
+    const shouldRecoverFromHistory =
+      !isGeneratingRef.current && versions.length === 0 && !generatedCode;
+    if (!isGeneratingRef.current && !shouldRecoverFromHistory) {
       console.log("[useCanvas] 未在生成中，跳过 messages 更新（查看历史版本）");
       return;
     }
@@ -152,6 +155,13 @@ export function useCanvas({
             });
             setGeneratedCode(artifactXml);
 
+            if (shouldRecoverFromHistory) {
+              setShouldSendToSandbox(true);
+              console.log("[useCanvas] 已从历史消息恢复未落库的 Artifact", {
+                filesCount: latestArtifact.files.length,
+              });
+            }
+
             // 自动选择最新生成的文件
             const latestFile =
               latestArtifact.files[latestArtifact.files.length - 1];
@@ -167,7 +177,7 @@ export function useCanvas({
         break; // 找到最新的就停止
       }
     }
-  }, [messages, generatedCode]);
+  }, [messages, generatedCode, versions.length, selectFile]);
 
   // 展开/收起（保留接口但不再使用）
   const expand = useCallback(() => {
@@ -513,14 +523,15 @@ export function useCanvas({
       // 将文件转换为 sandbox 需要的格式（使用文件名作为 key）
       const files: Record<string, string> = {};
       artifact.files.forEach((file) => {
-        const fileName = file.path.split("/").pop() || file.path;
+        if (file.path.startsWith("backend/") || file.path.startsWith("migrations/") || file.path.startsWith("acceptance/")) return;
+        const fileName = file.path.startsWith("frontend/") ? file.path.slice("frontend/".length) : file.path;
         files[fileName] = file.content;
       });
 
       // 查找入口文件
       const entryFileName = (() => {
         const appFile = artifact.files.find((f) => f.path.includes("App.tsx"));
-        if (appFile) return appFile.path.split("/").pop() || "App.tsx";
+        if (appFile) return appFile.path.startsWith("frontend/") ? appFile.path.slice("frontend/".length) : appFile.path;
 
         const componentFile = artifact.files.find(
           (f) =>
@@ -538,14 +549,18 @@ export function useCanvas({
       // 发送文件到 sandbox
       iframe.contentWindow.postMessage(
         {
-          protocolVersion: 1,
+          protocolVersion: 2,
           type: "artifacts",
-          payload: { files, entryFile: entryFileName },
+          payload: {
+            files,
+            entryFile: entryFileName,
+            runtime: versions.find((version) => version.versionNumber === selectedVersion)?.runtimeManifest || undefined,
+          },
         },
         SANDBOX_ORIGIN
       );
     },
-    [artifact]
+    [artifact, selectedVersion, versions]
   );
 
   // 合并新代码和现有代码（保留未修改的文件）- 使用 currentVersionFilesRef 避免依赖循环

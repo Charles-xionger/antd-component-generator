@@ -65,6 +65,21 @@ export async function POST(request: NextRequest, { params }: Context) {
     return Response.json({ error: "Artifact version not found" }, { status: 404 });
   }
 
+  if (version.runtimeVersion === "go-1.24") {
+    const preview = await prisma.buildJob.findFirst({
+      where: { projectId, artifactVersionId: version.id, type: "FULLSTACK_PREVIEW", status: "SUCCEEDED" },
+      orderBy: { completedAt: "desc" },
+    });
+    if (!preview) return Response.json({ error: "应用尚未通过可用性验证，暂时不能发布" }, { status: 409 });
+    const deployment = await prisma.deployment.create({
+      data: { projectId, artifactVersionId: version.id, status: "BUILDING", runtimeType: "GO" },
+    });
+    const job = await prisma.buildJob.create({
+      data: { type: "PUBLISH", projectId, artifactVersionId: version.id, deploymentId: deployment.id },
+    });
+    return Response.json({ deployment, job, publishedUrl: `https://${getPublishedHostname(project.slug)}` }, { status: 202 });
+  }
+
   const deployment = await prisma.deployment.create({
     data: { projectId, artifactVersionId: version.id, status: "BUILDING" },
   });

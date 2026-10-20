@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import { Sparkles, Table, LineChart, FileEdit, LayoutGrid } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { InputBar } from "./input-bar";
+import { GenerationStatusCard } from "./generation-status-card";
+import { useIsGenerating } from "@/stores/use-generation-store";
 import {
   Tooltip,
   TooltipContent,
@@ -71,6 +73,7 @@ export function HomeLanding({ onSubmit }: HomeLandingProps) {
   const [images, setImages] = useState<
     { dataUrl: string; mime_type: string }[]
   >([]);
+  const isGenerating = useIsGenerating();
 
   // 模型选择状态（与 localStorage 同步）
   const [selectedModel, setSelectedModel] = useState<string>(() => {
@@ -181,7 +184,7 @@ export function HomeLanding({ onSubmit }: HomeLandingProps) {
             value={input}
             onChange={setInput}
             onSubmit={handleSubmit}
-            isLoading={false}
+            isLoading={isGenerating}
             placeholder="描述你想要生成的组件..."
             images={images}
             onImagesChange={setImages}
@@ -189,6 +192,7 @@ export function HomeLanding({ onSubmit }: HomeLandingProps) {
             onModelChange={setSelectedModel}
           />
         </div>
+        <GenerationStatusCard />
       </div>
     </div>
   );

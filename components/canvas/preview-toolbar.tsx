@@ -9,6 +9,7 @@ import {
   Smartphone,
   Share2,
   Rocket,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -37,6 +38,8 @@ interface PreviewToolbarProps {
   isSharing?: boolean;
   onPublish?: () => void;
   isPublishing?: boolean;
+  fullstackPreview?: { status: string; previewUrl?: string | null; errorMessage?: string | null } | null;
+  onOpenFullstackPreview?: () => void;
 }
 
 export function PreviewToolbar({
@@ -55,11 +58,24 @@ export function PreviewToolbar({
   isSharing = false,
   onPublish,
   isPublishing = false,
+  fullstackPreview,
+  onOpenFullstackPreview,
 }: PreviewToolbarProps) {
   return (
     <div className="flex items-center justify-between px-4 py-2 bg-background border-b">
       {/* 左侧：版本选择 */}
       <div className="flex items-center gap-2">
+        {fullstackPreview && (
+          fullstackPreview.status === "SUCCEEDED" && fullstackPreview.previewUrl ? (
+            <Button variant="outline" size="sm" onClick={onOpenFullstackPreview}>
+              <ExternalLink className="h-4 w-4 mr-1" />打开可用版本
+            </Button>
+          ) : (
+            <span className={fullstackPreview.status === "FAILED" ? "text-xs text-destructive" : "text-xs text-muted-foreground"} title={fullstackPreview.errorMessage || undefined}>
+              {fullstackPreview.status === "FAILED" ? "应用构建未通过" : "正在准备可用版本"}
+            </span>
+          )
+        )}
         {versions.length > 0 && (
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground">版本:</span>

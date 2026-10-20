@@ -15,6 +15,14 @@ import {
   parseArtifactFromContent,
 } from "@/hooks/use-message-parser";
 import {
+  detectStructuredMessageKind,
+  parseStructuredMessage,
+} from "@/lib/chat/structured-message";
+import {
+  StructuredMessageCard,
+  StructuredMessageLoadingCard,
+} from "./structured-message-card";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -173,6 +181,12 @@ export function MessageItem({
     architectClosingText,
     architectPlanContent,
   } = useMessageParser(message.content, isUser, previousArtifact);
+  const structuredMessage = isUser
+    ? undefined
+    : parseStructuredMessage(message.content);
+  const pendingStructuredKind = isUser
+    ? undefined
+    : detectStructuredMessageKind(message.content);
 
   // AI 消息内容为空时，不渲染（流式响应刚开始的占位消息）
   if (!isUser && !message.content.trim()) {
@@ -272,6 +286,14 @@ export function MessageItem({
         </div>
       </div>
     );
+  }
+
+  if (structuredMessage) {
+    return <StructuredMessageCard payload={structuredMessage} />;
+  }
+
+  if (pendingStructuredKind) {
+    return <StructuredMessageLoadingCard kind={pendingStructuredKind} />;
   }
 
   // AI 消息 - 同时包含 Architect 和 Coding（完整流程）

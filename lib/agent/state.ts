@@ -1,6 +1,7 @@
 // lib/agent/state.ts
 import { BaseMessage } from "@langchain/core/messages";
 import { Annotation } from "@langchain/langgraph";
+import type { AppBlueprint, IntentResult, RequirementSpec } from "@/lib/app-contracts";
 
 export interface AgentPlan {
   files: Array<{ path: string; description: string }>;
@@ -21,6 +22,11 @@ export interface AgentState {
   codeContext?: string;
   // 场景类型（由 sceneDetector 节点判断）
   sceneType?: SceneType;
+  intentResult?: IntentResult;
+  requirementSpec?: RequirementSpec;
+  appBlueprint?: AppBlueprint;
+  validationErrors?: string[];
+  repairAttempts?: number;
 }
 
 // LangGraph state annotation
@@ -69,4 +75,9 @@ export const StateAnnotations = Annotation.Root({
     reducer: (x, y) => y ?? x,
     default: () => undefined,
   }),
+  intentResult: Annotation<IntentResult | undefined>({ reducer: (x, y) => y ?? x, default: () => undefined }),
+  requirementSpec: Annotation<RequirementSpec | undefined>({ reducer: (x, y) => y ?? x, default: () => undefined }),
+  appBlueprint: Annotation<AppBlueprint | undefined>({ reducer: (x, y) => y ?? x, default: () => undefined }),
+  validationErrors: Annotation<string[]>({ reducer: (_x, y) => y, default: () => [] }),
+  repairAttempts: Annotation<number>({ reducer: (_x, y) => y, default: () => 0 }),
 });

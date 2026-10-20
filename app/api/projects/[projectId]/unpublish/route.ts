@@ -16,6 +16,18 @@ export async function POST(
     return Response.json({ error: "Project not found" }, { status: 404 });
   }
 
+  if (project.activeDeployment?.runtimeType === "GO" && project.activeDeploymentId) {
+    const job = await prisma.buildJob.create({
+      data: {
+        type: "UNPUBLISH",
+        projectId,
+        artifactVersionId: project.activeDeployment.artifactVersionId,
+        deploymentId: project.activeDeploymentId,
+      },
+    });
+    return Response.json({ success: true, job }, { status: 202 });
+  }
+
   await prisma.$transaction(async (tx) => {
     if (project.activeDeploymentId) {
       await tx.deployment.update({

@@ -1,6 +1,6 @@
-# Data Gateway 与生成协议 V2
+# Data Gateway V2（历史方案）
 
-> 状态：DG-0.2 数据底座已完成，准备进入 DG-0.3
+> 状态：已停止继续实施。App V1 已切换到传统关系表、生成 Go 后端和独立应用容器；当前方案见 [Go 全栈轻应用运行时](../go-fullstack-runtime.md)。本目录仅保留早期设计和可复用的 Schema Diff 思路。
 > 建档时间：2026-09-26  
 > 当前协议：`protocolVersion: 1`  
 > 目标协议：`protocolVersion: 2`
@@ -19,7 +19,7 @@
 - [topology-v1.md](./topology-v1.md)：第一版容器、网络、路由、数据流和未来拆分边界。
 - [protocol-v2.md](./protocol-v2.md)：Generator、Sandbox、Runtime SDK 和 Data Gateway 的协议约定。
 - [dg-0.2-foundation.md](./dg-0.2-foundation.md)：已实现的数据表、Manifest 规则、Schema Diff 和只读 DRAFT API。
-- [development-plan.md](./development-plan.md)：实施顺序、预计时间、验收条件和风险控制。
+- [development-plan.md](./development-plan.md)：以业务闭环为单位的产品版本路线、下一迭代和验收条件。
 - [CHANGELOG.md](./CHANGELOG.md)：方案与开发版本的时间记录。
 
 ## 与现有系统的关系
@@ -31,7 +31,7 @@
 - Generator 与 Sandbox 的 `protocolVersion: 1`。
 - PostgreSQL 持久化平台数据。
 
-本阶段新增：
+已建立的数据基础：
 
 ```text
 Project
@@ -42,7 +42,7 @@ Project
 └── Deployment            代码版本与数据结构版本的发布绑定
 ```
 
-## 第一阶段范围
+## 原计划范围（不再执行）
 
 包括：
 

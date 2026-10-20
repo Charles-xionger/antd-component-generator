@@ -22,12 +22,22 @@ export async function POST(
     where: {
       id: deploymentId,
       projectId,
-      buildPath: { not: null },
+      OR: [{ buildPath: { not: null } }, { runtimeType: "GO", imageRef: { not: null } }],
       status: { in: ["ACTIVE", "SUPERSEDED", "DISABLED"] },
     },
   });
   if (!deployment) {
     return Response.json({ error: "Deployment not found" }, { status: 404 });
+  }
+
+  if (deployment.runtimeType === "GO") {
+    const replacement = await prisma.deployment.create({
+      data: { projectId, artifactVersionId: deployment.artifactVersionId, status: "BUILDING", runtimeType: "GO" },
+    });
+    const job = await prisma.buildJob.create({
+      data: { type: "PUBLISH", projectId, artifactVersionId: deployment.artifactVersionId, deploymentId: replacement.id },
+    });
+    return Response.json({ success: true, job, publishedUrl: `https://${getPublishedHostname(project.slug)}` }, { status: 202 });
   }
 
   await prisma.$transaction(async (tx) => {

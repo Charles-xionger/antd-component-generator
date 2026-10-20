@@ -109,6 +109,9 @@ export function HomeClient({ user, initialProjectId }: HomeClientProps) {
     message: string,
     images?: { dataUrl: string; mime_type: string }[],
   ) => {
+    // 首页首条需求需要先创建项目。立即展示意图识别状态，避免在项目
+    // 创建和页面切换完成前出现没有任何反馈的空白窗口。
+    useGenerationStore.getState().startThinking();
     try {
       const response = await fetch("/api/projects", {
         method: "POST",
@@ -130,9 +133,13 @@ export function HomeClient({ user, initialProjectId }: HomeClientProps) {
       setShowHomeLanding(false);
       setInitialMessage(message);
       setInitialImages(images);
-      router.push(`/projects/${project.id}`);
+      // 首次需求已经在当前 HomeClient 中启动。使用原生 History API 更新
+      // 地址可保留当前组件实例，避免 App Router 导航重挂载后把正在接收
+      // 流式回复的 useChat 实例丢弃。刷新/分享地址仍会进入项目页路由。
+      window.history.pushState(null, "", `/projects/${project.id}`);
     } catch (error) {
       console.error("创建项目失败:", error);
+      useGenerationStore.getState().fail("创建项目失败，请稍后重试");
       toast.error("创建项目失败，请稍后重试");
     }
   };

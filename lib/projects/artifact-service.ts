@@ -10,6 +10,11 @@ export async function saveProjectArtifactVersion(input: {
   files: ArtifactFileInput[];
   generationRequestId?: string;
   description?: string;
+  requirementSpec?: unknown;
+  appBlueprint?: unknown;
+  runtimeManifest?: unknown;
+  runtimeVersion?: string;
+  completeSnapshot?: boolean;
 }) {
   const { projectId, files, generationRequestId, description } = input;
 
@@ -60,7 +65,7 @@ export async function saveProjectArtifactVersion(input: {
 
         const previous = artifact.versions[0];
         const merged = new Map(
-          (previous?.files || []).map((file) => [file.path, file.content]),
+          (input.completeSnapshot ? [] : previous?.files || []).map((file) => [file.path, file.content]),
         );
         for (const file of files) merged.set(file.path, file.content);
 
@@ -73,6 +78,11 @@ export async function saveProjectArtifactVersion(input: {
             description:
               description ||
               (versionNumber === 1 ? "初始版本" : `项目版本 ${versionNumber}`),
+            requirementSpec: input.requirementSpec as never,
+            appBlueprint: input.appBlueprint as never,
+            runtimeManifest: input.runtimeManifest as never,
+            runtimeVersion: input.runtimeVersion,
+            fileManifest: Array.from(merged.keys()) as never,
             files: {
               create: Array.from(merged, ([path, content]) => ({ path, content })),
             },

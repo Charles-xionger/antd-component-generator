@@ -5,30 +5,32 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  schemas  = ["platform", "public"]
 }
 
 // ===== Auth.js 认证表 =====
 model User {
-  id                  String               @id @default(uuid())
-  name                String?
-  email               String?              @unique
-  emailVerified       DateTime?
-  image               String?
-  accounts            Account[]
-  sessions            Session[]
-  threads             Thread[] // 用户的所有会话
-  projects            Project[]
-  createdDataRecords  DataRecord[]         @relation("DataRecordCreatedBy")
-  updatedDataRecords  DataRecord[]         @relation("DataRecordUpdatedBy")
-  dataRecordRevisions DataRecordRevision[]
+  id            String    @id @default(uuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+  threads       Thread[] // 用户的所有会话
+  projects      Project[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@schema("platform")
 }
 
 enum ProjectStatus {
   ACTIVE
   ARCHIVED
+
+  @@schema("platform")
 }
 
 enum DeploymentStatus {
@@ -37,31 +39,36 @@ enum DeploymentStatus {
   FAILED
   SUPERSEDED
   DISABLED
+
+  @@schema("platform")
 }
 
-enum DataEnvironment {
-  DRAFT
-  PRODUCTION
+enum RuntimeType {
+  STATIC
+  GO
+
+  @@schema("platform")
 }
 
-enum DataSchemaStatus {
-  DRAFT
-  ACTIVE
-  SUPERSEDED
+enum BuildJobType {
+  FULLSTACK_PREVIEW
+  PUBLISH
+  UNPUBLISH
+
+  @@schema("platform")
 }
 
-enum DataMigrationStatus {
-  PENDING
-  APPLYING
+enum BuildJobStatus {
+  QUEUED
+  BUILDING
+  MIGRATING
+  TESTING
+  STARTING
+  VERIFYING
   SUCCEEDED
   FAILED
-}
 
-enum DataRecordOperation {
-  CREATE
-  UPDATE
-  DELETE
-  RESTORE
+  @@schema("platform")
 }
 
 model Project {
@@ -75,17 +82,16 @@ model Project {
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
-  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   thread           Thread?
   artifact         Artifact?
-  deployments      Deployment[]     @relation("ProjectDeployments")
-  activeDeployment Deployment?      @relation("ActiveDeployment", fields: [activeDeploymentId], references: [id], onDelete: SetNull)
-  dataCollections  DataCollection[]
-  dataRecords      DataRecord[]
-  dataMigrations   DataMigration[]
+  deployments      Deployment[] @relation("ProjectDeployments")
+  activeDeployment Deployment?  @relation("ActiveDeployment", fields: [activeDeploymentId], references: [id], onDelete: SetNull)
+  buildJobs        BuildJob[]
 
   @@index([userId, updatedAt])
   @@index([status, updatedAt])
+  @@schema("platform")
 }
 
 model Account {
@@ -105,6 +111,7 @@ model Account {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
+  @@schema("platform")
 }
 
 model Session {
@@ -113,6 +120,8 @@ model Session {
   userId       String
   expires      DateTime
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@schema("platform")
 }
 
 model VerificationToken {
@@ -121,6 +130,7 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+  @@schema("platform")
 }
 
 // ===== 应用业务表 =====
@@ -139,6 +149,7 @@ model Thread {
 
   @@index([userId])
   @@index([projectId])
+  @@schema("platform")
 }
 
 model Artifact {
@@ -148,6 +159,8 @@ model Artifact {
   updatedAt DateTime          @updatedAt
   project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   versions  ArtifactVersion[]
+
+  @@schema("platform")
 }
 
 model ArtifactVersion {
@@ -157,12 +170,19 @@ model ArtifactVersion {
   description         String?
   generationRequestId String?      @unique
   createdAt           DateTime     @default(now())
+  requirementSpec     Json?
+  appBlueprint        Json?
+  runtimeManifest     Json?
+  runtimeVersion      String?
+  fileManifest        Json?
   artifact            Artifact     @relation(fields: [artifactId], references: [id], onDelete: Cascade)
   files               File[]
   shares              Share[] // 分享记录
   deployments         Deployment[]
+  buildJobs           BuildJob[]
 
   @@unique([artifactId, versionNumber])
+  @@schema("platform")
 }
 
 model Deployment {
@@ -174,110 +194,48 @@ model Deployment {
   errorMessage      String?          @db.Text
   createdAt         DateTime         @default(now())
   activatedAt       DateTime?
+  runtimeType       RuntimeType      @default(STATIC)
+  imageRef          String?
+  migrationVersion  String?
+  verification      Json?
+  endpoint          String?
 
   project          Project         @relation("ProjectDeployments", fields: [projectId], references: [id], onDelete: Cascade)
   artifactVersion  ArtifactVersion @relation(fields: [artifactVersionId], references: [id], onDelete: Restrict)
   activeForProject Project?        @relation("ActiveDeployment")
-  dataMigrations   DataMigration[]
+  buildJobs        BuildJob[]
 
   @@index([projectId, createdAt])
   @@index([status, createdAt])
+  @@schema("platform")
 }
 
-model DataCollection {
-  id                       String   @id @default(uuid())
-  projectId                String
-  key                      String
-  name                     String
-  activeDraftSchemaId      String?  @unique
-  activeProductionSchemaId String?  @unique
-  createdAt                DateTime @default(now())
-  updatedAt                DateTime @updatedAt
+model BuildJob {
+  id                String         @id @default(uuid())
+  type              BuildJobType
+  status            BuildJobStatus @default(QUEUED)
+  projectId         String
+  artifactVersionId String
+  deploymentId      String?
+  attempt           Int            @default(0)
+  leaseToken        String?        @unique
+  leaseExpiresAt    DateTime?
+  log               String?        @db.Text
+  errorMessage      String?        @db.Text
+  previewUrl        String?
+  imageRef          String?
+  createdAt         DateTime       @default(now())
+  startedAt         DateTime?
+  completedAt       DateTime?
 
-  project                Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  schemas                DataSchemaVersion[] @relation("CollectionSchemas")
-  activeDraftSchema      DataSchemaVersion?  @relation("ActiveDraftSchema", fields: [activeDraftSchemaId], references: [id], onDelete: SetNull)
-  activeProductionSchema DataSchemaVersion?  @relation("ActiveProductionSchema", fields: [activeProductionSchemaId], references: [id], onDelete: SetNull)
-  records                DataRecord[]
+  project         Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  artifactVersion ArtifactVersion @relation(fields: [artifactVersionId], references: [id], onDelete: Cascade)
+  deployment      Deployment?     @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
 
-  @@unique([projectId, key])
-  @@index([projectId, updatedAt])
-}
-
-model DataSchemaVersion {
-  id            String           @id @default(uuid())
-  collectionId  String
-  versionNumber Int
-  schema        Json
-  status        DataSchemaStatus @default(DRAFT)
-  createdAt     DateTime         @default(now())
-  activatedAt   DateTime?
-
-  collection              DataCollection  @relation("CollectionSchemas", fields: [collectionId], references: [id], onDelete: Cascade)
-  draftForCollection      DataCollection? @relation("ActiveDraftSchema")
-  productionForCollection DataCollection? @relation("ActiveProductionSchema")
-
-  @@unique([collectionId, versionNumber])
-  @@index([collectionId, status, createdAt])
-}
-
-model DataRecord {
-  id            String          @id @default(uuid())
-  projectId     String
-  collectionId  String
-  environment   DataEnvironment
-  data          Json
-  recordVersion Int             @default(1)
-  createdById   String?
-  updatedById   String?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  deletedAt     DateTime?
-
-  project    Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  collection DataCollection       @relation(fields: [collectionId], references: [id], onDelete: Cascade)
-  createdBy  User?                @relation("DataRecordCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy  User?                @relation("DataRecordUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
-  revisions  DataRecordRevision[]
-
-  @@index([projectId, collectionId, environment, deletedAt, createdAt])
-  @@index([projectId, collectionId, environment, updatedAt])
-}
-
-model DataRecordRevision {
-  id         String              @id @default(uuid())
-  recordId   String
-  operation  DataRecordOperation
-  beforeData Json?
-  afterData  Json?
-  actorId    String?
-  createdAt  DateTime            @default(now())
-
-  record DataRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
-  actor  User?      @relation(fields: [actorId], references: [id], onDelete: SetNull)
-
-  @@index([recordId, createdAt])
-  @@index([actorId, createdAt])
-}
-
-model DataMigration {
-  id                   String              @id @default(uuid())
-  projectId            String
-  deploymentId         String?
-  fromSchemaVersionIds Json
-  toSchemaVersionIds   Json
-  changes              Json
-  status               DataMigrationStatus @default(PENDING)
-  errorMessage         String?             @db.Text
-  createdAt            DateTime            @default(now())
-  completedAt          DateTime?
-
-  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  deployment Deployment? @relation(fields: [deploymentId], references: [id], onDelete: SetNull)
-
-  @@index([projectId, createdAt])
-  @@index([deploymentId])
   @@index([status, createdAt])
+  @@index([projectId, createdAt])
+  @@index([artifactVersionId, type, status])
+  @@schema("platform")
 }
 
 model File {
@@ -288,6 +246,7 @@ model File {
   artifactVersion   ArtifactVersion @relation(fields: [artifactVersionId], references: [id], onDelete: Cascade)
 
   @@unique([artifactVersionId, path])
+  @@schema("platform")
 }
 
 // 分享表
@@ -299,6 +258,7 @@ model Share {
   createdAt         DateTime        @default(now())
 
   @@index([shareCode])
+  @@schema("platform")
 }
 
 /// MCP 服务器配置表
@@ -310,6 +270,8 @@ model MCPConfig {
   enabled     Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@schema("platform")
 }
 
 model checkpoint_blobs {
@@ -321,10 +283,13 @@ model checkpoint_blobs {
   blob          Bytes?
 
   @@id([thread_id, checkpoint_ns, channel, version])
+  @@schema("public")
 }
 
 model checkpoint_migrations {
   v Int @id
+
+  @@schema("public")
 }
 
 model checkpoint_writes {
@@ -338,6 +303,7 @@ model checkpoint_writes {
   blob          Bytes
 
   @@id([thread_id, checkpoint_ns, checkpoint_id, task_id, idx])
+  @@schema("public")
 }
 
 model checkpoints {
@@ -350,4 +316,5 @@ model checkpoints {
   metadata             Json    @default("{}")
 
   @@id([thread_id, checkpoint_ns, checkpoint_id])
+  @@schema("public")
 }

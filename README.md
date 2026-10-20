@@ -1,637 +1,306 @@
-# 🎨 AI Component Generator
+# Prompt Web
 
-基于 AI 的 React 组件智能生成平台，通过自然语言描述即可生成完整的前端代码，支持 Ant Design、Recharts 等主流组件库。
+Prompt Web 是一个从自然语言需求到可分享 Web 应用的 AI 构建与发布产品。
 
-> **快速开始**: 5 分钟即可完成本地部署 👉 [跳转到安装指南](#-快速开始)
+用户描述想解决的业务问题，系统负责理解需求、规划页面与数据、生成前后端、运行验证，并把通过检查的版本发布为一个可以交给他人使用的 URL。
 
----
+> 产品目标不是展示“AI 会写多少代码”，而是让第一次使用的人在几分钟内完成：提出想法 → 得到目标页面 → 修改 → 发布 → 分享使用。
 
-## ✨ 核心特性
+## 当前状态
 
-### 🤖 AI 驱动的代码生成
+项目已经具备端到端技术主链路，正在从开发者原型迭代为可稳定演示的成熟产品。
 
-- **双阶段生成**：Architect（架构设计） → Coder（代码实现）
-- **多模型支持**：Qwen、Claude、Gemini 等主流 LLM
-- **智能理解**：支持文字描述 + 图片识别，准确理解设计意图
-- **实时预览**：边生成边预览，所见即所得
+已具备：
 
-### 🎯 技术栈
+- 自然语言与图片输入，多模型支持。
+- RequirementSpec → AppBlueprint → 代码生成的结构化生成流程。
+- React 页面、Go 业务服务、PostgreSQL 关系表和向前兼容 SQL Migration 生成。
+- 浏览器快速预览，以及真实容器中的全栈预览。
+- ArtifactVersion 不可变版本、项目历史和版本切换。
+- 构建、Migration、健康检查与 API acceptance 场景验证。
+- DRAFT / PRODUCTION 数据隔离。
+- 发布、固定访问地址、重新发布、下线与版本回滚。
 
-- **前端框架**：Next.js 16 + React 19 + TypeScript
-- **AI 框架**：LangGraph（Architect → Coder 工作流）
-- **UI 组件**：Ant Design + Tailwind CSS + Shadcn/ui
-- **状态管理**：Zustand
-- **数据库**：PostgreSQL (Supabase) + Prisma ORM
-- **图表库**：Recharts
-- **沙箱环境**：独立 Vite 应用 + esbuild-wasm（实时代码执行）
+正在重点补齐：
 
-### 🚀 功能亮点
+- 一致、现代的主工作区 UI/UX。
+- 预览优先的生成、修改和发布旅程。
+- 局部选择修改、版本差异和一键撤销。
+- 浏览器 E2E、UI 验收与可重复的现场演示基线。
+- 更清晰的失败恢复、发布状态和上线反馈。
 
-#### 1. 智能架构设计
+详细目标见 [产品目标与成熟度标准](docs/product-goals.md)，演示范围见 [目标案例](docs/demo-cases.md)。
 
-- 自动分析需求并生成文件结构
-- 选择合适的 UI 组件和技术栈
-- 遵循最佳实践和代码规范
+## 产品定位
 
-#### 2. 实时代码预览
+Prompt Web 不以“通用能力超过所有成熟 AI 建站产品”为目标。当前聚焦企业内部轻应用和数据型工具，例如项目台账、运营看板、客户跟进、内容生产管理。
 
-- 浏览器沙箱实时渲染
-- 多版本管理和切换
-- 代码编辑器集成
+它重点验证三个价值：
 
-#### 3. 会话管理
+1. **从业务语言到可用结果**：用户不需要理解项目脚手架、数据库迁移或部署配置。
+2. **生成结果可以继续使用**：页面连接真实数据，发布后拥有稳定 URL，并支持后续修改和回滚。
+3. **AI 过程可以被理解和控制**：复杂任务有计划、有状态、有检查点，失败时能够定位和恢复。
 
-- ✅ **智能标题生成**：根据对话内容自动生成有意义的会话标题
-- 多会话并行
-- 收藏和重命名
-- 完整的历史记录
+现阶段的差异化不来自模型数量或 Agent 数量，而来自对一个完整交付闭环的打磨：
 
-#### 4. 交互优化
-
-- ✅ **停止生成**：代码生成过程中可随时停止
-- 图片上传识别
-- 实时生成进度
-- 流式响应
-
-#### 5. 代码分享
-
-- 一键生成分享链接
-- 独立的预览页面
-- 代码查看和下载
-
-## 🛠️ 技术架构
-
-### LangGraph 工作流
-
-```
-用户输入 → Architect (架构设计)
-              ↓
-          生成 <architectPlan>
-              ↓
-          Coder (代码实现)
-              ↓
-          生成 <boltArtifact>
-              ↓
-          保存到数据库 + 沙箱渲染
+```text
+描述目标
+  → 确认页面 / 数据 / 操作
+  → 实时看到生成结果
+  → 对目标区域进行修改
+  → 自动检查可用性
+  → 发布为稳定 URL
+  → 分享给真实用户
 ```
 
-### 数据库设计
+## 现场演示标准
 
-```prisma
-- User: 用户信息
-- Account: OAuth 账号
-- Thread: 会话（自动生成标题）
-- Artifact: 代码版本
-- ArtifactVersion: 版本历史
-- File: 文件内容
-- Share: 分享记录
+项目达到“可演示”必须同时满足：
+
+- 新用户不依赖讲解，可以识别入口并开始生成。
+- 一个黄金案例可以在 5 分钟左右完成生成、局部修改和发布。
+- 页面、数据、主要交互和移动端布局符合案例验收标准。
+- 生成过程使用用户语言展示“理解、设计、构建、检查”，不暴露内部消息噪音。
+- 发布后立即得到可复制、可打开的稳定 URL。
+- 任一步骤失败都有明确原因、重试入口或安全回退版本。
+- 黄金案例连续 10 次无人为修复走通，才进入现场演示版本。
+
+## 黄金演示案例
+
+第一优先级案例是“短剧分镜产能管理台”。仓库已有对应全栈验收 fixture，可复用人员、项目、分镜任务、工时和产能统计数据，最适合先建立稳定演示基线。
+
+演示过程：
+
+1. 从案例库选择“短剧分镜产能管理台”。
+2. 补充一句目标，例如“突出本周延期任务和团队产能差异”。
+3. 确认系统整理出的页面、数据与操作 Brief。
+4. 在预览中查看统计卡、趋势图和任务表。
+5. 选中统计卡，要求改成周趋势并突出异常。
+6. 切换移动端预览并打开真实全栈版本。
+7. 检查通过后发布，复制 URL，在无登录窗口打开。
+
+后续案例包括客户跟进台账和活动报名管理，完整范围与验收条件见 [目标案例](docs/demo-cases.md)。
+
+## AI Agent 设计
+
+Prompt Web 使用一个可持久化、可使用工具的 Web 应用 Agent。`Think`、`Explore`、`Plan`、`Execute` 和 `Verify` 是同一循环的状态，不强制用户依次经过多个角色式 Agent。
+
+当前核心链路：
+
+```text
+用户输入
+  → Intent Router
+  → RequirementSpec
+  → AppBlueprint
+  → React + Go + SQL + Acceptance
+  → Artifact Validator
+  → Browser Sandbox
+  → Full-stack Build Job
+  → DRAFT Preview + Acceptance
+  → PRODUCTION Deployment
 ```
 
-## 📦 快速开始
+Agent 相关的核心学习与面试主题：
 
-### 前置要求
+- 意图路由与任务分解。
+- Structured Output 与契约约束。
+- Tool Use 与真实工作区执行。
+- 状态持久化、Checkpoint、中断与恢复。
+- 自动验证、Evidence 和完成条件。
+- Human-in-the-loop 与发布边界。
+- Agent 可观测性、失败分类和重试策略。
 
-确保你的开发环境满足以下条件：
+架构方向见项目根目录的 [`AGENT.md`](../AGENT.md)。
 
-- **Node.js** >= 20.19.0（Vite 7 的最低要求，推荐 Node.js 22）
-- **pnpm** >= 9.0.0
-- **PostgreSQL** >= 14 (本地安装或使用 [Supabase](https://supabase.com/) 云数据库)
-- **GitHub OAuth App**（当前登录页只提供 GitHub 登录）
-- **antd-sandbox**（独立运行在 `http://localhost:5174`）
-- **AI API Key** (至少需要一个)：
-  - 阿里云 DashScope：用于界面默认的 Qwen 模型
-  - [302.AI](https://302.ai)：用于 Claude 模型
-  - [Google Gemini](https://aistudio.google.com/app/apikey)
+## 系统架构
 
----
+```text
+Next.js Product UI
+├── Chat / Plan / Progress
+├── Canvas Preview / Code / Versions
+└── Publish / Deployment Center
 
-### 第一步：克隆项目
+LangGraph Agent
+├── intentRouter
+├── businessAnalyst
+├── solutionArchitect
+├── coder
+└── artifactValidator
+
+Preview & Runtime
+├── Browser Sandbox: Vite + esbuild-wasm
+└── Go Full-stack Runtime
+    ├── React static assets
+    ├── Go API
+    ├── PostgreSQL Schema
+    ├── SQL Migration
+    └── Acceptance scenarios
+
+Delivery
+├── Build Worker
+├── Docker Socket Proxy
+├── Traefik routing
+└── ArtifactVersion / BuildJob / Deployment
+```
+
+Go 运行时细节见 [Go 全栈轻应用运行时](docs/go-fullstack-runtime.md)。
+
+## 技术栈
+
+- Next.js 16、React 19、TypeScript
+- LangGraph、Qwen / Claude / Gemini
+- Ant Design、Tailwind CSS、shadcn/ui、Recharts
+- PostgreSQL、Prisma、LangGraph Postgres Checkpoint
+- 独立 Vite Sandbox、esbuild-wasm
+- Go 1.24、pgx、Docker、Traefik
+- Zustand、TanStack Query、Zod
+
+## 本地启动
+
+### 环境要求
+
+- Node.js >= 20.19.0，推荐 Node.js 22
+- pnpm >= 9
+- PostgreSQL >= 14
+- GitHub OAuth App
+- 至少一个可用的模型 API Key
+- 独立仓库 `antd-sandbox`
+
+### 1. 安装依赖
 
 ```bash
-git clone https://github.com/Charles-xionger/antd-component-generator.git
-git clone https://github.com/Charles-xionger/antd-sandbox.git
-```
-
----
-
-### 第二步：安装依赖
-
-```bash
-# 主应用
 cd antd-component-generator
 pnpm install --frozen-lockfile
 
-# 独立沙箱
 cd ../antd-sandbox
 pnpm install --frozen-lockfile
 ```
 
----
-
-### 第三步：配置环境变量
-
-1. **复制环境变量模板**
+### 2. 配置环境变量
 
 ```bash
 cd ../antd-component-generator
 cp .env.example .env
 ```
 
-2. **编辑 `.env` 文件**，填写以下必需配置：
+至少填写：
 
-```bash
-# ==========================================
-# 【必需】数据库配置
-# ==========================================
-# 本地 PostgreSQL (推荐用 Docker)
+```dotenv
 DATABASE_URL="postgresql://postgres:password@localhost:5432/ai_generator"
-
-# 或使用 Supabase (免费 500MB)
-# DATABASE_URL="postgresql://postgres.[项目ID]:[密码]@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres?pgbouncer=true"
-# DIRECT_URL="postgresql://postgres.[项目ID]:[密码]@db.[项目ID].supabase.co:5432/postgres"
-
-# ==========================================
-# 【必需】Auth.js 配置
-# ==========================================
-# 生成密钥：openssl rand -base64 32
-AUTH_SECRET="your-random-secret-here-replace-this"
+AUTH_SECRET="replace-with-a-random-secret"
 NEXTAUTH_URL="http://localhost:3000"
+GITHUB_ID="your-github-oauth-app-client-id"
+GITHUB_SECRET="your-github-oauth-app-client-secret"
 
-# ==========================================
-# 【必需】GitHub OAuth 登录
-# ==========================================
-# 在 https://github.com/settings/developers 创建 OAuth App
-# Callback URL: http://localhost:3000/api/auth/callback/github
-GITHUB_ID="your-github-oauth-client-id"
-GITHUB_SECRET="your-github-oauth-client-secret"
-
-# ==========================================
-# 【必需】AI 模型配置 (至少配置一个)
-# ==========================================
-
-# 选项 1: Qwen（界面默认模型）
+# 至少配置一组模型
 ALIYUN_API_KEY="your-dashscope-api-key"
-ALIYUN_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
-
-# 选项 2: Claude（通过 302.AI）
-# AI302_API_KEY="sk-xxx"
-# AI302_BASE_URL="https://api.302.ai/v1"
-
-# 选项 3: Google Gemini
-# GOOGLE_API_KEY="your-google-api-key"
-# GOOGLE_MODEL_NAME="gemini-3-pro-preview"
+ALIYUN_BASE_URL="https://your-workspace-id.your-region.maas.aliyuncs.com/compatible-mode/v1"
 ```
 
-完整字段和注意事项见 [`.env.example`](./.env.example)。本地使用默认端口时无需设置
-`NEXT_PUBLIC_SANDBOX_URL`；主应用会自动访问 `http://localhost:5174/sandbox.html`。
+完整配置及生产运行时变量见 [`.env.example`](.env.example)。
 
-> 💡 **提示**: 如果使用 Docker 启动本地 PostgreSQL：
->
-> ```bash
-> docker run -d \
->   --name antd-generator-postgres \
->   -e POSTGRES_PASSWORD=password \
->   -e POSTGRES_DB=ai_generator \
->   -p 5432:5432 \
->   -v antd-generator-postgres-data:/var/lib/postgresql/data \
->   postgres:15
-> ```
-
----
-
-### 第四步：初始化数据库
+### 3. 初始化数据库
 
 ```bash
-# 在 antd-component-generator 目录执行
 pnpm prisma:generate
-
-# 运行数据库迁移（创建表结构）
-pnpm prisma:migrate:dev
-
-# (可选) 打开 Prisma Studio 查看数据库
-pnpm prisma studio
-```
-
----
-
-### 第五步：启动两个服务
-
-```bash
-# 终端 1：沙箱，运行在 http://localhost:5174
-cd antd-sandbox
-pnpm dev
-
-# 终端 2：主应用，运行在 http://localhost:3000
-cd antd-component-generator
-pnpm dev
-```
-
-打开浏览器访问 **[http://localhost:3000](http://localhost:3000)** 🎉
-
----
-
-### 验证安装
-
-如果一切正常，你应该能看到：
-
-1. ✅ 登录页面正常显示
-2. ✅ GitHub OAuth 登录成功
-3. ✅ 可以创建新会话
-4. ✅ 输入消息后 AI 开始生成代码
-5. ✅ 右侧沙箱实时预览代码效果
-
----
-
-### 常见问题
-
-<details>
-<summary><b>❌ 数据库连接失败</b></summary>
-
-**错误信息**: `Can't reach database server at localhost:5432`
-
-**解决方案**:
-
-1. 确认 PostgreSQL 已启动：`pg_isready -h localhost -p 5432`
-2. 检查 `DATABASE_URL` 格式是否正确
-3. 确认用户名、密码、数据库名正确
-</details>
-
-<details>
-<summary><b>❌ Prisma 迁移失败</b></summary>
-
-**解决方案**:
-
-```bash
-# 重置数据库（会删除所有数据）
-pnpm prisma migrate reset
-
-# 重新运行迁移
 pnpm prisma:migrate:dev
 ```
 
-</details>
-
-<details>
-<summary><b>❌ AI 模型无响应</b></summary>
-
-**检查清单**:
-
-1. 确认 API Key 已正确配置在 `.env` 文件中
-2. 检查 API Key 是否有效（访问对应平台确认）
-3. 查看终端日志是否有错误信息
-4. 确认网络可以访问对应的 API 端点
-5. 默认 Qwen 必须配置 `ALIYUN_API_KEY`；`AI302_API_KEY` 只用于 Claude 路径
-</details>
-
-<details>
-<summary><b>❌ 预览区域一直加载</b></summary>
-
-**解决方案**:
-
-1. 确认 `antd-sandbox` 已在 `http://localhost:5174` 启动
-2. 访问 `http://localhost:5174/sandbox.html`，确认页面可加载
-3. 本地运行时删除错误的 `NEXT_PUBLIC_SANDBOX_URL`，使用代码默认值
-</details>
-
-<details>
-<summary><b>⚠️ 端口 3000 被占用</b></summary>
-
-**解决方案**:
+### 4. 启动预览沙箱
 
 ```bash
-# 使用其他端口
-PORT=3001 pnpm dev
+cd ../antd-sandbox
+pnpm dev
 ```
 
-</details>
+默认地址为 `http://localhost:5174/sandbox.html`。
 
----
+### 5. 启动主应用
 
-### 生产环境部署
+```bash
+cd ../antd-component-generator
+pnpm dev
+```
 
-主应用与沙箱是两个独立 Web 服务，生产环境需要分别构建和部署。当前
-`NEXT_PUBLIC_SANDBOX_URL` 同时用于 iframe 地址和 `postMessage` 的目标 origin，正式跨域部署前
-应先拆分成两个环境变量，并限制消息来源。
+访问 `http://localhost:3000`。
 
-推荐部署平台：
+### 6. 启动全栈构建 Worker（可选）
 
-- **Vercel** (推荐，Next.js 官方支持) - [部署指南](https://vercel.com/docs)
-- **Netlify**
-- **Railway**
-- **自建服务器** (需配置 Node.js 环境)
+需要验证 Go 全栈预览与发布时，请先准备 Docker、运行时网络及数据库权限，再执行：
 
-**环境变量配置**：
+```bash
+pnpm worker:build
+```
 
-- 在部署平台的环境变量设置中添加 `.env` 中的所有配置
-- 将 `NEXTAUTH_URL` 改为你的域名（如 `https://your-domain.com`）
-- 生产环境数据库建议使用 Supabase 或其他云数据库
+生产拓扑和变量以 [Go 全栈轻应用运行时](docs/go-fullstack-runtime.md) 为准。
 
-## 🎯 使用指南
+## 验证
 
-### 基础使用
+```bash
+# 静态检查
+pnpm lint
+pnpm build
 
-1. **登录系统**：支持 GitHub OAuth
-2. **创建会话**：点击"新建会话"
-3. **描述需求**：输入自然语言描述或上传设计图
-4. **生成代码**：AI 自动生成完整的 React 组件
-5. **实时预览**：在右侧面板查看渲染效果
-6. **代码编辑**：支持在线编辑和调试
-7. **版本管理**：查看和切换不同版本
-8. **分享链接**：一键分享给他人
+# 应用契约、Agent 产品节点、运行时与发布相关测试
+pnpm test:app-runtime
 
-### 高级功能
+# 启动独立 PostgreSQL 与 Go 应用容器，执行真实 API 场景
+pnpm test:fullstack-e2e
+```
 
-- **停止生成**：生成过程中点击红色方块停止
-- **图片识别**：上传 UI 设计图，AI 自动识别布局
-- **会话标题**：首次对话后自动生成智能标题
-- **多模型切换**：选择不同的 AI 模型
-- **代码下载**：导出完整项目代码
+黄金案例的浏览器 E2E 与 UI 验收仍属于产品化阶段的必做项，不能用 API 测试代替。
 
-## 📚 项目结构
+## 目录结构
 
-````
+```text
 antd-component-generator/
-├── app/                       # Next.js App Router
-│   ├── api/                   # API Routes
-│   │   ├── agent/            # LangGraph Agent 流式响应
-│   │   │   ├── stream/       # 主 Agent 入口
-│   │   │   └── history/      # 会话历史
-│   │   ├── artifact/         # 代码版本管理
-│   │   │   └── save/         # 保存 Artifact
-│   │   ├── mcp/              # MCP 服务器配置管理
-│   │   │   └── configs/      # CRUD 接口
-│   │   └── share/            # 分享功能
-│   ├── page.tsx              # 首页
-│   └── layout.tsx            # 布局
-│
-├── components/                # React 组件
-│   ├── unified-chat.tsx      # 统一聊天界面（核心组件）
-│   ├── chat/                 # 聊天相关组件
-│   │   ├── input-bar.tsx     # 消息输入框
-│   │   ├── message-item.tsx  # 消息展示
-│   │   └── tool-call-card.tsx # 工具调用卡片
-│   ├── canvas/               # 代码预览面板
-│   │   ├── canvas-panel.tsx  # Canvas 主面板
-│   │   ├── code-panel.tsx    # 代码编辑器
-│   │   └── preview-panel.tsx # 实时预览
-│   ├── mcp/                  # MCP 配置管理
-│   │   └── config-panel.tsx  # MCP 配置面板
-│   └── ui/                   # UI 基础组件
-│
-├── hooks/                     # React Hooks
-│   ├── use-chat.ts           # 聊天逻辑（流式响应、停止生成）
-1. 安装对应的 LangChain 集成包：
-
-```bash
-pnpm add @langchain/your-provider
-````
-
-2. 编辑 `lib/agent/index.ts`，在 `baseModelConfig` 中添加模型配置：
-
-```typescript
-const baseModelConfig = {
-  modelName: process.env.MODEL_NAME || "your-model-name",
-  apiKey: process.env.YOUR_API_KEY,
-  temperature: 0.7,
-  streaming: true,
-};
+├── app/                    # Next.js 页面、API 和项目路由
+├── components/
+│   ├── chat/               # 对话、进度和结构化消息
+│   ├── canvas/             # 预览、代码、版本与发布工具栏
+│   └── ui/                 # 基础 UI 组件
+├── hooks/                  # Chat、Canvas、Sandbox 等客户端逻辑
+├── lib/
+│   ├── agent/              # LangGraph 与产品节点
+│   ├── build-jobs/         # 构建 / 发布 Worker
+│   ├── go-runtime/         # Go 应用生成、验证与构建
+│   └── data-gateway/       # 历史协议与可复用 Schema 能力
+├── prisma/                 # 平台数据库模型与迁移
+├── test/                   # 单元测试、fixture 与全栈 E2E
+└── docs/                   # 产品、架构、部署和演示文档
 ```
 
-3. 如果需要自定义 LLM 实例，修改 `createLLM` 函数。
+## 产品迭代顺序
 
----
+### P0：稳定演示闭环
 
-### 自定义 Prompt
+- 首页定位、案例入口和统一视觉语言。
+- 单一主工作区：计划、预览、修改、版本和发布。
+- 用户可理解的 Agent 进度与失败恢复。
+- 黄金案例固定数据、验收脚本和浏览器 E2E。
+- 发布成功页与无登录访问验证。
 
-编辑 `lib/agent/prompts.ts` 文件：
+### P1：提高目标页面命中率
 
-```typescript
-// Architect Prompt - 负责架构设计
-export const ARCHITECT_PROMPT = `你是一位精通 React 的高级前端架构师...`;
+- 可视化 Brief 与设计预设。
+- 预览内选择组件并局部修改。
+- 版本 Diff、Checkpoint 和一键撤销。
+- 参考图输入、响应式与关键 UI 状态验收。
 
-// Coder Prompt - 负责代码实现
-export const CODER_PROMPT = `你是一位追求极致代码整洁度的高级前端工程师...`;
+### P2：形成可持续使用的产品
 
-// Supervisor Prompt - 负责路由决策
-export const SUPERVISOR_PROMPT = `你需要判断用户请求...`;
-```
+- 项目首页、案例 Gallery 和首次引导。
+- 发布中心、访问状态、错误信息和基础使用指标。
+- 企业组件库、内部 API 与私有化配置。
+- 基于真实反馈持续评估生成质量。
 
-**优化建议**:
+优先级的判断标准只有一个：它是否提高了用户得到目标页面、完成修改、成功发布和让他人真实使用的概率。
 
-- Architect 侧重架构设计、组件选择、文件规划
-- Coder 侧重代码质量、最佳实践、细节实现
-- 添加更多示例可以提高生成质量
+## 相关文档
 
----
-
-### 扩展沙箱依赖
-
-沙箱支持的依赖在 Prompt 中定义。编辑 `lib/agent/prompts.ts`：
-
-```typescript
-**可用的 npm 包**:
-- react, react-dom
-- antd (Ant Design)
-- recharts (图表)
-- lucide-react (图标)
-- date-fns (日期处理)
-// 添加新的依赖...
-```
-
-**注意**: 新增依赖后需要在 Sandpack 配置中添加支持。
-
----
-
-### 集成 MCP (Model Context Protocol)
-
-项目已内置 MCP 支持，可以让 AI 调用外部工具（如绘图、天气查询等）。
-
-**快速开始**:
-
-1. 启动一个 MCP 服务器（如 drawing-server）
-2. 在界面添加 MCP 配置（名称 + URL）
-3. 选择该配置后，AI 自动获取可用工具
-4. 发送消息时 AI 会智能判断是否调用工具
-
-**详细文档**: 查看 [docs/mcp-feature-summary.md](docs/mcp-feature-summary.md)
-
----路线图
-
-### ✅ 已完成
-
-- [x] 会话名称自动生成（基于 LLM）
-- [x] 停止生成功能
-- [x] 多模型支持（Qwen/Claude/Gemini）
-- [x] Recharts 图表库支持
-- [x] Markdown 文档渲染优化（streamdown 库）
-- [x] MCP (Model Context Protocol) 集成
-- [x] 三子图架构（chat/coding/mcp）
-- [x] 流式响应优化
-
-### 🚧 进行中
-
-- [ ] 登录页样式优化，自定义 Logo
-- [ ] 消息输入框支持粘贴图片
-- [ ] 沙箱加载状态优化
-
-### 📅 计划中
-
-**近期计划**:
-
-- [ ] 分享页面时效管理
-- [ ] 更多 Spinner/Skeleton 组件
-- [ ] Prompt 持续优化（中英文生成、准确性）
-- [ ] 消息历史图片预览优化
-- [ ] 代码导出为 CodeSandbox/StackBlitz 项目
-
-**长期计划**指南
-
-我们欢迎任何形式的贡献！
-
-### 提交 Issue
-
-- 🐛 **Bug 报告**: 请详细描述问题和复现步骤
-- 💡 **功能建议**: 说明需求场景和预期效果
-- 📚 **文档改进**: 指出不清楚或错误的地方
-
-### 提交 Pull Request
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
-
-### 开发规范
-
-- 遵循 ESLint 规则
-- 使用 TypeScript 类型定义
-- 添加必要的注释
-- 更新相关文档
-
----
-
-## 📞 联系方式
-
-- **问题反馈**: [GitHub Issues](https://github.com/Charles-xionger/antd-component-generator/issues)
-- **功能建议**: [GitHub Discussions](https://github.com/Charles-xionger/antd-component-generator/discussions)
-
----
-
-## 📄 许可证
-
-本项目基于 [MIT License](LICENSE) 开源。
-
----
-
-## ⭐ Star History
-
-如果这个项目对你有帮助，请给我们一个 Star ⭐️
-
----
-
-**Built with ❤️ using Next.js, LangGraph, and AI**
-
----
-
-## 📖 相关文档
-
-- [MCP 功能文档](docs/mcp-feature-summary.md)
-- [流式架构设计](docs/stream-architecture.md)
-- [数据库迁移指南](docs/database-migration-guide.md)
-- [Canvas 架构设计](docs/Canvas.md)
-
-### 性能优化建议
-
-1. **使用 Gemini Flash 模型**：速度快、成本低
-2. **减少 Prompt 长度**：只包含必要的上下文
-3. **限制消息历史长度**：保留最近 10-20 条消息
-4. **缓存 Artifact**：避免重复生成相同代码
-5. **沙箱懒加载**：首次打开时才渲染 配置
-   ├── tailwind.config.ts # Tailwind CSS 配置
-   └── package.json # 依赖管理
-
-````
-
-**核心文件说明**:
-
-| 文件 | 说明 |
-|------|------|
-| `lib/agent/index.ts` | LangGraph 三子图架构：chat / coding / mcp |
-| `lib/agent/nodes.ts` | Architect（架构设计）和 Coder（代码实现）节点 |
-| `lib/agent/prompts.ts` | AI 的 System Prompt（决定生成质量的关键）|
-| `hooks/use-chat.ts` | 流式响应处理、停止生成、Artifact 检测 |
-| `hooks/use-canvas.ts` | 版本管理、沙箱通信、文件发送 |
-| `components/unified-chat.tsx` | 聊天 + Canvas 的完整界面 |
-
-## 🔧 开发指南
-
-### 添加新的 AI 模型
-
-编辑 `lib/agent/models.ts`：
-
-```typescript
-export function createLLM(modelName: string, config: ModelConfig) {
-  if (modelName.startsWith("your-model")) {
-    return new ChatYourModel({
-      model: modelName,
-      apiKey: process.env.YOUR_API_KEY,
-      temperature: config.temperature,
-    });
-  }
-  // ... 其他模型
-}
-````
-
-### 自定义 Prompt
-
-编辑 `lib/agent/prompts.ts`：
-
-```typescript
-export const ARCHITECT_PROMPT = `你是一位精通 React 的高级前端架构师...`;
-export const CODER_PROMPT = `你是一位追求极致代码整洁度的高级前端工程师...`;
-```
-
-### 扩展沙箱依赖
-
-在 Architect 和 Coder 的 Prompt 中更新可用依赖列表。
-
-## 📝 待办事项
-
-### 高优先级
-
-- [ ] 登录页样式优化，自定义 Logo
-- [ ] 消息输入框支持粘贴图片
-- [ ] 分享页面时效管理
-
-### 中优先级
-
-- [ ] 沙箱加载状态优化
-- [ ] 更多 Spinner/Skeleton 组件
-- [ ] Prompt 持续优化（中英文生成、准确性）
-- [ ] 消息历史图片预览优化
-
-### 低优先级
-
-- [ ] 生产环境沙箱部署方案（沙箱池、多用户隔离）
-- [ ] MCP (Model Context Protocol) 集成
-
-### ✅ 已完成
-
-- [x] 会话名称自动生成（基于 LLM）
-- [x] 停止生成功能
-- [x] 多模型支持（Qwen/Claude/Gemini）
-- [x] Recharts 图表库支持
-- [x] Markdown 文档渲染优化 使用 streamdown 库
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-## 📄 许可
-
-MIT License
-
----
-
-**Built with ❤️ using Next.js, LangGraph, and AI**
+- [产品目标与成熟度标准](docs/product-goals.md)
+- [目标案例与验收条件](docs/demo-cases.md)
+- [Go 全栈轻应用运行时](docs/go-fullstack-runtime.md)
+- [项目发布实现](docs/project-publishing-implementation.md)
+- [Agent UI 架构](docs/codex-style-agent-ui-architecture.md)
+- [安全生产部署](docs/safe-production-deployment.md)

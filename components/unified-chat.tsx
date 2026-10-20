@@ -2,7 +2,6 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Loader2 } from "lucide-react";
 import { SplitPane, Pane } from "react-split-pane";
 import { toast } from "sonner";
 import "react-split-pane/styles.css";
@@ -84,8 +83,10 @@ export function UnifiedChat({
   // Chat hook - 先初始化，回调稍后通过 ref 设置
   const chatCallbacksRef = useRef<{
     onArtifactDetected?: (content: string) => void;
+    onSaved?: () => void;
     onStreamStart?: () => void;
     onStreamComplete?: (content: string) => void;
+    onError?: () => void;
     onTitleUpdate?: (threadId: string, title: string) => void;
   }>({});
 
@@ -96,9 +97,11 @@ export function UnifiedChat({
     model: selectedModel,
     onArtifactDetected: (content) =>
       chatCallbacksRef.current.onArtifactDetected?.(content),
+    onSaved: () => chatCallbacksRef.current.onSaved?.(),
     onStreamStart: () => chatCallbacksRef.current.onStreamStart?.(),
     onStreamComplete: (content) =>
       chatCallbacksRef.current.onStreamComplete?.(content),
+    onError: () => chatCallbacksRef.current.onError?.(),
     onTitleUpdate: (threadId, title) =>
       chatCallbacksRef.current.onTitleUpdate?.(threadId, title),
   });
@@ -108,35 +111,27 @@ export function UnifiedChat({
 
   // 用 ref 跟踪是否已经处理过 initialMessage
   const initialMessageSentRef = useRef(false);
-  const pendingAutoSendRef = useRef(false);
+  const sendInitialMessage = chat.sendMessage;
 
-  // 第一步：接收 initialMessage 和 initialImages，设置输入框和图片
+  // 切换项目时清理上一项目的进度。该 effect 必须先于首条消息发送，
+  // 否则空历史记录的异步渲染会把刚启动的意图识别状态重置掉。
   useEffect(() => {
-    if (initialMessage && !initialMessageSentRef.current) {
+    useGenerationStore.getState().reset();
+  }, [projectId]);
+
+  // 新项目创建完成后，直接发送首页提交的原始需求。
+  // 不再先写入输入框再依赖延时回调，避免页面切换时回调捕获到旧状态。
+  useEffect(() => {
+    const hasInitialContent =
+      Boolean(initialMessage?.trim()) || Boolean(initialImages?.length);
+    if (hasInitialContent && !initialMessageSentRef.current) {
       initialMessageSentRef.current = true;
-      pendingAutoSendRef.current = true;
-      chat.setInput(initialMessage);
-      // 如果有初始图片，也设置到 chat 中
-      if (initialImages && initialImages.length > 0) {
-        chat.setImages(initialImages);
-      }
+      void sendInitialMessage({
+        message: initialMessage || "",
+        images: initialImages || [],
+      });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialMessage, initialImages]);
-
-  // 第二步：监听 chat.input 变化，当输入框被填充后自动发送
-  useEffect(() => {
-    if (pendingAutoSendRef.current && chat.input && !chat.isLoading) {
-      pendingAutoSendRef.current = false;
-
-      // 短暂延迟确保历史加载完成
-      const timer = setTimeout(() => {
-        chat.sendMessage();
-      }, 1000);
-
-      return () => clearTimeout(timer);
-    }
-  }, [chat.input, chat.isLoading, chat.messages.length, chat.sendMessage]);
+  }, [initialMessage, initialImages, sendInitialMessage]);
 
   // 设置 chat 回调（依赖 canvas）
   useEffect(() => {
@@ -163,66 +158,24 @@ export function UnifiedChat({
         canvas.setIsGenerating(true);
         canvas.setShouldSendToSandbox(false);
       },
-      onStreamComplete: async (content: string) => {
-        // 流式响应完成
-        if (canvas.artifact && canvas.artifact.files.length > 0) {
-          console.log("[UnifiedChat] 代码生成完成，准备保存到后端", {
-            filesCount: canvas.artifact.files.length,
-            contentLength: content.length,
-          });
-
-          // 🛡️ 完整性校验
-          const hasClosingTag = content.includes("</boltArtifact>");
-          const hasEntryFile = canvas.artifact.files.some(
-            (f) =>
-              f.path === "App.tsx" ||
-              f.path === "src/App.tsx" ||
-              f.path.endsWith("/App.tsx"),
-          );
-
-          if (!hasClosingTag) {
-            console.error("[UnifiedChat] ❌ 生成不完整：缺少闭合标签");
-            toast.warning("生成中断，内容不完整");
-            canvas.setIsGenerating(false);
-            return;
-          }
-
-          if (!hasEntryFile) {
-            console.error("[UnifiedChat] ❌ 生成不完整：缺少入口文件 App.tsx");
-            toast.warning("生成结果缺失关键文件，可能无法运行");
-            // 不强制中断，允许尝试加载
-          }
-
-          // 🚀 后端已接管自动保存逻辑 (Server-Side Auto-Save)
-          // 前端只需刷新版本列表即可
-          console.log(
-            "[UnifiedChat] 生成完成，后端应已自动保存，准备刷新版本列表",
-          );
-
-          try {
-            // 短暂延迟确保后端事务完成
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-
-            // 刷新版本列表，获取后端保存的最新版本
-            await canvas.refreshVersionList();
-            console.log("[UnifiedChat] 版本列表刷新完成");
-
-            // 生成完成，禁用 messages 监听（切换为查看历史模式）
-            canvas.setIsGenerating(false);
-
-            // 允许发送到沙箱渲染
-            canvas.setShouldSendToSandbox(true);
-
-            toast.success("代码已生成并保存");
-          } catch (error) {
-            console.error("[UnifiedChat] 刷新版本列表失败:", error);
-            canvas.setIsGenerating(false);
-            toast.error("刷新版本失败，请手动刷新页面");
-          }
-        } else {
-          // 没有代码生成，直接禁用生成模式
+      onSaved: async () => {
+        try {
+          await canvas.refreshVersionList();
+          canvas.setShouldSendToSandbox(true);
+          toast.success("代码已生成、保存并同步预览");
+        } catch (error) {
+          console.error("[UnifiedChat] 刷新已保存版本失败:", error);
+          toast.error("代码已保存，但刷新预览失败，请手动刷新页面");
+        } finally {
           canvas.setIsGenerating(false);
         }
+      },
+      onStreamComplete: () => {
+        canvas.setIsGenerating(false);
+      },
+      onError: () => {
+        canvas.setIsGenerating(false);
+        canvas.setShouldSendToSandbox(false);
       },
       onTitleUpdate: (threadId: string, title: string) => {
         console.log("[UnifiedChat] 🏷️ 标题已更新:", { threadId, title });
@@ -340,7 +293,7 @@ ${sandboxError}
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.origin !== SANDBOX_ORIGIN) return;
-      if (event.data?.protocolVersion !== 1) return;
+      if (![1, 2].includes(event.data?.protocolVersion)) return;
 
       const { type, payload } = event.data || {};
 
@@ -461,15 +414,6 @@ ${sandboxError}
     }
   }, [canvas.artifact, canvas.versions]);
 
-  // 🔥 修复：初始加载时重置生成状态
-  // 避免上次会话遗留的状态导致“正在生成内容”卡片错误显示
-  useEffect(() => {
-    // 只有当没有消息或者最新消息不是 assistant 时，才可能是异常状态
-    if (chat.messages.length === 0) {
-      useGenerationStore.getState().reset();
-    }
-  }, [chat.messages.length]);
-
   return (
     <div className="h-full bg-background">
       <SplitPane
@@ -518,17 +462,6 @@ ${sandboxError}
 
               {/* 🔥 生成状态卡片 */}
               <GenerationStatusCard />
-
-              {chat.isLoading && (
-                <div className="flex justify-start">
-                  <div className="flex items-center gap-2 rounded-lg bg-muted px-4 py-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span className="text-sm text-gray-600 dark:text-gray-400">
-                      思考中...
-                    </span>
-                  </div>
-                </div>
-              )}
 
               <div ref={messagesEndRef} />
             </div>

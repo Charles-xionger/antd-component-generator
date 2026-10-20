@@ -17,6 +17,7 @@ const ALLOWED_IMPORTS = [
   "@tanstack/react-query",
   "recharts",
   "zod",
+  "@prompt-web/app-runtime",
 ];
 
 function validatePath(filePath: string) {
@@ -154,6 +155,28 @@ void i18n
     // 源文件位于临时目录，显式回到应用自己的依赖目录解析白名单包。
     nodePaths: [path.join(process.cwd(), "node_modules")],
     plugins: [
+      {
+        name: "published-app-runtime",
+        setup(buildApi) {
+          buildApi.onResolve({ filter: /^@prompt-web\/app-runtime$/ }, () => ({
+            path: "app-runtime",
+            namespace: "prompt-web-runtime",
+          }));
+          buildApi.onLoad({ filter: /.*/, namespace: "prompt-web-runtime" }, () => ({
+            loader: "ts",
+            contents: `export async function invoke(operationId: string, input: Record<string, unknown> = {}) {
+  const response = await fetch("/api/operations/" + encodeURIComponent(operationId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Operation failed");
+  return payload;
+}`,
+          }));
+        },
+      },
       {
         name: "published-import-allowlist",
         setup(buildApi) {

@@ -18,6 +18,29 @@ import { auth } from "@/lib/auth";
 import { generateThreadTitle } from "@/lib/agent/models";
 import { getOwnedProject, getOwnedThread } from "@/lib/projects/ownership";
 
+const NODE_STAGE: Record<string, string> = {
+  intentRouter: "intent",
+  businessAnalyst: "requirements",
+  directResponder: "responding",
+  solutionArchitect: "architecture",
+  coder: "coding",
+  artifactValidator: "validating",
+};
+
+function messageText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return content == null ? "" : String(content);
+  return content
+    .map((block) => {
+      if (typeof block === "string") return block;
+      if (block && typeof block === "object" && "text" in block) {
+        return String((block as { text?: unknown }).text || "");
+      }
+      return "";
+    })
+    .join("");
+}
+
 export async function POST(request: NextRequest) {
   try {
     const session = await auth();
@@ -183,6 +206,14 @@ export async function POST(request: NextRequest) {
           let aiResponseContent = ""; // 累积AI回复用于生成标题
           let finalAiContent = ""; // 非流式模型/提供商的最终响应兜底
           let lastHeartbeat = Date.now(); // 心跳时间戳
+          let coderRunCount = 0;
+          const streamedContentNodes = new Set<string>();
+          const fallbackContentNodes = new Set([
+            "businessAnalyst",
+            "directResponder",
+            "solutionArchitect",
+            "coder",
+          ]);
 
           // 心跳机制：防止连接超时
           // 始终启用心跳机制，确保长时间生成不中断
@@ -232,6 +263,44 @@ export async function POST(request: NextRequest) {
               break;
             }
 
+            const graphNode = String(
+              event.metadata?.langgraph_node || event.name || "",
+            );
+            const nodeStage = NODE_STAGE[graphNode];
+
+            // 只在 LangGraph 节点自身开始/结束时发送阶段事件，避免把节点
+            // 内部的模型、解析器等子事件重复展示为产品步骤。
+            if (
+              nodeStage &&
+              event.name === graphNode &&
+              (event.event === "on_chain_start" ||
+                event.event === "on_chain_end")
+            ) {
+              let stage = nodeStage;
+              if (graphNode === "coder" && event.event === "on_chain_start") {
+                coderRunCount += 1;
+                if (coderRunCount > 1) stage = "repairing";
+              } else if (graphNode === "coder" && coderRunCount > 1) {
+                stage = "repairing";
+              }
+
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    type: "stage",
+                    stage,
+                    node: graphNode,
+                    status:
+                      event.event === "on_chain_start"
+                        ? "running"
+                        : "completed",
+                    threadId: finalThreadId,
+                  })}\n\n`,
+                ),
+              );
+              lastHeartbeat = Date.now();
+            }
+
             // 流式发送 AI 消息内容
             if (
               event.event === "on_chat_model_stream" &&
@@ -251,6 +320,7 @@ export async function POST(request: NextRequest) {
               // 智能过滤：基于事件元数据和内容特征
               // 定义需要过滤的节点（只过滤纯内部逻辑，不过滤有用户价值的消息）
               const FILTERED_NODES = [
+                "intentRouter", // 意图识别结构化结果（内部路由数据）
                 "routeToSubgraph", // Supervisor 路由决策（纯内部逻辑）
                 // 注意：不过滤 architect，让前端智能渲染为架构规划卡片
               ];
@@ -258,11 +328,13 @@ export async function POST(request: NextRequest) {
               // 检查事件来源（通过 tags 或 name 判断）
               const eventTags = event.tags || [];
               const eventName = event.name || "";
+              const eventNode = graphNode;
               const isFilteredNode = FILTERED_NODES.some(
                 (node) =>
                   eventTags.includes(node) ||
                   eventName.includes(node) ||
-                  eventName === node,
+                  eventName === node ||
+                  eventNode === node,
               );
 
               // 额外的内容特征检测（只过滤纯内部逻辑）
@@ -274,6 +346,8 @@ export async function POST(request: NextRequest) {
                 continue;
               }
 
+              streamedContentNodes.add(eventNode);
+
               // 注意：Architect 消息已经用 <architectPlan> 标签包裹
               // 不再需要过滤，前端会优雅地渲染为卡片
 
@@ -281,6 +355,8 @@ export async function POST(request: NextRequest) {
                 `data: ${JSON.stringify({
                   type: "content",
                   content,
+                  stage: NODE_STAGE[eventNode] || "responding",
+                  node: eventNode,
                   threadId: finalThreadId,
                 })}\n\n`,
               );
@@ -306,7 +382,8 @@ export async function POST(request: NextRequest) {
               // 注意：先发送内容，再检测闭合，确保前端能收到完整的 ARCHITECT 内容
               if (
                 !hasArchitectCompleted &&
-                accumulatedContent.includes("</architectPlan>")
+                (accumulatedContent.includes("</appBlueprint>") ||
+                  accumulatedContent.includes("</architectPlan>"))
               ) {
                 hasArchitectCompleted = true;
 
@@ -321,12 +398,54 @@ export async function POST(request: NextRequest) {
               }
             }
 
+            // 部分 OpenAI 兼容服务只返回节点最终消息，不产生
+            // on_chat_model_stream。节点结束时立即补发完整内容，避免用户
+            // 必须刷新页面后才能看到澄清问题或生成结果。
+            if (
+              event.event === "on_chain_end" &&
+              event.name === graphNode &&
+              fallbackContentNodes.has(graphNode) &&
+              !streamedContentNodes.has(graphNode)
+            ) {
+              const outputMessages = event.data?.output?.messages;
+              const finalMessage = Array.isArray(outputMessages)
+                ? outputMessages[outputMessages.length - 1]
+                : undefined;
+              const completedContent = finalMessage?.content
+                ? typeof finalMessage.content === "string"
+                  ? finalMessage.content
+                  : Array.isArray(finalMessage.content)
+                    ? finalMessage.content
+                        .map((block: { text?: string }) => block.text || "")
+                        .join("")
+                    : String(finalMessage.content)
+                : "";
+
+              if (completedContent) {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      type: "content",
+                      content: completedContent,
+                      stage: NODE_STAGE[graphNode] || "responding",
+                      node: graphNode,
+                      threadId: finalThreadId,
+                    })}\n\n`,
+                  ),
+                );
+                accumulatedContent += completedContent;
+                aiResponseContent += completedContent;
+                finalAiContent = completedContent;
+                lastHeartbeat = Date.now();
+              }
+            }
+
             // 监听 architect 节点完成事件（更可靠的完成信号）
             // 但要注意：只有在确实有 architectPlan 内容时才发送完成事件
             // 闲聊场景下不应该发送 architect_complete，避免前端误判
             if (
               event.event === "on_chain_end" &&
-              event.name === "architect" &&
+              event.name === "solutionArchitect" &&
               !hasArchitectCompleted
             ) {
               const outputMessages = event.data?.output?.messages;
@@ -346,7 +465,10 @@ export async function POST(request: NextRequest) {
 
               // 检查是否包含架构规划标签
               // 只有真正的架构规划才发送 architect_complete 事件
-              if (accumulatedContent.includes("<architectPlan>")) {
+              if (
+                accumulatedContent.includes("<appBlueprint>") ||
+                accumulatedContent.includes("<architectPlan>")
+              ) {
                 hasArchitectCompleted = true;
 
                 // 发送 ARCHITECT 完成事件
@@ -395,6 +517,24 @@ export async function POST(request: NextRequest) {
 
           // 某些 OpenAI 兼容服务不产生 on_chat_model_stream 事件，但会在
           // 节点结束时给出完整消息。此时仍把结果返回给前端，避免空白响应。
+          if (!accumulatedContent && !finalAiContent) {
+            try {
+              const snapshot = await graph.getState(config);
+              const persistedMessages = Array.isArray(snapshot.values?.messages)
+                ? snapshot.values.messages
+                : [];
+              const latestAssistant = [...persistedMessages]
+                .reverse()
+                .find(
+                  (item: { _getType?: () => string }) =>
+                    item?._getType?.() === "ai",
+                );
+              finalAiContent = messageText(latestAssistant?.content);
+            } catch (stateError) {
+              console.error("[Stream] 读取最终消息失败:", stateError);
+            }
+          }
+
           if (!accumulatedContent && finalAiContent) {
             controller.enqueue(
               encoder.encode(
@@ -457,7 +597,33 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // Artifact 已由 Coder 节点通过统一服务端入口保存。
+          // Coder 运行过就必须存在本次 request 对应的持久化版本。
+          // 不能再把“模型输出了代码”误报成“代码已保存并可预览”。
+          if (coderRunCount > 0) {
+            const savedVersion = await prisma.artifactVersion.findFirst({
+              where: {
+                generationRequestId: finalGenerationRequestId,
+                artifact: { projectId: finalProjectId },
+              },
+              select: { id: true, versionNumber: true },
+            });
+            if (!savedVersion) {
+              throw new Error(
+                "生成结果未通过产物校验或未成功保存，请重试生成",
+              );
+            }
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  type: "artifact_saved",
+                  artifactVersionId: savedVersion.id,
+                  versionNumber: savedVersion.versionNumber,
+                  threadId: finalThreadId,
+                  projectId: finalProjectId,
+                })}\n\n`,
+              ),
+            );
+          }
 
           // ==========================================
           // 6. 自动生成会话标题（如果是新会话）

@@ -1,0 +1,6 @@
+{
+  "people": [{ "id": "person-demo", "name": "分镜师阿杰" }],
+  "projects": [{ "id": "project-demo", "name": "竖屏短剧《逆光》" }],
+  "tasks": [{ "id": "task-demo", "projectId": "project-demo", "title": "第 1 集分镜" }],
+  "workLogs": [{ "id": "log-demo", "personId": "person-demo", "projectId": "project-demo", "taskId": "task-demo", "workDate": "2026-09-26", "hours": 4, "completedShots": 8, "complexityWeight": 1.5 }]
+}

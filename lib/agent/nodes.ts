@@ -6,6 +6,10 @@ import {
 } from "@langchain/core/messages";
 import type { AgentState, SceneType } from "./state";
 import { ARCHITECT_PROMPT, CODER_PROMPT } from "./prompts";
+import { FULLSTACK_CODER_PROMPT, STATIC_APP_CODER_PROMPT } from "./prompts/product";
+import { CURRENT_GO_RUNTIME } from "@/lib/app-contracts";
+import { queueFullstackPreview } from "@/lib/build-jobs/service";
+import { validateGeneratedArtifact } from "@/lib/go-runtime/artifact-validator";
 import { createLLM } from "./models";
 import { parseXmlToFiles } from "./utils";
 import { saveProjectArtifactVersion } from "@/lib/projects/artifact-service";
@@ -520,7 +524,12 @@ export async function coder(
   }
 
   // 准备 prompt，并压缩以节省 token
-  const promptWithContext = compressPrompt(CODER_PROMPT);
+  const isGoApplication = state.appBlueprint?.runtimeType !== "STATIC";
+  const promptWithContext = compressPrompt(
+    state.appBlueprint
+      ? `${isGoApplication ? FULLSTACK_CODER_PROMPT : STATIC_APP_CODER_PROMPT}\nRequirementSpec:\n${JSON.stringify(state.requirementSpec)}\nAppBlueprint:\n${JSON.stringify(state.appBlueprint)}${state.validationErrors?.length ? `\n上一次产物验证失败，必须修复：\n${state.validationErrors.join("\n")}` : ""}`
+      : CODER_PROMPT,
+  );
 
   // 获取相关的对话上下文
   let relevantMessages: typeof state.messages;
@@ -560,7 +569,12 @@ export async function coder(
   // 这样可以强制 Coder 转换角色，将其视为输入指令而不是自己的历史输出
   // 避免 Coder 模仿 Architect 的语气或尝试"完善"计划
   let architectPlanInstruction: HumanMessage | null = null;
-  if (lastArchitectMessage) {
+  if (state.appBlueprint) {
+    architectPlanInstruction = new HumanMessage(
+      `Implement this confirmed full-stack App Blueprint now:\n${JSON.stringify(state.appBlueprint)}`,
+    );
+  }
+  else if (lastArchitectMessage) {
     const planContent =
       typeof lastArchitectMessage.content === "string"
         ? lastArchitectMessage.content
@@ -699,6 +713,26 @@ export async function coder(
     // 创建新的 AIMessage 带上修改后的内容
     const messageWithVersion = new AIMessage(content);
 
+    const generatedFiles = parseXmlToFiles(content);
+    if (state.appBlueprint) {
+      const validationErrors = validateGeneratedArtifact(
+        content,
+        generatedFiles,
+        state.appBlueprint,
+      );
+      if (validationErrors.length > 0) {
+        console.warn(
+          "[Coder] 生成产物验证失败，等待自动修复",
+          validationErrors,
+        );
+        return {
+          messages: [messageWithVersion],
+          generatedArtifact: content,
+          validationErrors,
+        };
+      }
+    }
+
     // ==========================================
     // 🛡️ 后端自动保存逻辑
     // ==========================================
@@ -715,23 +749,40 @@ export async function coder(
           );
 
           // 2. 解析文件
-          const files = parseXmlToFiles(content);
+          const files = generatedFiles;
 
           if (files.length > 0) {
             // 3. 检查入口文件完整性
             const hasAppTsx = files.some(
-              (f) => f.path === "App.tsx" || f.path.endsWith("/App.tsx"),
+              (f) => f.path === "App.tsx" || f.path === "frontend/App.tsx" || f.path.endsWith("/App.tsx"),
             );
 
             if (hasAppTsx) {
+              let seedData: Record<string, Array<Record<string, unknown>>> = {};
+              const seedFile = files.find((file) => file.path === "acceptance/seed.json");
+              if (seedFile) {
+                try { seedData = JSON.parse(seedFile.content); } catch { console.warn("[Coder] acceptance/seed.json 不是有效 JSON，Sandbox 将使用空数据"); }
+              }
               const version = await saveProjectArtifactVersion({
                 projectId,
                 files,
                 generationRequestId:
                   config?.configurable?.generation_request_id,
                 description: "AI 自动生成",
+                requirementSpec: state.requirementSpec,
+                appBlueprint: state.appBlueprint,
+                runtimeManifest: state.appBlueprint && isGoApplication ? {
+                  runtimeVersion: CURRENT_GO_RUNTIME,
+                  frontendEntry: "frontend/App.tsx",
+                  migrationDirectory: "migrations",
+                  operations: state.appBlueprint.operations,
+                  seedData,
+                } : undefined,
+                runtimeVersion: state.appBlueprint && isGoApplication ? CURRENT_GO_RUNTIME : undefined,
+                completeSnapshot: Boolean(state.appBlueprint),
               });
               console.log(`[Coder] ✅ Artifact v${version.versionNumber} 保存成功`);
+              if (state.appBlueprint && isGoApplication) await queueFullstackPreview(projectId, version.id);
             } else {
               console.warn("[Coder] ⚠️ 生成结果缺少 App.tsx，跳过自动保存");
             }
@@ -746,6 +797,7 @@ export async function coder(
     return {
       messages: [messageWithVersion],
       generatedArtifact: content,
+      validationErrors: [],
     };
   } catch (networkError) {
     console.error("Network error in coder:", networkError);
@@ -755,4 +807,16 @@ export async function coder(
       generatedArtifact: "网络连接错误，请检查网络设置后重试。",
     };
   }
+}
+
+export async function artifactValidator(state: AgentState): Promise<Partial<AgentState>> {
+  if (!state.appBlueprint || !state.generatedArtifact) {
+    return { validationErrors: [] };
+  }
+  const errors = validateGeneratedArtifact(
+    state.generatedArtifact,
+    parseXmlToFiles(state.generatedArtifact),
+    state.appBlueprint,
+  );
+  return { validationErrors: errors, repairAttempts: errors.length ? (state.repairAttempts || 0) + 1 : state.repairAttempts || 0 };
 }

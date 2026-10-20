@@ -74,6 +74,28 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
     const [isCreatingShare, setIsCreatingShare] = useState(false);
     const [copiedShareUrl, setCopiedShareUrl] = useState(false);
     const [isPublishing, setIsPublishing] = useState(false);
+    const [fullstackPreview, setFullstackPreview] = useState<{ status: string; previewUrl?: string | null; errorMessage?: string | null } | null>(null);
+    const [fullstackPreviewOpen, setFullstackPreviewOpen] = useState(false);
+
+    useEffect(() => {
+      if (!projectId || !selectedVersion) return;
+      const version = versions.find((item) => item.versionNumber === selectedVersion);
+      if (!version) return;
+      let active = true;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const load = async () => {
+        try {
+          const response = await fetch(`/api/projects/${projectId}/previews?artifactVersionId=${version.id}`);
+          const data = await response.json();
+          if (active && response.ok) setFullstackPreview(data.preview);
+          if (active && data.preview && !["SUCCEEDED", "FAILED"].includes(data.preview.status)) timer = setTimeout(load, 2000);
+        } catch {
+          if (active) timer = setTimeout(load, 4000);
+        }
+      };
+      void load();
+      return () => { active = false; if (timer) clearTimeout(timer); };
+    }, [projectId, selectedVersion, versions]);
 
     // 切换全屏 - 调用父组件回调
     const toggleFullscreen = useCallback(() => {
@@ -128,7 +150,7 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
         if (iframeRef?.current?.contentWindow) {
           iframeRef.current.contentWindow.postMessage(
             {
-              protocolVersion: 1,
+              protocolVersion: 2,
               type: "CHANGE_LANGUAGE",
               lng: language,
             },
@@ -213,8 +235,11 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "发布失败");
-        toast.success("发布成功");
-        window.open(data.publishedUrl, "_blank", "noopener,noreferrer");
+        if (response.status === 202) toast.success("发布任务已创建，通过健康检查后自动上线");
+        else {
+          toast.success("发布成功");
+          window.open(data.publishedUrl, "_blank", "noopener,noreferrer");
+        }
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "发布失败");
       } finally {
@@ -293,6 +318,8 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
             isSharing={isCreatingShare}
             onPublish={projectId ? handlePublish : undefined}
             isPublishing={isPublishing}
+            fullstackPreview={fullstackPreview}
+            onOpenFullstackPreview={() => setFullstackPreviewOpen(true)}
           />
         )}
 
@@ -346,6 +373,17 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
                 )}
               </Button>
             </div>
+          </DialogContent>
+        </Dialog>
+        <Dialog open={fullstackPreviewOpen} onOpenChange={setFullstackPreviewOpen}>
+          <DialogContent className="max-w-[95vw] h-[90vh] p-0 overflow-hidden">
+            <DialogHeader className="sr-only">
+              <DialogTitle>可用版本</DialogTitle>
+              <DialogDescription>连接独立测试数据，可以完整操作和刷新验证</DialogDescription>
+            </DialogHeader>
+            {fullstackPreview?.previewUrl && (
+              <iframe className="w-full h-full border-0" src={fullstackPreview.previewUrl} title="Go full-stack preview" />
+            )}
           </DialogContent>
         </Dialog>
       </div>
