@@ -8,7 +8,7 @@
 | --- | --- |
 | 固定脚本模型 + 真实 PostgreSQL + 隔离命令 | `lib/workspace/*.test.ts` 与 `lib/agent/workspace-node.db.test.ts`：59/59；包含断点恢复、CAS、诊断、定向修复、Go/TS 检查、提交。 |
 | 真实 Next.js HTTP + 工作区 Worker | `pnpm test:workspace-http-e2e`：静态首次生成 → 修改 → v1/v2 → 发布 API → 公开 HTML/JS 文件，且所有权、事件游标通过。 |
-| Go 容器与真实运行时 | `pnpm test:workspace-go-preview-e2e`：成功/失败 Preview 分支；成功项目 v2 定向修改后，经部署 API 发布，容器 `/healthz`、前端 JS 和业务 API 均返回 v2 内容。失败 Preview 不触发 Agent 自动修复。 |
+| Go 容器与真实运行时 | `pnpm test:workspace-go-preview-e2e`：成功/失败 Preview 分支；成功项目 v2 定向修改后，经部署 API 发布，容器 `/healthz`、前端 JS 和业务 API 均返回 v2 内容。隔离 Traefik 的 Docker provider 通过 HTTPS Host 规则转发 Preview 与发布地址的页面/JS；失败 Preview 不触发 Agent 自动修复。 |
 | 既有安全网 | `pnpm test:app-runtime` 72/72；`pnpm test:data-gateway` 8/8；`pnpm test:fullstack-e2e` 和 `pnpm test:publishing-e2e` 通过；`pnpm lint` 0 错误、7 个原有 warning；`pnpm exec next build` 通过。 |
 | 真实页面 BOT | `test/workspace-agent-browser-fixture.ts` 可启动隔离的首次生成、Go 修改、旧 XML 历史和中断恢复场景；已用浏览器操作并对照数据库核查 BOT-1 至 BOT-5、BOT-7。BOT-6 的状态与静态 Sandbox 已走查，Go 应用在隔离容器网络内可访问。 |
 
@@ -34,7 +34,7 @@
 | 16 | 通过：P0 代码面板只读，运行中输入不可注入当前执行段；BOT-1/3。人工编辑留到下一需求。 |
 | 17 | 通过：仅校验通过的确定修订创建版本；失败 Draft 不入版本，`commit.db.test.ts`、BOT-1/2。 |
 | 18 | 通过：重复提交幂等、快照锁定，`commit.db.test.ts`、`worker.db.test.ts`。 |
-| 19 | 本地接缝通过：Go Preview 构建/健康/API、失败状态和静态 Sandbox 已验证；外部 HTTPS Preview 域名未在隔离测试中路由，见待完成项。 |
+| 19 | 本地接缝通过：Go Preview 构建/健康/API、失败状态和静态 Sandbox 已验证；隔离 Traefik 实测 HTTPS Host 路由。外部 DNS/可信证书仍待环境验收，见待完成项。 |
 | 20 | 通过：结构化 Item、序号游标与去重，`workspace-agent-http-e2e.ts`、BOT-3；浏览器刷新后事件序列连续。 |
 | 21 | 通过：旧 XML 历史仍可读；新任务编译失败/修复/提交为独立 Item，代码仅在文件面板，BOT-7。 |
 | 22 | 通过：跨用户项目/工作区 API 拒绝、路径和日志不暴露 Secret，`service.db.test.ts`、HTTP E2E、BOT-5。 |
@@ -48,12 +48,12 @@
 | AC-UI-4 | BOT-3 刷新及 Worker 恢复后任务、计划、文件与事件仍在；事件期间聚焦的 Code 标签保持焦点；live region 仅包状态，工具日志不逐行播报。 |
 | AC-UI-5 | 精确 `innerWidth=390`、`scrollWidth=390`，文件列表在代码上方；亮色计算样式与 `DESIGN.md` token 一致，暗色媒体规则已加载。设计 token 的正文/次级文本在亮暗面板上的计算对比度依次为 16.40/5.76 和 15.42/7.51。窄屏 Code → 两个文件 → 复制按钮可按 Tab 到达且焦点环可见。**暗色真实视觉截图仍未完成**。 |
 | BOT-1/2/3/4/5/7 | 实际 Next 页面和隔离 PostgreSQL 走查通过；夹具提供重复启动/清理方式。截图只留在本次浏览器验收记录中，尚未归档到仓库。 |
-| BOT-6 | Go 成功/失败及静态 Sandbox 页面状态已走查；Go 预览和发布容器的前端/API 实测可用。外部 HTTPS 域名仍需有 Traefik/DNS 的环境确认。 |
+| BOT-6 | Go 成功/失败及静态 Sandbox 页面状态已走查；Go 预览和发布容器的前端/API 实测可用，隔离 Traefik 实测 HTTPS Host 路由。外部 DNS/可信证书仍需环境确认。 |
 
 ## 进入用户 Review 前仍需补齐
 
 1. 用浏览器暗色媒体模拟核对工作区状态、诊断、文件面板的视觉和文本对比度。当前只有暗色 CSS 规则加载证据，不能等同于视觉验收。
-2. 在有 Traefik/DNS 的隔离环境核对 Go Preview 与发布返回的 HTTPS 地址；本地 Docker E2E 已验证相应容器的页面、JS、健康检查和业务 API，但没有真实域名路由。
+2. 在目标环境核对 Go Preview 与发布返回的 HTTPS 地址，包括真实 DNS、可信证书与公网入口。隔离 Docker E2E 已通过 Traefik 的 HTTPS Host 路由验证页面/JS，但使用自签名测试证书和容器内 Host 解析，不能替代环境验收。测试还发现 API 与 Worker 原有默认域名不一致；现已共用 `getPublishedAppsDomain()`，部署时仍应明确配置相同的 `PUBLISHED_APPS_DOMAIN`。
 3. 将 spec 中 BOT-1 至 BOT-7 要求的关键截图归档到可复查的验收资产。浏览器手工结果不能替代可追溯截图。
 
 以上未补齐前，不合并到共享分支，也不发布 stage/production。用户 Review 通过后再讨论后续合并/发布动作。

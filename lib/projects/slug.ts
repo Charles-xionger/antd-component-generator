@@ -13,7 +13,10 @@ export function createProjectIdentity(name: string) {
   };
 }
 
+export function getPublishedAppsDomain() {
+  return process.env.PUBLISHED_APPS_DOMAIN || "apps.xiongerer.xyz";
+}
+
 export function getPublishedHostname(slug: string) {
-  const rootDomain = process.env.PUBLISHED_APPS_DOMAIN || "apps.xiongerer.xyz";
-  return `${slug}.${rootDomain}`;
+  return `${slug}.${getPublishedAppsDomain()}`;
 }

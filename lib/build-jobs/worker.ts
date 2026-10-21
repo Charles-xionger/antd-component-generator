@@ -17,11 +17,11 @@ import {
 } from "@/lib/publishing/deployment-events";
 import { appBlueprintSchema } from "@/lib/app-contracts";
 import { validateFullstackArtifact } from "@/lib/go-runtime/artifact-validator";
+import { getPublishedAppsDomain, getPublishedHostname } from "@/lib/projects/slug";
 
 const run = promisify(execFile);
 const workerId = randomUUID();
 const buildsRoot = path.resolve(process.env.APP_BUILDS_ROOT || "/app-builds");
-const appsDomain = process.env.PUBLISHED_APPS_DOMAIN || "apps.localhost";
 const dockerNetwork = process.env.APP_RUNTIME_NETWORK || "prompt_web_internal";
 const traefikNetwork = process.env.TRAEFIK_NETWORK || "traefik_net";
 
@@ -276,8 +276,8 @@ async function processJob(job: NonNullable<Awaited<ReturnType<typeof claimJob>>>
   const prefix = job.type === "PUBLISH" ? "prompt-app" : "prompt-preview";
   const containerName = `${prefix}-${job.id.replaceAll("-", "").slice(0, 16)}`;
   const hostname = job.type === "PUBLISH"
-    ? `${version.artifact.project.slug}.${appsDomain}`
-    : `preview-${job.id.replaceAll("-", "").slice(0, 12)}.${appsDomain}`;
+    ? getPublishedHostname(version.artifact.project.slug)
+    : `preview-${job.id.replaceAll("-", "").slice(0, 12)}.${getPublishedAppsDomain()}`;
   await docker(["rm", "-f", containerName]).catch(() => undefined);
   await docker([
     "run", "-d", "--name", containerName, "--restart", "unless-stopped",

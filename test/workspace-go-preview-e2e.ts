@@ -14,6 +14,7 @@ const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
 const runtimeNetwork = `workspace-preview-${suffix}`;
 const routerNetwork = `workspace-router-${suffix}`;
 const databaseContainer = `workspace-preview-db-${suffix}`;
+const routerContainer = `workspace-preview-router-${suffix}`;
 const databaseName = "workspace_preview_e2e";
 const databasePassword = `workspace_preview_${suffix}`;
 const appContainers: string[] = [];
@@ -24,6 +25,11 @@ async function command(file: string, args: string[], env?: Record<string, string
 }
 
 async function docker(args: string[]) { return command("docker", args); }
+
+async function routedGet(url: string) {
+  const hostname = new URL(url).hostname;
+  return docker(["run", "--rm", "--network", routerNetwork, "curlimages/curl:8.12.1", "-kfsS", "--retry", "20", "--retry-delay", "1", "--retry-all-errors", "--connect-to", `${hostname}:443:${routerContainer}:443`, url]);
+}
 
 async function freePort() {
   return new Promise<number>((resolve, reject) => {
@@ -139,7 +145,7 @@ async function queueGoPublication(databaseUrl: string, user: { id: string; email
   const token = await encode({ token: { id: user.id, sub: user.id, email: user.email }, secret: authSecret, salt: cookieName, maxAge: 3600 });
   let nextOutput = "";
   const next = spawn("pnpm", ["exec", "next", "start", "-p", String(port)], {
-    cwd: process.cwd(), env: { ...process.env, DATABASE_URL: databaseUrl, AUTH_SECRET: authSecret, NEXTAUTH_URL: baseUrl, GITHUB_ID: "workspace-go-publish", GITHUB_SECRET: "workspace-go-publish" }, stdio: ["ignore", "pipe", "pipe"],
+    cwd: process.cwd(), env: { ...process.env, DATABASE_URL: databaseUrl, AUTH_SECRET: authSecret, NEXTAUTH_URL: baseUrl, PUBLISHED_APPS_DOMAIN: "preview.test", GITHUB_ID: "workspace-go-publish", GITHUB_SECRET: "workspace-go-publish" }, stdio: ["ignore", "pipe", "pipe"],
   });
   const collect = (chunk: Buffer) => { nextOutput = `${nextOutput}${chunk.toString()}`.slice(-8000); };
   next.stdout?.on("data", collect);
@@ -172,6 +178,10 @@ async function main() {
   try {
     await docker(["network", "create", runtimeNetwork]);
     await docker(["network", "create", routerNetwork]);
+    await docker(["run", "-d", "--name", routerContainer, "--network", routerNetwork,
+      "-v", "/var/run/docker.sock:/var/run/docker.sock:ro", "traefik:v3.7",
+      "--providers.docker=true", "--providers.docker.exposedbydefault=false",
+      `--providers.docker.network=${routerNetwork}`, "--entrypoints.websecure.address=:443"]);
     await docker(["run", "-d", "--name", databaseContainer, "--network", runtimeNetwork, "-p", `127.0.0.1:${port}:5432`, "-e", `POSTGRES_PASSWORD=${databasePassword}`, "-e", `POSTGRES_DB=${databaseName}`, "postgres:16-alpine"]);
     await databaseReady();
     process.env.DATABASE_URL = databaseUrl;
@@ -218,6 +228,7 @@ async function main() {
       assert.equal((await client.draftWorkspace.findUniqueOrThrow({ where: { id: workspace.id } })).status, "CLOSED");
       if (expectedStatus === "SUCCEEDED") {
         assert.ok(job.previewUrl?.includes("preview.test"));
+        assert.match(await routedGet(job.previewUrl!), /<script type="module"/);
         assert.match(await docker(["run", "--rm", "--network", runtimeNetwork, "curlimages/curl:8.12.1", "-fsS", `http://${containerName}:8080/healthz`]), /ok/);
         assert.match(await docker(["run", "--rm", "--network", runtimeNetwork, "curlimages/curl:8.12.1", "-fsS", "-X", "POST", "-H", "Content-Type: application/json", "--data", "{}", `http://${containerName}:8080/api/operations/get.item`]), /"ok":true/);
       } else {
@@ -268,16 +279,19 @@ async function main() {
     assert.equal((await client.deployment.findUniqueOrThrow({ where: { id: publication.deployment.id } })).status, "ACTIVE");
     assert.match(await docker(["run", "--rm", "--network", runtimeNetwork, "curlimages/curl:8.12.1", "-fsS", `http://${publicContainer}:8080/healthz`]), /ok/);
     const publicPage = await docker(["run", "--rm", "--network", runtimeNetwork, "curlimages/curl:8.12.1", "-fsS", `http://${publicContainer}:8080/`]);
+    assert.match(await routedGet(publication.publishedUrl), /<script type="module"/);
     const publicScript = publicPage.match(/<script type="module" src="\/([^\"]+)"/i)?.[1];
     assert.ok(publicScript, "Published Go app must serve its frontend entry");
     assert.match(await docker(["run", "--rm", "--network", runtimeNetwork, "curlimages/curl:8.12.1", "-fsS", `http://${publicContainer}:8080/${publicScript}`]), /Preview changed/);
     assert.match(await docker(["run", "--rm", "--network", runtimeNetwork, "curlimages/curl:8.12.1", "-fsS", "-X", "POST", "-H", "Content-Type: application/json", "--data", "{}", `http://${publicContainer}:8080/api/operations/get.item`]), /"label":"changed"/);
+    assert.match(await routedGet(new URL(`/${publicScript}`, publication.publishedUrl).toString()), /Preview changed/);
     process.stdout.write("Go workspace modification: v2 preview and public deployment succeeded\n");
     if (process.env.WORKSPACE_GO_BROWSER === "1") await serveBrowserPreview(databaseUrl, user, projectIds);
   } finally {
     await closeDatabaseConnections?.();
     for (const containerName of appContainers) await docker(["rm", "-f", containerName]).catch(() => undefined);
     for (const imageName of appImages) await docker(["image", "rm", imageName]).catch(() => undefined);
+    await docker(["rm", "-f", routerContainer]).catch(() => undefined);
     await docker(["rm", "-f", databaseContainer]).catch(() => undefined);
     await removeNetwork(routerNetwork);
     await removeNetwork(runtimeNetwork);
