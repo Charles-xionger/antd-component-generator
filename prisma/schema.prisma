@@ -88,6 +88,7 @@ model Project {
   deployments      Deployment[] @relation("ProjectDeployments")
   activeDeployment Deployment?  @relation("ActiveDeployment", fields: [activeDeploymentId], references: [id], onDelete: SetNull)
   buildJobs        BuildJob[]
+  draftWorkspaces  DraftWorkspace[]
 
   @@index([userId, updatedAt])
   @@index([status, updatedAt])
@@ -180,8 +181,89 @@ model ArtifactVersion {
   shares              Share[] // 分享记录
   deployments         Deployment[]
   buildJobs           BuildJob[]
+  draftOrigins        DraftWorkspace[]
 
   @@unique([artifactId, versionNumber])
+  @@schema("platform")
+}
+
+enum DraftWorkspaceStatus {
+  ACTIVE
+  CLOSED
+
+  @@schema("platform")
+}
+
+model DraftWorkspace {
+  id                    String               @id @default(uuid())
+  projectId             String
+  taskId                String               @unique
+  baseArtifactVersionId String?
+  status                DraftWorkspaceStatus @default(ACTIVE)
+  revision              Int                  @default(0)
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  project               Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  baseArtifactVersion   ArtifactVersion?     @relation(fields: [baseArtifactVersionId], references: [id], onDelete: Restrict)
+  files                 DraftFile[]
+  fileRevisions         DraftFileRevision[]
+  writeReceipts         DraftWriteReceipt[]
+  fileChanges           DraftFileChange[]
+
+  @@index([projectId, createdAt])
+  @@schema("platform")
+}
+
+model DraftFile {
+  workspaceId String
+  path        String
+  content     String   @db.Text
+  sha256      String
+  revision    Int
+  workspace   DraftWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, path])
+  @@schema("platform")
+}
+
+model DraftFileRevision {
+  workspaceId String
+  path        String
+  revision    Int
+  content     String?  @db.Text
+  sha256      String?
+  workspace   DraftWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, path, revision])
+  @@index([workspaceId, revision])
+  @@schema("platform")
+}
+
+model DraftWriteReceipt {
+  workspaceId String
+  toolCallId  String
+  inputHash   String
+  revision    Int
+  path        String
+  sha256      String
+  workspace   DraftWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, toolCallId])
+  @@schema("platform")
+}
+
+model DraftFileChange {
+  workspaceId  String
+  revision     Int
+  toolCallId   String
+  path         String
+  beforeSha256 String?
+  afterSha256  String
+  createdAt    DateTime @default(now())
+  workspace    DraftWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, revision])
+  @@unique([workspaceId, toolCallId])
   @@schema("platform")
 }
 
