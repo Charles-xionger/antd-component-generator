@@ -41,7 +41,9 @@ async function claimJob() {
     where: { id: candidate.id, OR: [{ status: "QUEUED" }, { leaseExpiresAt: { lt: new Date() } }] },
     data: { status: "BUILDING", leaseToken, leaseExpiresAt: new Date(Date.now() + 10 * 60_000), startedAt: candidate.startedAt || new Date(), attempt: { increment: 1 } },
   });
-  return claimed.count === 1 ? prisma.buildJob.findUnique({ where: { id: candidate.id } }) : null;
+  if (claimed.count !== 1) return null;
+  await appendBuildActivity(candidate.id, publicationActivityForStatus("QUEUED"));
+  return prisma.buildJob.findUnique({ where: { id: candidate.id } });
 }
 
 async function setStatus(jobId: string, status: "BUILDING" | "MIGRATING" | "TESTING" | "STARTING" | "VERIFYING") {
