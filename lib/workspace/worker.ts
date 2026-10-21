@@ -20,7 +20,11 @@ export async function processPendingWorkspaceTasks(input: { limit?: number; proj
   const modelFactory = input.modelFactory ?? createWorkspaceAgentModel;
   return Promise.all(runs.map(async (run) => {
     try {
-      const model = modelFactory(run.modelName, { requirementSpec: run.requirementSpec ?? run.workspace.baseArtifactVersion?.requirementSpec, appBlueprint: run.appBlueprint ?? run.workspace.baseArtifactVersion?.appBlueprint });
+      // A validated run needs only the database-backed commit path. Do not
+      // initialize an external model client just to recover that checkpoint.
+      const model = run.status === "READY_TO_VALIDATE"
+        ? { decide: async () => { throw new Error("Ready run must not consult the model"); } }
+        : modelFactory(run.modelName, { requirementSpec: run.requirementSpec ?? run.workspace.baseArtifactVersion?.requirementSpec, appBlueprint: run.appBlueprint ?? run.workspace.baseArtifactVersion?.appBlueprint });
       const result = await executeWorkspaceTask({ runId: run.id, userId: run.workspace.project.userId, model });
       return { runId: run.id, status: result.run.status, error: null };
     } catch (error) {

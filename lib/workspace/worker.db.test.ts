@@ -81,7 +81,7 @@ dbTest("worker commits a ready run after restart without another model call", as
   const ready = await executeAgentRun({ runId: run.id, userId, model: { decide: async ({ step }: { step: number }) => decisions[step] } });
   assert.equal(ready.status, "READY_TO_VALIDATE");
   assert.equal(await prisma.artifactVersion.count({ where: { generationRequestId: `workspace:${workspace.id}` } }), 0);
-  const modelFactory = () => ({ decide: async () => { throw new Error("Ready run must not call model"); } });
+  const modelFactory = () => { throw new Error("Ready run must not initialize the model"); };
   const processed = await processPendingWorkspaceTasks({ projectId, modelFactory });
   assert.deepEqual(processed.map(({ status, error }) => [status, error]), [["COMMITTED", null]]);
   assert.equal(await prisma.artifactVersion.count({ where: { generationRequestId: `workspace:${workspace.id}` } }), 1);

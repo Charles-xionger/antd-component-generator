@@ -58,6 +58,10 @@
 
 原先模型适配器会正确拒绝截断/多条工具调用，但执行循环将其直接升级为整段任务 `FAILED`。现改为持久化不含文件变更的失败步骤与 `model.response_rejected` 事件，把结构化错误交回下一轮模型决策；已有文件不重写，同类失败连续出现则以 `NO_PROGRESS` 停止。新建隔离 PostgreSQL 下完整 Workspace/Agent/API 测试 63/63、Next 构建、真实 HTTP E2E 通过；`pnpm lint` 为 0 错误、7 个既有 warning。测试容器已清理。
 
+### 最后审查补充：已校验任务脱离模型服务提交
+
+`READY_TO_VALIDATE` 任务在 Worker 重启后原本仍先初始化模型客户端，导致模型配置异常时阻断纯数据库的版本提交。回归测试先复现该失败，再让 Worker 对此状态跳过模型初始化；已校验修订可直接走幂等提交。隔离 PostgreSQL 下完整 Workspace/Agent/API 测试 63/63、TypeScript 检查、Next 构建、真实 HTTP E2E 通过；`pnpm lint` 为 0 错误、7 个既有 warning。测试容器已清理。
+
 ## 用户 Review 与目标环境待办
 
 ### 分支集成门槛
