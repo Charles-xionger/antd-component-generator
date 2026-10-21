@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -115,10 +116,10 @@ export function ChatSidebar({
           输入需求创建
         </Button>
         <Button asChild className="w-full justify-start gap-2" variant="ghost">
-          <a href="/deployments">
+          <Link href="/deployments">
             <Rocket className="h-4 w-4" />
             发布中心
-          </a>
+          </Link>
         </Button>
       </div>
 

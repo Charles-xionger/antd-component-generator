@@ -82,7 +82,7 @@ export function createDeploymentStatusService(
       if (!deployment) return null;
       const job = deployment.buildJobs[0];
       const workerStatus = deploymentWorkerStatus(deployment, job);
-      const progress = getPublicationProgress(workerStatus);
+      const baseProgress = getPublicationProgress(workerStatus);
       const activities = job
         ? parsePublicationLog(job.log).map((event) => ({
             ...event,
@@ -90,7 +90,7 @@ export function createDeploymentStatusService(
           }))
         : [];
       const errorMessage = job?.errorMessage || deployment.errorMessage;
-      const failedStage = activities.at(-1)?.stage ?? progress.stage;
+      const failedStage = activities.at(-1)?.stage ?? baseProgress.stage;
       const failedStageLabel = {
         preparing: "准备",
         building: "构建",
@@ -99,6 +99,21 @@ export function createDeploymentStatusService(
         verifying: "验证",
         switching: "切换流量",
       }[failedStage];
+      const progress = workerStatus === "FAILED"
+        ? {
+            ...baseProgress,
+            stage: failedStage,
+            stageLabel: failedStageLabel,
+            progress: {
+              preparing: 5,
+              building: 38,
+              uploading: 55,
+              starting: 70,
+              verifying: 86,
+              switching: 100,
+            }[failedStage],
+          }
+        : baseProgress;
       const error = errorMessage
         ? {
             ...classifyPublicationError(errorMessage),

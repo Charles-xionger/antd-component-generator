@@ -223,3 +223,26 @@ test("emits a safe named error before completing a failed deployment", async () 
   assert.match(body, /event: error\ndata: .*"health_check_failed"/);
   assert.ok(body.indexOf("event: error") < body.indexOf("event: complete"));
 });
+
+test("treats a cancelled browser subscription as a normal stream shutdown", async () => {
+  const abort = new AbortController();
+  const handle = createDeploymentEventsHandler({
+    authenticate: async () => "user-1",
+    loadSnapshot: async () => runningSnapshot([1]),
+    pollIntervalMs: 0,
+  });
+  const response = await handle(
+    new Request("https://oompt.test/api/deployments/deployment-go/events", {
+      signal: abort.signal,
+    }),
+    "deployment-go",
+  );
+  const reader = response.body!.getReader();
+
+  await reader.read();
+  abort.abort();
+  await reader.cancel();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(abort.signal.aborted, true);
+});

@@ -147,6 +147,9 @@ test("reports the actual failed stage and deterministic recovery guidance", asyn
 
   assert.equal(snapshot?.state, "failed");
   assert.equal(snapshot?.previousVersionAvailable, true);
+  assert.equal(snapshot?.progress.stage, "uploading");
+  assert.equal(snapshot?.progress.stageLabel, "上传");
+  assert.equal(snapshot?.progress.progress, 55);
   assert.equal(snapshot?.error?.stage, "uploading");
   assert.equal(snapshot?.error?.stageLabel, "上传");
   assert.equal(snapshot?.error?.code, "data_preparation_failed");

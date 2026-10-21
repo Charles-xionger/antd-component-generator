@@ -40,8 +40,37 @@ export function createDeploymentEventsHandler(dependencies: DeploymentEventsDepe
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
+        let closed = false;
         const send = (event: string, data: unknown, id?: number) => {
-          controller.enqueue(encoder.encode(encodeSse(event, data, id)));
+          if (closed) return false;
+          try {
+            controller.enqueue(encoder.encode(encodeSse(event, data, id)));
+            return true;
+          } catch {
+            // The browser may cancel the response before request.signal observes
+            // the disconnect. Treat that as a normal stream shutdown.
+            closed = true;
+            return false;
+          }
+        };
+        const sendComment = (comment: string) => {
+          if (closed) return false;
+          try {
+            controller.enqueue(encoder.encode(`: ${comment}\n\n`));
+            return true;
+          } catch {
+            closed = true;
+            return false;
+          }
+        };
+        const close = () => {
+          if (closed) return;
+          closed = true;
+          try {
+            controller.close();
+          } catch {
+            // A cancelled response is already closed by the runtime.
+          }
         };
         const finish = (current: DeploymentStatusSnapshot) => {
           if (current.state === "failed") send("error", current.error || {
@@ -52,7 +81,7 @@ export function createDeploymentEventsHandler(dependencies: DeploymentEventsDepe
             state: current.state,
             lastSequence: current.lastSequence,
           });
-          controller.close();
+          close();
         };
         let cursor = isResume ? parsedCursor : snapshot.lastSequence;
         let previousStatus = JSON.stringify(statusPayload(snapshot));
@@ -79,7 +108,7 @@ export function createDeploymentEventsHandler(dependencies: DeploymentEventsDepe
             const current = await dependencies.loadSnapshot(deploymentId, userId);
             if (!current) {
               send("error", { code: "not_found", title: "发布任务不可用" });
-              controller.close();
+              close();
               return;
             }
             for (const activity of current.activities.filter((event) => event.sequence > cursor)) {
@@ -96,18 +125,22 @@ export function createDeploymentEventsHandler(dependencies: DeploymentEventsDepe
               return;
             }
             heartbeat += 1;
-            if (heartbeat % 15 === 0) controller.enqueue(encoder.encode(": heartbeat\n\n"));
+            if (heartbeat % 15 === 0 && !sendComment("heartbeat")) return;
           }
-          controller.close();
+          close();
         };
         void poll().catch((error) => {
+          if (request.signal.aborted || closed) {
+            close();
+            return;
+          }
           send("error", {
             code: "stream_failed",
             title: "实时连接暂时中断",
             retryable: true,
           });
           void error;
-          controller.close();
+          close();
         });
       },
     });
