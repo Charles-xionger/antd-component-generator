@@ -102,6 +102,43 @@ dbTest("run_command accepts only named checks and leaves workspace files unchang
   await closeDraftWorkspace({ workspaceId: workspace.id, userId });
 });
 
+dbTest("plan updates and structured scenarios survive as workspace data without a JSON envelope from the model", async () => {
+  const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Build an item flow", runtimeType: "GO", maxSteps: 5 });
+  const decisions = [
+    { kind: "tool", name: "update_plan", arguments: { summary: "Build and check item flow", steps: [{ id: "acceptance", title: "Write acceptance scenarios", status: "in_progress" }] } },
+    { kind: "tool", name: "write_scenarios", arguments: { scenarios: [] } },
+    { kind: "tool", name: "write_scenarios", arguments: { scenarios: [{ id: "basic", description: "Get item", steps: [{ operationId: "get.item" }] }] } },
+    { kind: "question", question: "Which data source?" },
+  ];
+  const result = await executeAgentRun({ runId: run.id, userId, model: { decide: async ({ step }) => decisions[step] } });
+  assert.equal(result.status, "NEEDS_INPUT");
+  assert.deepEqual((await prisma.agentRun.findUniqueOrThrow({ where: { id: run.id } })).plan, { summary: "Build and check item flow", steps: [{ id: "acceptance", title: "Write acceptance scenarios", status: "in_progress" }] });
+  const file = await readDraftFile({ workspaceId: workspace.id, userId, path: "acceptance/scenarios.json" });
+  assert.deepEqual(JSON.parse(file.content).scenarios[0].steps[0].operationId, "get.item");
+  assert.equal((await prisma.draftWorkspace.findUniqueOrThrow({ where: { id: workspace.id } })).revision, 1);
+  assert.equal((await prisma.agentEvent.count({ where: { runId: run.id, type: "plan.updated" } })), 2);
+  const invalid = await prisma.agentRunStep.findUniqueOrThrow({ where: { runId_number: { runId: run.id, number: 1 } } });
+  assert.equal((invalid.result as { ok: boolean }).ok, false);
+  await closeDraftWorkspace({ workspaceId: workspace.id, userId });
+});
+
+dbTest("a validated completion closes the durable plan before version commit", async () => {
+  const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Build a page", runtimeType: "STATIC", maxSteps: 4 });
+  const decisions = [
+    { kind: "tool", name: "update_plan", arguments: { summary: "Build a page", steps: [{ id: "page", title: "Write page", status: "in_progress" }, { id: "check", title: "Validate", status: "pending" }] } },
+    { kind: "tool", name: "write_file", arguments: { path: "frontend/App.tsx", content: "export default function App() { return null; }" } },
+    { kind: "complete", summary: "Ready" },
+  ];
+  const result = await executeAgentRun({ runId: run.id, userId, model: { decide: async ({ step }) => decisions[step] } });
+  assert.equal(result.status, "READY_TO_VALIDATE");
+  const saved = await prisma.agentRun.findUniqueOrThrow({ where: { id: run.id } });
+  assert.deepEqual((saved.plan as { steps: Array<{ status: string }> }).steps.map((step) => step.status), ["completed", "completed"]);
+  assert.equal(await prisma.agentEvent.count({ where: { runId: run.id, type: "plan.updated" } }), 3);
+  await closeDraftWorkspace({ workspaceId: workspace.id, userId });
+});
+
 dbTest("reclaims a decided write after a crash without rewriting its receipt", async () => {
   const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
   const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Resume a page", runtimeType: "STATIC", maxSteps: 3 });

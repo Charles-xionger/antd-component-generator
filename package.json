@@ -21,6 +21,8 @@
     "test:app-runtime": "tsx --test lib/app-contracts.test.ts lib/agent/product-nodes.test.ts lib/chat/item-presentation.test.ts lib/chat/structured-message.test.ts lib/publishing/publish-flow.test.ts lib/publishing/deployment-events.test.ts lib/publishing/deployment-status.test.ts lib/publishing/deployment-stream.test.ts lib/publishing/realtime-ui.test.ts lib/go-runtime/schema.test.ts lib/go-runtime/acceptance.test.ts lib/go-runtime/artifact-validator.test.ts lib/go-runtime/builder.test.ts lib/data-gateway/manifest.test.ts lib/data-gateway/schema-diff.test.ts",
     "test:fullstack-e2e": "tsx test/fullstack-runtime-e2e.ts",
     "test:publishing-e2e": "prisma generate && tsx test/publishing-flow-e2e.ts",
+    "test:workspace-http-e2e": "tsx test/workspace-agent-http-e2e.ts",
+    "test:workspace-browser-fixture": "tsx test/workspace-agent-browser-fixture.ts",
     "worker:build": "tsx lib/build-jobs/worker.ts",
     "worker:agent": "tsx lib/workspace/worker.ts"
   },

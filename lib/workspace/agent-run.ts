@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { appBlueprintSchema, requirementSpecSchema } from "@/lib/app-contracts";
+import { acceptanceScenarioSuiteSchema, appBlueprintSchema, requirementSpecSchema } from "@/lib/app-contracts";
 import prisma from "@/lib/database/prisma";
 import { validateAcceptanceScenarios, validateJsonFile } from "./diagnostics";
 import { appendAgentEvent } from "./events";
@@ -10,7 +10,7 @@ import { inspectWorkspaceDiagnostics, runWorkspaceCommand, validateAndRecordWork
 
 const toolDecisionSchema = z.object({
   kind: z.literal("tool"),
-  name: z.enum(["list_files", "search_files", "read_file", "read_file_range", "write_file", "patch_file", "delete_file", "validate_json", "validate_schema", "validate_workspace", "inspect_diagnostics", "run_command"]),
+  name: z.enum(["list_files", "search_files", "read_file", "read_file_range", "write_file", "write_json_file", "write_scenarios", "patch_file", "delete_file", "update_plan", "validate_json", "validate_schema", "validate_workspace", "inspect_diagnostics", "run_command"]),
   arguments: z.record(z.string(), z.unknown()),
 }).strict();
 const decisionSchema = z.discriminatedUnion("kind", [
@@ -26,6 +26,7 @@ export type AgentModel = { decide(observation: {
   workspaceId: string;
   revision: number;
   step: number;
+  plan: unknown;
   previousResult: unknown;
   history: Array<{ step: number; action: string; path?: string; outcome?: string }>;
 }): Promise<unknown> };
@@ -36,6 +37,12 @@ const patchSchema = locationSchema.extend({ oldText: z.string().min(1), newText:
 const searchSchema = z.object({ query: z.string().min(1).max(512), maxResults: z.number().int().min(1).max(100).optional() }).strict();
 const rangeSchema = locationSchema.extend({ startLine: z.number().int().min(1), endLine: z.number().int().min(1) });
 const commandSchema = z.object({ command: z.enum(["typecheck_frontend", "build_frontend", "build_backend"]) }).strict();
+const jsonWriteSchema = locationSchema.extend({ value: z.record(z.string(), z.unknown()) });
+const scenarioWriteSchema = z.object({ scenarios: z.array(z.unknown()) }).strict();
+const planSchema = z.object({
+  summary: z.string().min(1).max(2000),
+  steps: z.array(z.object({ id: z.string().min(1).max(80), title: z.string().min(1).max(200), status: z.enum(["pending", "in_progress", "completed"]) }).strict()).min(1).max(20),
+}).strict();
 const diagnosticFingerprint = (value: unknown) => Array.isArray(value)
   ? value.map((item) => {
       const diagnostic = item as Record<string, unknown>;
@@ -47,6 +54,21 @@ async function ownedRun(runId: string, userId: string) {
   const run = await prisma.agentRun.findFirst({ where: { id: runId, workspace: { project: { userId, status: "ACTIVE" } } }, include: { workspace: { include: { baseArtifactVersion: true } } } });
   if (!run) throw new WorkspaceError("NOT_FOUND", "Agent run not found");
   return run;
+}
+
+async function updateAgentPlan(input: { runId: string; workspaceId: string; leaseToken: string; expectedRevision: number; toolCallId: string; value: unknown }) {
+  const plan = planSchema.parse(input.value);
+  await prisma.$transaction(async (tx) => {
+    const workspace = await tx.draftWorkspace.findFirst({ where: { id: input.workspaceId, revision: input.expectedRevision, status: "ACTIVE" }, select: { id: true } });
+    if (!workspace) throw new WorkspaceError("REVISION_CONFLICT", "Workspace revision changed before plan update");
+    const updated = await tx.agentRun.updateMany({
+      where: { id: input.runId, workspaceId: input.workspaceId, status: "RUNNING", leaseToken: input.leaseToken, leaseUntil: { gt: new Date() } },
+      data: { plan: JSON.parse(JSON.stringify(plan)) },
+    });
+    if (updated.count !== 1) throw new WorkspaceError("RUN_LEASE_LOST", "Agent lease was lost before plan update");
+    await appendAgentEvent(tx, { runId: input.runId, type: "plan.updated", itemId: input.toolCallId, toolCallId: input.toolCallId, payload: { ...plan, revision: input.expectedRevision } });
+  });
+  return { plan, revision: input.expectedRevision };
 }
 
 export async function createAgentRun(input: { workspaceId: string; userId: string; requestId: string; goal: string; runtimeType: "STATIC" | "GO"; modelName?: string; requirementSpec?: unknown; appBlueprint?: unknown; maxSteps?: number; timeoutMs?: number }) {
@@ -86,6 +108,16 @@ async function executeTool(decision: Extract<Decision, { kind: "tool" }>, contex
     case "read_file": return readDraftFile({ ...scope, ...locationSchema.parse(decision.arguments) });
     case "read_file_range": return readDraftFileRange({ ...scope, ...rangeSchema.parse(decision.arguments) });
     case "write_file": return writeDraftFile({ ...mutation, ...writeSchema.parse(decision.arguments) });
+    case "write_json_file": {
+      const { path, value } = jsonWriteSchema.parse(decision.arguments);
+      if (!path.endsWith(".json") || path === "acceptance/scenarios.json") throw new WorkspaceError("INVALID_JSON_TARGET", "Use write_scenarios for acceptance/scenarios.json; other JSON targets must end in .json");
+      return writeDraftFile({ ...mutation, path, content: `${JSON.stringify(value, null, 2)}\n` });
+    }
+    case "write_scenarios": {
+      const { scenarios } = scenarioWriteSchema.parse(decision.arguments);
+      const suite = acceptanceScenarioSuiteSchema.parse({ scenarios });
+      return writeDraftFile({ ...mutation, path: "acceptance/scenarios.json", content: `${JSON.stringify(suite, null, 2)}\n` });
+    }
     case "patch_file": return patchDraftFile({ ...mutation, ...patchSchema.parse(decision.arguments) });
     case "delete_file": return deleteDraftFile({ ...mutation, ...locationSchema.parse(decision.arguments) });
     case "validate_json": {
@@ -99,6 +131,7 @@ async function executeTool(decision: Extract<Decision, { kind: "tool" }>, contex
     case "validate_workspace": return validateAndRecordWorkspaceRevision({ ...scope, revision: context.expectedRevision, runtimeType: context.runtimeType, blueprint: context.appBlueprint as never });
     case "inspect_diagnostics": return inspectWorkspaceDiagnostics({ ...scope, revision: context.expectedRevision });
     case "run_command": return runWorkspaceCommand({ ...scope, revision: context.expectedRevision, runtimeType: context.runtimeType, ...commandSchema.parse(decision.arguments) });
+    case "update_plan": return updateAgentPlan({ runId: context.runId, workspaceId: context.workspaceId, leaseToken: context.leaseToken, expectedRevision: context.expectedRevision, toolCallId: context.toolCallId, value: decision.arguments });
   }
 }
 
@@ -152,7 +185,7 @@ export async function executeAgentRun(input: { runId: string; userId: string; mo
           const args = choice?.kind === "tool" ? choice.arguments : null;
           return { step: entry.number, action: choice?.kind === "tool" ? choice.name : choice?.kind ?? "unknown", path: typeof args?.path === "string" ? args.path : undefined, outcome: typeof error?.code === "string" ? error.code : typeof validation?.status === "string" ? validation.status : result?.ok === true ? "ok" : undefined };
         });
-        const response = await input.model.decide({ goal: run.goal, workspaceId: run.workspaceId, revision: run.workspace.revision, step: run.nextStep, previousResult: prior?.result, history });
+        const response = await input.model.decide({ goal: run.goal, workspaceId: run.workspaceId, revision: run.workspace.revision, step: run.nextStep, plan: run.plan, previousResult: prior?.result, history });
         const decision = decisionSchema.parse(response);
         await renew();
         if (leaseLost) throw new WorkspaceError("RUN_LEASE_LOST", "Agent run lease was lost");
@@ -170,15 +203,18 @@ export async function executeAgentRun(input: { runId: string; userId: string; mo
         const previousValidation = prior?.result && typeof prior.result === "object" ? (prior.result as { validation?: { revision?: number; diagnostics?: unknown } }).validation : undefined;
         const noProgress = validation?.status === "FAILED" && previousValidation?.revision === expectedRevision && diagnosticFingerprint(previousValidation.diagnostics) === diagnosticFingerprint(validation.diagnostics);
         const status = decision.kind === "question" ? "NEEDS_INPUT" : validation?.status === "PASSED" ? "READY_TO_VALIDATE" : noProgress ? "NO_PROGRESS" : "RUNNING";
+        const currentPlan = status === "READY_TO_VALIDATE" ? planSchema.safeParse(run.plan) : null;
+        const completedPlan = currentPlan?.success ? { ...currentPlan.data, steps: currentPlan.data.steps.map((planStep) => ({ ...planStep, status: "completed" as const })) } : null;
         const result = decision.kind === "question" ? { question: decision.question } : { validation: { revision: validation!.revision, validationRunId: validation!.validationRunId, status: validation!.status, diagnostics: validation!.diagnostics } };
         await prisma.$transaction(async (tx) => {
-          const updated = await tx.agentRun.updateMany({ where: { id: run.id, status: "RUNNING", leaseToken, leaseUntil: { gt: new Date() } }, data: { status, nextStep: { increment: 1 }, summary: status === "NO_PROGRESS" ? "Same validation diagnostics repeated without a workspace change" : decision.kind === "complete" ? decision.summary : decision.question, ...(status === "RUNNING" ? { leaseUntil: new Date(Date.now() + 120_000) } : { leaseToken: null, leaseUntil: null }) } });
+          const updated = await tx.agentRun.updateMany({ where: { id: run.id, status: "RUNNING", leaseToken, leaseUntil: { gt: new Date() } }, data: { status, nextStep: { increment: 1 }, summary: status === "NO_PROGRESS" ? "Same validation diagnostics repeated without a workspace change" : decision.kind === "complete" ? decision.summary : decision.question, ...(completedPlan ? { plan: JSON.parse(JSON.stringify(completedPlan)) } : {}), ...(status === "RUNNING" ? { leaseUntil: new Date(Date.now() + 120_000) } : { leaseToken: null, leaseUntil: null }) } });
           if (updated.count !== 1) throw new WorkspaceError("RUN_LEASE_LOST", "Agent run lease was lost before completing a step");
           await tx.agentRunStep.update({ where: { runId_number: { runId: run.id, number: run.nextStep } }, data: { status: "COMPLETED", result, completedAt: new Date() } });
           if (validation) {
             await appendAgentEvent(tx, { runId: run.id, type: "validation.completed", itemId, payload: { revision: expectedRevision, validationRunId: validation.validationRunId, status: validation.status, diagnosticCount: validation.diagnostics.length } });
             for (const diagnostic of validation.diagnostics) await appendAgentEvent(tx, { runId: run.id, type: "diagnostic.created", itemId: `${validation.validationRunId}:${diagnostic.id}`, payload: { revision: expectedRevision, diagnostic } });
             for (const check of validation.checks) if (check.output) await appendAgentEvent(tx, { runId: run.id, type: "command.output", itemId: `${validation.validationRunId}:${check.name}`, payload: { revision: expectedRevision, check: check.name, output: check.output } });
+            if (completedPlan) await appendAgentEvent(tx, { runId: run.id, type: "plan.updated", itemId: `${itemId}:completed`, payload: { ...completedPlan, revision: expectedRevision } });
           } else {
             await appendAgentEvent(tx, { runId: run.id, type: "question.asked", itemId, payload: { question: decision.kind === "question" ? decision.question : "" } });
           }

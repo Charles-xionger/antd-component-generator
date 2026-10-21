@@ -12,11 +12,15 @@ export function workspaceRunLabel(status: string): string {
   return labels[status] ?? "状态待确认";
 }
 
+export function workspaceEventSection(type: string): "summary" | "details" {
+  return ["tool.started", "tool.completed", "command.output"].includes(type) ? "details" : "summary";
+}
+
 export function workspaceEventLabel(event: { type: string; payload: Record<string, unknown> }): string | null {
   const payload = event.payload;
   const path = typeof payload.path === "string" ? payload.path : null;
   switch (event.type) {
-    case "plan.updated": return "任务已排队";
+    case "plan.updated": return typeof payload.summary === "string" ? `计划已更新：${payload.summary}` : "任务已排队";
     case "run.started": return "开始处理工作区";
     case "tool.started": return `正在执行 ${String(payload.name ?? "工具")}${path ? ` · ${path}` : ""}`;
     case "tool.completed": return payload.ok === false ? `工具失败：${String(payload.name ?? "工具")}${payload.error && typeof payload.error === "object" ? ` · ${String((payload.error as { message?: unknown }).message ?? "")}` : ""}` : null;

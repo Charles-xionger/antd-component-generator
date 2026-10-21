@@ -6,7 +6,7 @@ export type WorkspaceEvent = { sequence: number; type: string; payload: Record<s
 type RunView = { id: string; workspaceId: string; status: string; summary: string | null; nextStep: number; maxSteps: number };
 type WorkspaceView = { id: string; revision: number; status: string };
 
-export function useWorkspaceActivity(projectId?: string, onFiles?: (workspaceId: string, files: Array<{ path: string; content: string }>) => void, onCommitted?: () => void) {
+export function useWorkspaceActivity(projectId?: string, onFiles?: (workspaceId: string, files: Array<{ path: string; content: string }>) => void, onCommitted?: (fresh: boolean) => void) {
   const [workspace, setWorkspace] = useState<WorkspaceView | null>(null);
   const [run, setRun] = useState<RunView | null>(null);
   const [events, setEvents] = useState<WorkspaceEvent[]>([]);
@@ -72,14 +72,10 @@ export function useWorkspaceActivity(projectId?: string, onFiles?: (workspaceId:
         setWorkspace(currentWorkspace);
         if (currentRun?.id === runId) setRun(currentRun);
         const incoming = (eventData.events || []) as WorkspaceEvent[];
+        const committed = incoming.some((event) => event.type === "artifact.committed");
         if (incoming.length) {
           cursorRef.current = eventData.nextCursor;
           setEvents((previous) => [...previous, ...incoming].slice(-100));
-          const commit = incoming.find((event) => event.type === "artifact.committed");
-          if (commit && committedRef.current !== runId) {
-            committedRef.current = runId;
-            callbacksRef.current.onCommitted?.();
-          }
         }
         if (revisionRef.current !== currentWorkspace.revision) {
           const listResponse = await fetch(`${base}/files`, { cache: "no-store" });
@@ -94,6 +90,10 @@ export function useWorkspaceActivity(projectId?: string, onFiles?: (workspaceId:
             revisionRef.current = listing.revision;
             callbacksRef.current.onFiles?.(workspaceId, files);
           }
+        }
+        if (committed && committedRef.current !== runId) {
+          committedRef.current = runId;
+          callbacksRef.current.onCommitted?.(attachedRunRef.current === runId);
         }
         setError(null);
       } catch (reason) {

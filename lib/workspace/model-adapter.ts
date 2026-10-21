@@ -12,6 +12,8 @@ const toolDefinitions = [
   ["read_file", "Read one workspace file.", { path: pathField }],
   ["read_file_range", "Read a bounded line range of one file.", { path: pathField, startLine: { type: "integer" }, endLine: { type: "integer" } }],
   ["write_file", "Write exactly one workspace file.", { path: pathField, content: stringField }],
+  ["write_json_file", "Write one non-scenario JSON object. The runtime serializes the object; never handwrite its JSON envelope.", { path: pathField, value: { type: "object" } }],
+  ["write_scenarios", "Write acceptance/scenarios.json from an array of scenario objects. The runtime validates the suite and constructs the required {scenarios:[...]} envelope.", { scenarios: { type: "array", items: { type: "object" } } }],
   ["patch_file", "Replace one exact span in one workspace file.", { path: pathField, oldText: stringField, newText: stringField }],
   ["delete_file", "Delete exactly one workspace file.", { path: pathField }],
   ["validate_json", "Parse and diagnose one JSON workspace file.", { path: pathField }],
@@ -19,6 +21,7 @@ const toolDefinitions = [
   ["validate_workspace", "Run all required contract, TypeScript, frontend build, and applicable Go checks for the current revision.", {}],
   ["inspect_diagnostics", "Read the most recent validation diagnostics for the current revision.", {}],
   ["run_command", "Run one allowlisted workspace check without shell access: typecheck_frontend, build_frontend, or build_backend.", { command: { type: "string", enum: ["typecheck_frontend", "build_frontend", "build_backend"] } }],
+  ["update_plan", "Persist a concise plan with 1-20 steps. Each step has id, title and pending/in_progress/completed status.", { summary: stringField, steps: { type: "array", items: { type: "object", properties: { id: stringField, title: stringField, status: { type: "string", enum: ["pending", "in_progress", "completed"] } }, required: ["id", "title", "status"], additionalProperties: false } } }],
   ["complete", "Finish the coding phase when the workspace is ready for validation.", { summary: stringField }],
   ["ask_question", "Stop when a user decision is essential.", { question: stringField }],
 ] as const;
@@ -52,8 +55,8 @@ export function createWorkspaceAgentModel(modelName: string, context: { requirem
     async decide(observation) {
       const previous = JSON.stringify(observation.previousResult ?? null).slice(0, 16_000);
       const response = await bound.invoke([
-        new SystemMessage("You are a workspace coding agent. The database workspace is the only source of code. Call exactly one provided tool each turn. Never output <boltArtifact>, file-change events, or complete project snapshots in text. Read relevant files before editing. Use precise file writes or patches, inspect tool results, and call complete only when the coding phase is ready for validation. Ask a question only if user input is essential."),
-        new HumanMessage(JSON.stringify({ goal: observation.goal, requirementSpec: context.requirementSpec, appBlueprint: context.appBlueprint, workspaceId: observation.workspaceId, revision: observation.revision, step: observation.step, history: observation.history, previousResult: previous })),
+        new SystemMessage("You are a workspace coding agent. The database workspace is the only source of code. Call exactly one provided tool each turn. Never output <boltArtifact>, file-change events, or complete project snapshots in text. Read relevant files before editing. For JSON files use write_json_file, and for acceptance/scenarios.json use write_scenarios so the runtime constructs its required envelope. Keep the plan current with update_plan. Use precise file writes or patches, inspect tool results, and call complete only when the coding phase is ready for validation. Ask a question only if user input is essential."),
+        new HumanMessage(JSON.stringify({ goal: observation.goal, requirementSpec: context.requirementSpec, appBlueprint: context.appBlueprint, workspaceId: observation.workspaceId, revision: observation.revision, step: observation.step, plan: observation.plan, history: observation.history, previousResult: previous })),
       ]);
       return parseWorkspaceToolDecision(response);
     },

@@ -11,7 +11,7 @@ import "@/app/split-pane.css";
 import { useChat } from "@/hooks/use-chat";
 import { useCanvas } from "@/hooks/use-canvas";
 import { useWorkspaceActivity } from "@/hooks/use-workspace-activity";
-import { workspaceEventLabel, workspaceRunLabel } from "@/lib/workspace/presentation";
+import { workspaceEventLabel, workspaceEventSection, workspaceRunLabel } from "@/lib/workspace/presentation";
 import { SANDBOX_ORIGIN } from "@/lib/sandbox-config";
 
 // Components
@@ -116,14 +116,25 @@ export function UnifiedChat({
   const workspaceActivity = useWorkspaceActivity(
     projectId,
     canvas.setWorkspaceFiles,
-    () => {
+    (fresh) => {
       void canvas.refreshVersionList();
       canvas.setShouldSendToSandbox(true);
-      toast.success("工作区验证通过，已保存版本");
+      if (fresh) toast.success("工作区验证通过，已保存版本");
     },
   );
   const attachWorkspaceRun = workspaceActivity.attach;
   const workspaceBusy = Boolean(workspaceActivity.run && ["QUEUED", "RUNNING", "READY_TO_VALIDATE"].includes(workspaceActivity.run.status));
+  const latestPlan = [...workspaceActivity.events].reverse().find((event) => event.type === "plan.updated" && Array.isArray(event.payload.steps));
+  const planSteps = latestPlan?.payload.steps as Array<{ id: string; title: string; status: string }> | undefined;
+  const visibleEvents = workspaceActivity.events.filter((event) => workspaceEventSection(event.type) === "summary" && workspaceEventLabel(event)).slice(-10);
+  const detailEvents = workspaceActivity.events.filter((event) => workspaceEventSection(event.type) === "details").slice(-20);
+  const openWorkspaceFile = (path: string) => {
+    const file = canvas.artifact?.files.find((entry) => entry.path === path);
+    if (!file) return;
+    canvas.selectFile(file);
+    canvas.setActiveTab("code");
+    setIsCanvasVisible(true);
+  };
   const cancelWorkspaceRun = useCallback(async () => {
     if (!workspaceActivity.workspace || !workspaceActivity.run) return;
     const response = await fetch(`/api/workspaces/${workspaceActivity.workspace.id}/runs/${workspaceActivity.run.id}/cancel`, { method: "POST" });
@@ -455,7 +466,7 @@ ${sandboxError}
   }, [canvas.artifact, canvas.versions]);
 
   return (
-    <div className="h-full bg-background">
+    <div className="workspace-chat-layout h-full bg-background" data-mobile-pane={isCanvasVisible ? "canvas" : "chat"}>
       <SplitPane
         // 兼容性修复：react-split-pane 类型定义可能不包含 split 属性，但组件本身支持
         // @ts-expect-error react-split-pane props compatibility
@@ -525,10 +536,10 @@ ${sandboxError}
               ))}
 
               {/* 🔥 生成状态卡片 */}
-              <GenerationStatusCard />
+              {!workspaceActivity.run && <GenerationStatusCard />}
 
               {workspaceActivity.run && (
-                <section className="rounded-lg border border-border bg-muted/40 p-3 text-sm" aria-label="工作区任务进度">
+                <section className="rounded-lg border border-border bg-muted/40 p-3 text-sm" aria-label="工作区任务进度" aria-live="polite">
                   <div className="flex items-center justify-between gap-2">
                     <span>工作区任务 · {workspaceRunLabel(workspaceActivity.run.status)} · 第 {workspaceActivity.run.nextStep}/{workspaceActivity.run.maxSteps} 步</span>
                     {workspaceBusy && (
@@ -536,12 +547,28 @@ ${sandboxError}
                     )}
                   </div>
                   {workspaceActivity.run.summary && <p className="mt-1 text-muted-foreground">{workspaceActivity.run.summary}</p>}
+                  {planSteps && (
+                    <ol className="mt-2 space-y-1" aria-label="工作区计划">
+                      {planSteps.map((step) => <li key={step.id}>{step.status === "completed" ? "✓" : step.status === "in_progress" ? "→" : "○"} {step.title}</li>)}
+                    </ol>
+                  )}
                   {workspaceActivity.error && <p className="mt-1 text-destructive">{workspaceActivity.error}</p>}
                   <div className="mt-2 max-h-40 space-y-1 overflow-y-auto text-xs text-muted-foreground">
-                    {workspaceActivity.events.filter((event) => workspaceEventLabel(event)).slice(-10).map((event) => (
-                      <div key={event.sequence}>{workspaceEventLabel(event)}</div>
-                    ))}
+                    {visibleEvents.map((event) => {
+                      const diagnostic = event.type === "diagnostic.created" && event.payload.diagnostic && typeof event.payload.diagnostic === "object"
+                        ? event.payload.diagnostic as { file?: string; path?: string; code?: string; raw?: string; expected?: string; actual?: string }
+                        : null;
+                      const file = diagnostic?.file && canvas.artifact?.files.some((entry) => entry.path === diagnostic.file) ? diagnostic.file : null;
+                      return (
+                        <div key={event.sequence}>
+                          {workspaceEventLabel(event)}
+                          {file && <button type="button" className="ml-1 underline" onClick={() => openWorkspaceFile(file)}>打开文件</button>}
+                          {diagnostic && <details className="ml-2"><summary>诊断详情</summary><pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all">{[diagnostic.code, diagnostic.path, diagnostic.expected && `预期：${diagnostic.expected}`, diagnostic.actual && `实际：${diagnostic.actual}`, diagnostic.raw?.slice(0, 4000)].filter(Boolean).join("\n")}</pre></details>}
+                        </div>
+                      );
+                    })}
                   </div>
+                  {detailEvents.length > 0 && <details className="mt-2 text-xs text-muted-foreground"><summary>工具明细（{detailEvents.length}）</summary><div className="max-h-40 space-y-1 overflow-y-auto">{detailEvents.map((event) => <div key={event.sequence}>{workspaceEventLabel(event) ?? `${event.type} · ${String(event.payload.check ?? event.payload.name ?? "")}`}{event.type === "command.output" && typeof event.payload.output === "string" && <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-all">{event.payload.output.slice(0, 4000)}</pre>}</div>)}</div></details>}
                 </section>
               )}
 
@@ -581,6 +608,7 @@ ${sandboxError}
         {/* Right: Canvas Panel (Always visible) */}
         <Pane minSize="300px">
           <div className="flex h-full flex-col">
+            <button type="button" className="border-b px-3 py-2 text-left text-sm md:hidden" onClick={() => setIsCanvasVisible(false)}>← 返回对话</button>
             <CanvasPanel
               projectId={projectId}
               canvas={canvas}

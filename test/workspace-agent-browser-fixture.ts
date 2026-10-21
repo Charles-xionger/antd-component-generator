@@ -1,0 +1,165 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { createServer, request as httpRequest, type Server } from "node:http";
+import { createServer as createTcpServer } from "node:net";
+import { encode } from "next-auth/jwt";
+import prisma from "@/lib/database/prisma";
+import { processPendingWorkspaceTasks } from "@/lib/workspace/worker";
+
+if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL must point to an isolated test PostgreSQL database");
+
+async function freePort() {
+  return new Promise<number>((resolve, reject) => {
+    const server = createTcpServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") return reject(new Error("No port"));
+      server.close(() => resolve(address.port));
+    });
+  });
+}
+
+const requirement = {
+  name: "文本整理工具", goal: "将输入文本整理为统一格式", actors: ["业务用户"], workflows: ["输入文本并整理"],
+  entities: [], businessRules: [], outOfScope: ["账号与多人协作"], acceptanceCriteria: ["输入文本后可查看整理结果"], confirmed: true,
+};
+const blueprint = {
+  blueprintVersion: 1, runtimeType: "STATIC", product: { name: requirement.name, goal: requirement.goal, actors: requirement.actors, workflows: requirement.workflows, acceptanceCriteria: requirement.acceptanceCriteria },
+  pages: [{ id: "formatter", title: "文本整理", route: "/", operations: [] }], entities: [], operations: [], businessRules: [], dataEvolution: [], testScenarios: [],
+};
+const appFile = `import { useState } from "react";
+export default function App() {
+  const [input, setInput] = useState("");
+  const [output, setOutput] = useState("");
+  return <main style={{ maxWidth: 680, margin: "3rem auto", padding: 24 }}>
+    <h1>文本整理</h1>
+    <textarea aria-label="输入文本" value={input} onChange={(event) => setInput(event.target.value)} />
+    <button style={{ backgroundColor: "#444", color: "white" }} onClick={() => setOutput(input.trim().replace(/\\s+/g, " "))}>整理文本</button>
+    <p aria-label="整理结果">{output}</p>
+  </main>;
+}
+`;
+
+function scriptedResponse(requestBody: Record<string, unknown>) {
+  const messages = Array.isArray(requestBody.messages) ? requestBody.messages as Array<{ role?: string; content?: unknown }> : [];
+  const system = messages.filter((message) => message.role === "system").map((message) => String(message.content ?? "")).join("\n");
+  const latestUser = [...messages].reverse().find((message) => message.role === "user");
+  let content: string | undefined;
+  let tool: { name: string; arguments: Record<string, unknown> } | undefined;
+  if (Array.isArray(requestBody.tools)) {
+    const observation = JSON.parse(String(latestUser?.content ?? "{}")) as { goal?: string; step?: number };
+    const modification = /按钮|blue|颜色/i.test(observation.goal ?? "");
+    if (modification) {
+      tool = observation.step === 0 ? { name: "read_file", arguments: { path: "frontend/App.tsx" } }
+        : observation.step === 1 ? { name: "patch_file", arguments: { path: "frontend/App.tsx", oldText: 'backgroundColor: "#444"', newText: 'backgroundColor: "#2563eb"' } }
+          : { name: "complete", arguments: { summary: "按钮颜色已更新" } };
+    } else {
+      tool = observation.step === 0 ? { name: "update_plan", arguments: { summary: "建立文本整理页面并验证", steps: [{ id: "frontend", title: "编写文本整理页面", status: "in_progress" }, { id: "validation", title: "检查并提交", status: "pending" }] } }
+        : observation.step === 1 ? { name: "write_file", arguments: { path: "frontend/App.tsx", content: appFile } }
+          : { name: "complete", arguments: { summary: "文本整理页面已完成" } };
+    }
+  } else if (system.includes("业务分析师")) content = `<requirementSpec>${JSON.stringify(requirement)}</requirementSpec>`;
+  else if (system.includes("解决方案架构师")) content = `<appBlueprint>${JSON.stringify(blueprint)}</appBlueprint>`;
+  else if (system.includes("意图路由器")) content = `<intentResult>${JSON.stringify({ intent: "MODIFY_APP", confidence: 1, requiresClarification: false, reason: "修改现有页面", requestedCapabilities: [] })}</intentResult>`;
+  else content = "文本整理工具";
+  return { content, tool };
+}
+
+function fakeModelServer() {
+  return createServer(async (request, response) => {
+    if (request.method !== "POST" || request.url !== "/v1/chat/completions") { response.writeHead(404).end(); return; }
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+    const result = scriptedResponse(body);
+    const toolCalls = result.tool ? [{ index: 0, id: `call-${randomUUID()}`, type: "function", function: { name: result.tool.name, arguments: JSON.stringify(result.tool.arguments) } }] : undefined;
+    const model = String(body.model ?? "test-model");
+    if (body.stream !== true) {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ id: `chatcmpl-${randomUUID()}`, object: "chat.completion", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, message: { role: "assistant", content: result.content ?? null, tool_calls: toolCalls }, finish_reason: toolCalls ? "tool_calls" : "stop" }] }));
+      return;
+    }
+    response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
+    const base = { id: `chatcmpl-${randomUUID()}`, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model };
+    response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: "assistant", ...(toolCalls ? { tool_calls: toolCalls } : { content: result.content }) }, finish_reason: null }] })}\n\n`);
+    response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: toolCalls ? "tool_calls" : "stop" }] })}\n\n`);
+    response.end("data: [DONE]\n\n");
+  });
+}
+
+async function listen(server: Server, port: number) {
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", resolve); });
+}
+
+async function waitForNext(port: number, child: ChildProcess, output: () => string) {
+  for (let attempt = 0; attempt < 90; attempt += 1) {
+    if (child.exitCode !== null) throw new Error(`Next.js exited: ${output().slice(-4000)}`);
+    try { if ((await fetch(`http://127.0.0.1:${port}/api/auth/session`)).status < 500) return; } catch { /* start pending */ }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(`Next.js did not start: ${output().slice(-4000)}`);
+}
+
+async function main() {
+  const id = randomUUID();
+  const [modelPort, nextPort, freeProxyPort] = await Promise.all([freePort(), freePort(), freePort()]);
+  const requestedProxyPort = Number(process.env.WORKSPACE_BROWSER_PROXY_PORT);
+  const proxyPort = Number.isInteger(requestedProxyPort) && requestedProxyPort > 1024 && requestedProxyPort < 65536 ? requestedProxyPort : freeProxyPort;
+  const baseUrl = `http://127.0.0.1:${proxyPort}`;
+  const authSecret = `workspace-browser-fixture-${id}`;
+  const modelServer = fakeModelServer();
+  await listen(modelServer, modelPort);
+  process.env.ALIYUN_BASE_URL = `http://127.0.0.1:${modelPort}/v1`;
+  process.env.ALIYUN_API_KEY = "workspace-browser-fixture";
+  const user = await prisma.user.create({ data: { email: `${id}@workspace-browser.test`, name: "工作区验收用户" } });
+  const project = await prisma.project.create({ data: { userId: user.id, name: "新项目", slug: `workspace-browser-${id}`, thread: { create: { userId: user.id, title: "新项目" } } } });
+  const cookieName = "authjs.session-token";
+  const token = await encode({ token: { id: user.id, sub: user.id, name: user.name, email: user.email }, secret: authSecret, salt: cookieName, maxAge: 3600 });
+  let nextOutput = "";
+  const next = spawn("pnpm", ["exec", "next", "start", "-p", String(nextPort)], {
+    cwd: process.cwd(),
+    env: { ...process.env, AUTH_SECRET: authSecret, NEXTAUTH_URL: baseUrl, GITHUB_ID: "workspace-browser-fixture", GITHUB_SECRET: "workspace-browser-fixture" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const collect = (chunk: Buffer) => { nextOutput = `${nextOutput}${chunk.toString()}`.slice(-8000); };
+  next.stdout?.on("data", collect);
+  next.stderr?.on("data", collect);
+  await waitForNext(nextPort, next, () => nextOutput);
+  const proxy = createServer((request, response) => {
+    if (request.url === "/__test_auth") {
+      response.writeHead(302, { "Set-Cookie": `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax`, Location: `/projects/${project.id}` });
+      response.end();
+      return;
+    }
+    const upstream = httpRequest({ hostname: "127.0.0.1", port: nextPort, path: request.url, method: request.method, headers: { ...request.headers, host: `127.0.0.1:${proxyPort}`, "x-forwarded-host": `127.0.0.1:${proxyPort}` } }, (remote) => {
+      response.writeHead(remote.statusCode ?? 502, remote.headers);
+      remote.pipe(response);
+    });
+    upstream.on("error", (error) => { if (!response.headersSent) response.writeHead(502); response.end(error.message); });
+    request.pipe(upstream);
+  });
+  await listen(proxy, proxyPort);
+  let busy = false;
+  const ticker = setInterval(() => {
+    if (busy) return;
+    busy = true;
+    void processPendingWorkspaceTasks({ projectId: project.id, limit: 1 }).catch((error) => console.error("Fixture worker error:", error)).finally(() => { busy = false; });
+  }, 1000);
+  let stopping = false;
+  const stop = async () => {
+    if (stopping) return;
+    stopping = true;
+    clearInterval(ticker);
+    next.kill("SIGTERM");
+    await Promise.all([new Promise<void>((resolve) => proxy.close(() => resolve())), new Promise<void>((resolve) => modelServer.close(() => resolve()))]);
+    await prisma.user.delete({ where: { id: user.id } });
+    await prisma.$disconnect();
+    process.exit(0);
+  };
+  process.once("SIGINT", () => { void stop(); });
+  process.once("SIGTERM", () => { void stop(); });
+  process.stdout.write(`BROWSER_FIXTURE_URL=${baseUrl}/__test_auth\nPROJECT_ID=${project.id}\n`);
+}
+
+void main().catch((error) => { console.error(error); process.exitCode = 1; });

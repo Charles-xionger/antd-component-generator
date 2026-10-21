@@ -58,6 +58,30 @@ body.dragging .Resizer {
   border-right: 5px solid rgba(0, 0, 0, 0.5);
 }
 
+@media (max-width: 767px) {
+  .workspace-chat-layout > .split-pane {
+    display: block !important;
+  }
+
+  .workspace-chat-layout > .split-pane > .split-pane-pane {
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  .workspace-chat-layout > .split-pane > .split-pane-divider {
+    display: none !important;
+  }
+
+  .workspace-chat-layout[data-mobile-pane="chat"] > .split-pane > .split-pane-pane:last-child,
+  .workspace-chat-layout[data-mobile-pane="canvas"] > .split-pane > .split-pane-pane:first-child {
+    display: none !important;
+  }
+
+  .workspace-chat-layout[data-mobile-pane="canvas"] > .split-pane > .split-pane-pane:last-child {
+    display: block !important;
+  }
+}
+
 .Resizer.disabled {
   cursor: not-allowed;
 }

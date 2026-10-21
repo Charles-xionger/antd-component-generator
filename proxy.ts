@@ -32,6 +32,9 @@ export default auth((req) => {
 
   // 未登录且不在登录页，重定向到登录页
   if (!isLoggedIn && !isLoginPage) {
+    if (req.nextUrl.pathname.startsWith("/api/workspaces")) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     return NextResponse.redirect(new URL("/login", req.url));
   }
 
