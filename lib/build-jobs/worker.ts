@@ -9,7 +9,12 @@ import prisma from "@/lib/database/prisma";
 import { assembleGoApplication } from "@/lib/go-runtime/builder";
 import { runAcceptanceScenarios } from "@/lib/go-runtime/acceptance";
 import { projectSchemaName, quoteIdentifier, validateForwardOnlyMigration } from "@/lib/go-runtime/schema";
-import { appendBuildLog } from "./service";
+import { appendBuildActivity } from "./service";
+import {
+  appendPublicationActivity,
+  limitPublicationLog,
+  publicationActivityForStatus,
+} from "@/lib/publishing/deployment-events";
 import { appBlueprintSchema } from "@/lib/app-contracts";
 import { validateFullstackArtifact } from "@/lib/go-runtime/artifact-validator";
 
@@ -41,7 +46,7 @@ async function claimJob() {
 
 async function setStatus(jobId: string, status: "BUILDING" | "MIGRATING" | "TESTING" | "STARTING" | "VERIFYING") {
   await prisma.buildJob.update({ where: { id: jobId }, data: { status, leaseExpiresAt: new Date(Date.now() + 10 * 60_000) } });
-  await appendBuildLog(jobId, `[${status}]`);
+  await appendBuildActivity(jobId, publicationActivityForStatus(status));
 }
 
 async function applyMigrations(projectId: string, environment: "draft" | "prod", directory: string) {
@@ -304,13 +309,26 @@ async function processJob(job: NonNullable<Awaited<ReturnType<typeof claimJob>>>
       ),
       { runId },
     );
-    await appendBuildLog(job.id, `[ACCEPTANCE] ${acceptance.scenarioCount} scenarios, ${acceptance.stepCount} steps passed`);
+    await appendBuildActivity(job.id, {
+      stage: "verifying",
+      level: "success",
+      message: `${acceptance.scenarioCount} 个场景、${acceptance.stepCount} 个步骤已通过验证`,
+    });
   }
 
   const endpoint = `https://${hostname}`;
   const previousActive = job.type === "PUBLISH"
     ? await prisma.project.findUnique({ where: { id: job.projectId }, select: { activeDeploymentId: true } })
     : null;
+  const currentLog = await prisma.buildJob.findUnique({
+    where: { id: job.id },
+    select: { log: true },
+  });
+  const succeeded = appendPublicationActivity(currentLog?.log, {
+    ...publicationActivityForStatus("SUCCEEDED"),
+    timestamp: new Date().toISOString(),
+  });
+  const completedAt = new Date();
   await prisma.$transaction(async (tx) => {
     if (job.type === "PUBLISH") {
       if (!job.deploymentId) throw new Error("Publish job has no deployment");
@@ -319,7 +337,18 @@ async function processJob(job: NonNullable<Awaited<ReturnType<typeof claimJob>>>
       await tx.deployment.update({ where: { id: job.deploymentId }, data: { status: "ACTIVE", runtimeType: "GO", imageRef, endpoint, activatedAt: new Date(), verification: { buildJobId: job.id } } });
       await tx.project.update({ where: { id: job.projectId }, data: { activeDeploymentId: job.deploymentId } });
     }
-    await tx.buildJob.update({ where: { id: job.id }, data: { status: "SUCCEEDED", imageRef, previewUrl: endpoint, completedAt: new Date(), leaseToken: null, leaseExpiresAt: null } });
+    await tx.buildJob.update({
+      where: { id: job.id },
+      data: {
+        status: "SUCCEEDED",
+        imageRef,
+        previewUrl: endpoint,
+        log: limitPublicationLog(succeeded.log),
+        completedAt,
+        leaseToken: null,
+        leaseExpiresAt: null,
+      },
+    });
   });
   if (previousActive?.activeDeploymentId && previousActive.activeDeploymentId !== job.deploymentId) {
     const oldContainer = `prompt-app-${previousActive.activeDeploymentId.replaceAll("-", "").slice(0, 16)}`;
@@ -346,8 +375,25 @@ async function tick() {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await cleanupFailedJob(job);
-    await appendBuildLog(job.id, `[FAILED] ${message}`).catch(() => undefined);
-    await prisma.buildJob.update({ where: { id: job.id }, data: { status: "FAILED", errorMessage: message, completedAt: new Date(), leaseToken: null, leaseExpiresAt: null } });
+    const latest = await prisma.buildJob.findUnique({
+      where: { id: job.id },
+      select: { status: true, log: true },
+    });
+    const failed = appendPublicationActivity(latest?.log, {
+      ...publicationActivityForStatus("FAILED", message, latest?.status),
+      timestamp: new Date().toISOString(),
+    });
+    await prisma.buildJob.update({
+      where: { id: job.id },
+      data: {
+        status: "FAILED",
+        log: limitPublicationLog(failed.log),
+        errorMessage: message,
+        completedAt: new Date(),
+        leaseToken: null,
+        leaseExpiresAt: null,
+      },
+    });
     if (job.deploymentId) await prisma.deployment.update({ where: { id: job.deploymentId }, data: { status: "FAILED", errorMessage: message } });
   }
   return true;

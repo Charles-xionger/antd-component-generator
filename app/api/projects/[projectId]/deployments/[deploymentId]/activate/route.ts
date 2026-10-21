@@ -37,7 +37,12 @@ export async function POST(
     const job = await prisma.buildJob.create({
       data: { type: "PUBLISH", projectId, artifactVersionId: deployment.artifactVersionId, deploymentId: replacement.id },
     });
-    return Response.json({ success: true, job, publishedUrl: `https://${getPublishedHostname(project.slug)}` }, { status: 202 });
+    return Response.json({
+      success: true,
+      job: { id: job.id, status: job.status },
+      deploymentId: replacement.id,
+      publishedUrl: `https://${getPublishedHostname(project.slug)}`,
+    }, { status: 202 });
   }
 
   await prisma.$transaction(async (tx) => {

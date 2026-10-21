@@ -1,4 +1,9 @@
 import prisma from "@/lib/database/prisma";
+import {
+  appendPublicationActivity,
+  limitPublicationLog,
+  type NewPublicationActivity,
+} from "@/lib/publishing/deployment-events";
 
 const MAX_LOG_LENGTH = 64_000;
 
@@ -17,6 +22,23 @@ export async function appendBuildLog(jobId: string, line: string) {
   const current = await prisma.buildJob.findUnique({ where: { id: jobId }, select: { log: true } });
   const next = `${current?.log || ""}${line}\n`.slice(-MAX_LOG_LENGTH);
   return prisma.buildJob.update({ where: { id: jobId }, data: { log: next } });
+}
+
+export async function appendBuildActivity(
+  jobId: string,
+  activity: Omit<NewPublicationActivity, "timestamp"> & { timestamp?: string },
+) {
+  const current = await prisma.buildJob.findUnique({
+    where: { id: jobId },
+    select: { log: true },
+  });
+  const appended = appendPublicationActivity(current?.log, {
+    ...activity,
+    timestamp: activity.timestamp || new Date().toISOString(),
+  });
+  const bounded = limitPublicationLog(appended.log, MAX_LOG_LENGTH);
+  await prisma.buildJob.update({ where: { id: jobId }, data: { log: bounded } });
+  return appended.event;
 }
 
 export async function getLatestPreview(projectId: string, artifactVersionId?: string) {

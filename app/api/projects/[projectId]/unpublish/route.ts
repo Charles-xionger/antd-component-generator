@@ -25,7 +25,10 @@ export async function POST(
         deploymentId: project.activeDeploymentId,
       },
     });
-    return Response.json({ success: true, job }, { status: 202 });
+    return Response.json({
+      success: true,
+      job: { id: job.id, status: job.status },
+    }, { status: 202 });
   }
 
   await prisma.$transaction(async (tx) => {

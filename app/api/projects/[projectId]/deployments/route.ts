@@ -4,6 +4,7 @@ import prisma from "@/lib/database/prisma";
 import { getOwnedProject } from "@/lib/projects/ownership";
 import { getPublishedHostname } from "@/lib/projects/slug";
 import { publishDeployment } from "@/lib/publishing/deploy";
+import { sanitizePublicationText } from "@/lib/publishing/deployment-events";
 
 interface Context {
   params: Promise<{ projectId: string }>;
@@ -26,7 +27,12 @@ export async function GET(_request: NextRequest, { params }: Context) {
     include: { artifactVersion: { select: { versionNumber: true } } },
   });
   return Response.json({
-    deployments,
+    deployments: deployments.map((deployment) => ({
+      ...deployment,
+      errorMessage: deployment.errorMessage
+        ? sanitizePublicationText(deployment.errorMessage)
+        : null,
+    })),
     activeDeploymentId: project.activeDeploymentId,
     publishedUrl: project.activeDeployment
       ? `https://${getPublishedHostname(project.slug)}`
@@ -77,7 +83,11 @@ export async function POST(request: NextRequest, { params }: Context) {
     const job = await prisma.buildJob.create({
       data: { type: "PUBLISH", projectId, artifactVersionId: version.id, deploymentId: deployment.id },
     });
-    return Response.json({ deployment, job, publishedUrl: `https://${getPublishedHostname(project.slug)}` }, { status: 202 });
+    return Response.json({
+      deployment,
+      job: { id: job.id, status: job.status },
+      publishedUrl: `https://${getPublishedHostname(project.slug)}`,
+    }, { status: 202 });
   }
 
   const deployment = await prisma.deployment.create({
@@ -99,7 +109,9 @@ export async function POST(request: NextRequest, { params }: Context) {
   } catch (error) {
     return Response.json(
       {
-        error: error instanceof Error ? error.message : "Publish failed",
+        error: sanitizePublicationText(
+          error instanceof Error ? error.message : "Publish failed",
+        ),
         deploymentId: deployment.id,
       },
       { status: 422 },

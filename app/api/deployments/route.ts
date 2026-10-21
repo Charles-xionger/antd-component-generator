@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/database/prisma";
 import { getPublishedHostname } from "@/lib/projects/slug";
+import { sanitizePublicationText } from "@/lib/publishing/deployment-events";
 
 export async function GET() {
   const session = await auth();
@@ -35,7 +36,12 @@ export async function GET() {
       url: `https://${getPublishedHostname(project.slug)}`,
       activeDeploymentId: project.activeDeploymentId,
       activeVersion: project.activeDeployment?.artifactVersion.versionNumber,
-      deployments: project.deployments,
+      deployments: project.deployments.map((deployment) => ({
+        ...deployment,
+        errorMessage: deployment.errorMessage
+          ? sanitizePublicationText(deployment.errorMessage)
+          : null,
+      })),
     })),
   });
 }
