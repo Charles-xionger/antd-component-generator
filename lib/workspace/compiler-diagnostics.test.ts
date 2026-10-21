@@ -23,3 +23,8 @@ test("unparsed command failures remain visible and output is capped", () => {
   assert.equal(error.code, "GO_COMPILE_ERROR");
   assert.ok(error.raw!.length <= 4096);
 });
+
+test("unparsed compiler text also redacts temporary host paths", () => {
+  const [error] = parseCompilerDiagnostics("go", "go: failed /var/folders/a/workspace-go-check-xyz/app");
+  assert.equal(error.raw!.includes("/var/folders"), false);
+});

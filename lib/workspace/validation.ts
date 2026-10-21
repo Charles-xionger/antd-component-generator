@@ -2,6 +2,7 @@ import type { AppBlueprint } from "@/lib/app-contracts";
 import prisma from "@/lib/database/prisma";
 import { buildWorkspaceFrontend } from "./frontend-build";
 import type { CommandResult } from "./command";
+import { scrubHostPaths } from "./compiler-diagnostics";
 import { compileBackendGo } from "./go-check";
 import { typecheckFrontend } from "./typecheck";
 import { validateJsonFile, validateWorkspaceFileContract, type WorkspaceDiagnostic } from "./diagnostics";
@@ -27,7 +28,7 @@ export async function validateWorkspaceFiles(files: WorkspaceFile[], runtimeType
         check.exitCode = command.exitCode;
         check.timedOut = command.timedOut;
         check.outputTruncated = command.outputTruncated;
-        check.output = command.output.slice(0, 4096);
+        check.output = scrubHostPaths(command.output.slice(0, 4096));
       }
     } catch (error) {
       check.status = "failed";
