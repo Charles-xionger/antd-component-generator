@@ -1,0 +1,18 @@
+{
+  "scenarios": [{
+    "id": "storyboard.capacity-flow",
+    "description": "从空项目录入分镜产能，验证统计口径和服务端约束",
+    "steps": [
+      { "operationId": "dashboard.query", "input": { "projectId": "project-{{runId}}" }, "expectStatus": 200, "assertions": [{ "path": "metrics.capacityPerHour", "operator": "equals", "value": 0 }] },
+      { "operationId": "person.create", "input": { "id": "person-{{runId}}", "name": "分镜师阿杰" }, "expectStatus": 201 },
+      { "operationId": "project.create", "input": { "id": "project-{{runId}}", "name": "竖屏短剧验收项目" }, "expectStatus": 201 },
+      { "operationId": "task.create", "input": { "id": "task-{{runId}}", "projectId": "project-{{runId}}", "title": "第 1 集分镜" }, "expectStatus": 201 },
+      { "operationId": "worklog.create", "input": { "id": "log-{{runId}}", "idempotencyKey": "request-{{runId}}", "personId": "person-{{runId}}", "projectId": "project-{{runId}}", "taskId": "task-{{runId}}", "workDate": "2026-09-26", "hours": 4, "completedShots": 8, "complexityWeight": 1.5 }, "expectStatus": 201 },
+      { "operationId": "dashboard.query", "input": { "projectId": "project-{{runId}}" }, "expectStatus": 200, "assertions": [{ "path": "metrics.totalHours", "operator": "equals", "value": 4 }, { "path": "metrics.effectiveCapacity", "operator": "equals", "value": 12 }, { "path": "metrics.capacityPerHour", "operator": "equals", "value": 3 }, { "path": "byPerson", "operator": "nonEmpty" }] },
+      { "operationId": "worklog.create", "input": { "id": "duplicate-{{runId}}", "idempotencyKey": "request-{{runId}}", "personId": "person-{{runId}}", "projectId": "project-{{runId}}", "taskId": "task-{{runId}}", "workDate": "2026-09-26", "hours": 4, "completedShots": 8, "complexityWeight": 1.5 }, "expectStatus": 409 },
+      { "operationId": "worklog.create", "input": { "idempotencyKey": "negative-{{runId}}", "personId": "person-{{runId}}", "projectId": "project-{{runId}}", "taskId": "task-{{runId}}", "workDate": "2026-09-26", "hours": -1, "completedShots": 1, "complexityWeight": 1 }, "expectStatus": 400 },
+      { "operationId": "worklog.create", "input": { "idempotencyKey": "foreign-{{runId}}", "personId": "missing-{{runId}}", "projectId": "project-{{runId}}", "taskId": "task-{{runId}}", "workDate": "2026-09-26", "hours": 1, "completedShots": 1, "complexityWeight": 1 }, "expectStatus": 400 },
+      { "operationId": "worklog.create", "input": { "idempotencyKey": "zero-{{runId}}", "personId": "person-{{runId}}", "projectId": "project-{{runId}}", "taskId": "task-{{runId}}", "workDate": "2026-09-26", "hours": 0, "completedShots": 0, "complexityWeight": 1 }, "expectStatus": 201 }
+    ]
+  }]
+}

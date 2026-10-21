@@ -8,6 +8,8 @@ import {
   Tablet,
   Smartphone,
   Share2,
+  Rocket,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -19,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { DeviceType, ArtifactVersion } from "./types";
+import { workspacePreviewLabel } from "@/lib/workspace/presentation";
 
 interface PreviewToolbarProps {
   selectedDevice: DeviceType;
@@ -33,6 +36,11 @@ interface PreviewToolbarProps {
   onLanguageChange: (language: "zh" | "en") => void;
   currentLanguage: "zh" | "en";
   onShare?: () => void;
+  isSharing?: boolean;
+  onPublish?: () => void;
+  isPublishing?: boolean;
+  fullstackPreview?: { status: string; previewUrl?: string | null; errorMessage?: string | null } | null;
+  onOpenFullstackPreview?: () => void;
 }
 
 export function PreviewToolbar({
@@ -48,11 +56,30 @@ export function PreviewToolbar({
   onLanguageChange,
   currentLanguage,
   onShare,
+  isSharing = false,
+  onPublish,
+  isPublishing = false,
+  fullstackPreview,
+  onOpenFullstackPreview,
 }: PreviewToolbarProps) {
   return (
     <div className="flex items-center justify-between px-4 py-2 bg-background border-b">
       {/* 左侧：版本选择 */}
       <div className="flex items-center gap-2">
+        {fullstackPreview && (
+          fullstackPreview.status === "SUCCEEDED" && fullstackPreview.previewUrl ? (
+            <Button variant="outline" size="sm" onClick={onOpenFullstackPreview}>
+              <ExternalLink className="h-4 w-4 mr-1" />{workspacePreviewLabel(fullstackPreview.status)}
+            </Button>
+          ) : fullstackPreview.status === "FAILED" ? (
+            <details className="max-w-64 text-xs text-destructive">
+              <summary className="cursor-pointer">{workspacePreviewLabel(fullstackPreview.status)}</summary>
+              <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-all text-foreground">{(fullstackPreview.errorMessage || "构建或启动失败，错误详情暂不可用").slice(0, 4000)}</pre>
+            </details>
+          ) : (
+            <span className="text-xs text-muted-foreground" role="status">{workspacePreviewLabel(fullstackPreview.status)}</span>
+          )
+        )}
         {versions.length > 0 && (
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground">版本:</span>
@@ -98,10 +125,27 @@ export function PreviewToolbar({
 
       {/* 右侧：分享、语言切换、刷新和全屏 */}
       <div className="flex items-center gap-2">
+        {onPublish && (
+          <Button
+            size="sm"
+            onClick={onPublish}
+            disabled={isPublishing}
+            title="发布当前版本"
+          >
+            <Rocket className="h-4 w-4 mr-1" />
+            {isPublishing ? "发布中" : "发布"}
+          </Button>
+        )}
         {onShare && (
-          <Button variant="ghost" size="sm" onClick={onShare} title="分享预览">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onShare}
+            disabled={isSharing}
+            title="分享预览"
+          >
             <Share2 className="h-4 w-4 mr-1" />
-            分享
+            {isSharing ? "生成中" : "分享"}
           </Button>
         )}
 

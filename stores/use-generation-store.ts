@@ -1,108 +1,184 @@
-// stores/use-generation-store.ts
 import { create } from "zustand";
 
-/**
- * 生成阶段枚举
- */
 export enum GenerationStage {
-  /** 空闲状态 */
   IDLE = "idle",
-  /** 思考中（通用状态） */
-  THINKING = "thinking",
-  /** 生成中（通用状态） */
-  GENERATING = "generating",
+  INTENT = "intent",
+  REQUIREMENTS = "requirements",
+  AWAITING_CONFIRMATION = "awaiting_confirmation",
+  RESPONDING = "responding",
+  ARCHITECTURE = "architecture",
+  CODING = "coding",
+  VALIDATING = "validating",
+  REPAIRING = "repairing",
+  FAILED = "failed",
 }
 
-/**
- * 生成状态接口
- */
-export interface GenerationState {
-  /** 是否正在生成中 */
-  isGenerating: boolean;
-  /** 当前生成阶段 */
+export type GenerationStepStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed";
+
+export interface GenerationStep {
   stage: GenerationStage;
-  /** 当前处理的消息 ID */
-  currentMessageId?: string;
+  status: GenerationStepStatus;
 }
 
-/**
- * 生成状态操作接口
- */
-export interface GenerationActions {
-  /** 开始思考 */
+export const GENERATION_STAGE_META: Record<
+  GenerationStage,
+  { label: string; description: string }
+> = {
+  [GenerationStage.IDLE]: {
+    label: "准备就绪",
+    description: "等待新的业务需求",
+  },
+  [GenerationStage.INTENT]: {
+    label: "识别业务意图",
+    description: "判断是创建、修改、修复还是一般咨询",
+  },
+  [GenerationStage.REQUIREMENTS]: {
+    label: "梳理业务需求",
+    description: "明确角色、流程、数据、规则和验收结果",
+  },
+  [GenerationStage.AWAITING_CONFIRMATION]: {
+    label: "等待需求确认",
+    description: "确认规格后再进入应用设计与开发",
+  },
+  [GenerationStage.RESPONDING]: {
+    label: "组织回复",
+    description: "根据当前应用上下文生成答复",
+  },
+  [GenerationStage.ARCHITECTURE]: {
+    label: "设计应用方案",
+    description: "生成页面、关系模型、接口和验收场景",
+  },
+  [GenerationStage.CODING]: {
+    label: "生成全栈应用",
+    description: "生成 React、Go、SQL Migration 和业务测试",
+  },
+  [GenerationStage.VALIDATING]: {
+    label: "校验生成结果",
+    description: "检查文件完整性、契约和运行时安全规则",
+  },
+  [GenerationStage.REPAIRING]: {
+    label: "修复生成结果",
+    description: "根据校验结果自动修复应用代码",
+  },
+  [GenerationStage.FAILED]: {
+    label: "生成未完成",
+    description: "处理过程中发生错误，请查看提示后重试",
+  },
+};
+
+interface GenerationState {
+  isGenerating: boolean;
+  stage: GenerationStage;
+  currentMessageId?: string;
+  steps: GenerationStep[];
+  error?: string;
   startThinking: (messageId?: string) => void;
-  /** 开始生成内容 */
   startGenerating: (messageId?: string) => void;
-  /** 完成所有生成 */
+  updateStage: (
+    stage: GenerationStage,
+    status?: GenerationStepStatus,
+    messageId?: string,
+  ) => void;
+  fail: (message?: string) => void;
   complete: () => void;
-  /** 重置状态 */
   reset: () => void;
 }
 
-/**
- * 生成状态 Store
- */
-export type GenerationStore = GenerationState & GenerationActions;
+function updateSteps(
+  steps: GenerationStep[],
+  stage: GenerationStage,
+  status: GenerationStepStatus,
+) {
+  if (stage === GenerationStage.IDLE) return steps;
+  const existing = steps.findIndex((step) => step.stage === stage);
+  if (existing === -1) return [...steps, { stage, status }];
+  return steps.map((step, index) =>
+    index === existing ? { ...step, status } : step,
+  );
+}
 
-/**
- * 创建生成状态 Store
- */
-export const useGenerationStore = create<GenerationStore>((set) => ({
-  // 初始状态
+export const useGenerationStore = create<GenerationState>((set) => ({
   isGenerating: false,
   stage: GenerationStage.IDLE,
   currentMessageId: undefined,
+  steps: [],
+  error: undefined,
 
-  // Actions
   startThinking: (messageId) =>
     set({
       isGenerating: true,
-      stage: GenerationStage.THINKING,
+      stage: GenerationStage.INTENT,
       currentMessageId: messageId,
+      steps: [{ stage: GenerationStage.INTENT, status: "running" }],
+      error: undefined,
     }),
 
   startGenerating: (messageId) =>
-    set({
+    set((state) => ({
       isGenerating: true,
-      stage: GenerationStage.GENERATING,
-      currentMessageId: messageId,
-    }),
+      stage: GenerationStage.CODING,
+      currentMessageId: messageId ?? state.currentMessageId,
+      steps: updateSteps(state.steps, GenerationStage.CODING, "running"),
+    })),
+
+  updateStage: (stage, status = "running", messageId) =>
+    set((state) => ({
+      isGenerating: status !== "failed",
+      stage,
+      currentMessageId: messageId ?? state.currentMessageId,
+      steps: updateSteps(state.steps, stage, status),
+      error: status === "failed" ? state.error : undefined,
+    })),
+
+  fail: (message) =>
+    set((state) => ({
+      isGenerating: false,
+      stage: GenerationStage.FAILED,
+      steps: updateSteps(state.steps, state.stage, "failed"),
+      error: message,
+    })),
 
   complete: () =>
-    set({
+    set((state) => ({
       isGenerating: false,
       stage: GenerationStage.IDLE,
       currentMessageId: undefined,
-    }),
+      steps: state.steps.map((step) =>
+        step.status === "running" ? { ...step, status: "completed" } : step,
+      ),
+    })),
 
   reset: () =>
     set({
       isGenerating: false,
       stage: GenerationStage.IDLE,
       currentMessageId: undefined,
+      steps: [],
+      error: undefined,
     }),
 }));
 
-/**
- * 便捷的 Selector Hooks
- */
-
-/** 获取是否正在生成中 */
 export const useIsGenerating = () =>
   useGenerationStore((state) => state.isGenerating);
-
-/** 获取当前生成阶段 */
 export const useGenerationStage = () =>
   useGenerationStore((state) => state.stage);
-
-/** 获取进度文本 */
-export const useProgressText = () => undefined;
-
-/** 获取生成状态和操作 */
+export const useGenerationSteps = () =>
+  useGenerationStore((state) => state.steps);
+export const useProgressText = () =>
+  useGenerationStore((state) =>
+    state.stage === GenerationStage.IDLE
+      ? undefined
+      : GENERATION_STAGE_META[state.stage]?.label,
+  );
 export const useGenerationActions = () =>
   useGenerationStore((state) => ({
     startThinking: state.startThinking,
     startGenerating: state.startGenerating,
+    updateStage: state.updateStage,
     complete: state.complete,
     reset: state.reset,
   }));

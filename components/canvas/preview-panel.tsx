@@ -9,6 +9,7 @@ interface PreviewPanelProps {
   isVisible: boolean;
   selectedDevice: DeviceType;
   isSandboxReady: boolean;
+  sandboxError?: string | null;
   onSandboxReady?: () => void;
 }
 
@@ -25,7 +26,13 @@ function getDeviceSize(device: DeviceType) {
 
 export const PreviewPanel = forwardRef<HTMLIFrameElement, PreviewPanelProps>(
   function PreviewPanel(
-    { isVisible, selectedDevice, isSandboxReady, onSandboxReady },
+    {
+      isVisible,
+      selectedDevice,
+      isSandboxReady,
+      sandboxError,
+      onSandboxReady,
+    },
     ref
   ) {
     const deviceSize = getDeviceSize(selectedDevice);
@@ -62,10 +69,10 @@ export const PreviewPanel = forwardRef<HTMLIFrameElement, PreviewPanelProps>(
                 </div>
                 {/* 文字提示 */}
                 <div className="text-foreground font-medium text-base mb-2">
-                  沙箱环境准备中
+                  {sandboxError ? "预览加载失败" : "沙箱环境准备中"}
                 </div>
-                <div className="text-muted-foreground text-sm">
-                  正在初始化 React 渲染环境...
+                <div className="text-muted-foreground text-sm max-w-md px-4">
+                  {sandboxError || "正在初始化 React 渲染环境..."}
                 </div>
                 {/* 进度点 */}
                 <div className="flex items-center justify-center gap-1 mt-4">

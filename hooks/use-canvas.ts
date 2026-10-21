@@ -11,6 +11,7 @@ import type {
   ParsedFile,
   DeviceType,
 } from "@/components/canvas";
+import type { ArtifactData } from "./use-artifact-parser";
 
 export interface UseCanvasOptions {
   /** 当前 threadId */
@@ -32,6 +33,7 @@ export interface UseCanvasReturn {
   artifact: ReturnType<typeof useArtifactParser>["artifact"];
   selectedFile: ParsedFile | null;
   selectFile: (file: ParsedFile) => void;
+  setWorkspaceFiles: (workspaceId: string, files: Array<{ path: string; content: string }>) => void;
 
   // 版本管理
   versions: ArtifactVersion[];
@@ -84,6 +86,8 @@ export function useCanvas({
 
   // 代码内容
   const [generatedCode, setGeneratedCode] = useState(initialCode);
+  const [workspaceArtifact, setWorkspaceArtifact] = useState<ArtifactData | null>(null);
+  const [workspaceSelectedPath, setWorkspaceSelectedPath] = useState<string | null>(null);
 
   // 版本管理
   const [versions, setVersions] = useState<ArtifactVersion[]>([]);
@@ -107,8 +111,26 @@ export function useCanvas({
   const isSelectingVersionRef = useRef(false);
 
   // 使用 artifact parser
-  const { artifact, selectedFile, selectFile } =
+  const { artifact: parsedArtifact, selectedFile: parsedSelectedFile, selectFile: selectParsedFile } =
     useArtifactParser(generatedCode);
+  const artifact = workspaceArtifact ?? parsedArtifact;
+  const selectedFile = workspaceArtifact
+    ? workspaceArtifact.files.find((file) => file.path === workspaceSelectedPath) ?? workspaceArtifact.files[0] ?? null
+    : parsedSelectedFile;
+  const selectFile = useCallback((file: ParsedFile) => {
+    if (workspaceArtifact) setWorkspaceSelectedPath(file.path);
+    else selectParsedFile(file);
+  }, [workspaceArtifact, selectParsedFile]);
+  const setWorkspaceFiles = useCallback((workspaceId: string, files: Array<{ path: string; content: string }>) => {
+    setWorkspaceArtifact({
+      id: workspaceId,
+      title: "工作区草稿",
+      currentGeneratingFile: null,
+      files: files.map((file) => ({ path: file.path, content: file.content, language: file.path.split(".").pop() || "text", isComplete: true, isGenerating: false })),
+    });
+    setWorkspaceSelectedPath((current) => files.some((file) => file.path === current) ? current : files[0]?.path ?? null);
+    setShouldSendToSandbox(false);
+  }, []);
 
   // 监听 messages 变化，实时解析最新的 artifact
   // 【关键】只在正在生成时启用，避免历史版本被 messages 覆盖
@@ -119,9 +141,12 @@ export function useCanvas({
       return;
     }
 
-    // 【关键修复】只在正在生成时才监听 messages
-    // 查看历史版本时不应该被 messages 覆盖
-    if (!isGeneratingRef.current) {
+    // 正常情况下只在生成时监听消息，避免历史消息覆盖用户手动选择的版本。
+    // 但旧请求可能已经在会话中生成了 boltArtifact、后端版本保存却失败；
+    // 此时没有任何版本可选，应从最后一条历史消息恢复文件回显。
+    const shouldRecoverFromHistory =
+      !isGeneratingRef.current && versions.length === 0 && !generatedCode;
+    if (!isGeneratingRef.current && !shouldRecoverFromHistory) {
       console.log("[useCanvas] 未在生成中，跳过 messages 更新（查看历史版本）");
       return;
     }
@@ -152,6 +177,13 @@ export function useCanvas({
             });
             setGeneratedCode(artifactXml);
 
+            if (shouldRecoverFromHistory) {
+              setShouldSendToSandbox(true);
+              console.log("[useCanvas] 已从历史消息恢复未落库的 Artifact", {
+                filesCount: latestArtifact.files.length,
+              });
+            }
+
             // 自动选择最新生成的文件
             const latestFile =
               latestArtifact.files[latestArtifact.files.length - 1];
@@ -167,7 +199,7 @@ export function useCanvas({
         break; // 找到最新的就停止
       }
     }
-  }, [messages, generatedCode]);
+  }, [messages, generatedCode, versions.length, selectFile]);
 
   // 展开/收起（保留接口但不再使用）
   const expand = useCallback(() => {
@@ -345,6 +377,7 @@ export function useCanvas({
 
       // 设置标记，暂时禁用 messages 监听
       isSelectingVersionRef.current = true;
+      setWorkspaceArtifact(null);
 
       // 先尝试从缓存获取
       const cachedVersion = getCachedVersion(versionNumber);
@@ -462,6 +495,8 @@ export function useCanvas({
 
   // threadId 变化时获取版本
   useEffect(() => {
+    setWorkspaceArtifact(null);
+    setWorkspaceSelectedPath(null);
     if (threadId) {
       fetchVersionHistory();
     } else {
@@ -513,14 +548,15 @@ export function useCanvas({
       // 将文件转换为 sandbox 需要的格式（使用文件名作为 key）
       const files: Record<string, string> = {};
       artifact.files.forEach((file) => {
-        const fileName = file.path.split("/").pop() || file.path;
+        if (file.path.startsWith("backend/") || file.path.startsWith("migrations/") || file.path.startsWith("acceptance/")) return;
+        const fileName = file.path.startsWith("frontend/") ? file.path.slice("frontend/".length) : file.path;
         files[fileName] = file.content;
       });
 
       // 查找入口文件
       const entryFileName = (() => {
         const appFile = artifact.files.find((f) => f.path.includes("App.tsx"));
-        if (appFile) return appFile.path.split("/").pop() || "App.tsx";
+        if (appFile) return appFile.path.startsWith("frontend/") ? appFile.path.slice("frontend/".length) : appFile.path;
 
         const componentFile = artifact.files.find(
           (f) =>
@@ -538,13 +574,18 @@ export function useCanvas({
       // 发送文件到 sandbox
       iframe.contentWindow.postMessage(
         {
+          protocolVersion: 2,
           type: "artifacts",
-          payload: { files, entryFile: entryFileName },
+          payload: {
+            files,
+            entryFile: entryFileName,
+            runtime: versions.find((version) => version.versionNumber === selectedVersion)?.runtimeManifest || undefined,
+          },
         },
         SANDBOX_ORIGIN
       );
     },
-    [artifact]
+    [artifact, selectedVersion, versions]
   );
 
   // 合并新代码和现有代码（保留未修改的文件）- 使用 currentVersionFilesRef 避免依赖循环
@@ -657,6 +698,7 @@ export function useCanvas({
     artifact,
     selectedFile,
     selectFile,
+    setWorkspaceFiles,
 
     // 版本管理
     versions,

@@ -19,3 +19,10 @@ export const prisma =
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
 export default prisma;
+
+// One-shot integration runners must close the adapter's pg Pool before
+// stopping their disposable PostgreSQL container.
+export async function closeDatabaseConnections() {
+  await prisma.$disconnect();
+  await pool.end();
+}

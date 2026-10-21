@@ -5,6 +5,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  schemas  = ["platform", "public"]
 }
 
 // ===== Auth.js 认证表 =====
@@ -16,10 +17,82 @@ model User {
   image         String?
   accounts      Account[]
   sessions      Session[]
-  threads       Thread[]  // 用户的所有会话
-  
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  threads       Thread[] // 用户的所有会话
+  projects      Project[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@schema("platform")
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+
+  @@schema("platform")
+}
+
+enum DeploymentStatus {
+  BUILDING
+  ACTIVE
+  FAILED
+  SUPERSEDED
+  DISABLED
+
+  @@schema("platform")
+}
+
+enum RuntimeType {
+  STATIC
+  GO
+
+  @@schema("platform")
+}
+
+enum BuildJobType {
+  FULLSTACK_PREVIEW
+  PUBLISH
+  UNPUBLISH
+
+  @@schema("platform")
+}
+
+enum BuildJobStatus {
+  QUEUED
+  BUILDING
+  MIGRATING
+  TESTING
+  STARTING
+  VERIFYING
+  SUCCEEDED
+  FAILED
+
+  @@schema("platform")
+}
+
+model Project {
+  id                 String        @id @default(uuid())
+  userId             String
+  name               String
+  description        String?
+  slug               String        @unique
+  status             ProjectStatus @default(ACTIVE)
+  activeDeploymentId String?       @unique
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  thread           Thread?
+  artifact         Artifact?
+  deployments      Deployment[] @relation("ProjectDeployments")
+  activeDeployment Deployment?  @relation("ActiveDeployment", fields: [activeDeploymentId], references: [id], onDelete: SetNull)
+  buildJobs        BuildJob[]
+  draftWorkspaces  DraftWorkspace[]
+
+  @@index([userId, updatedAt])
+  @@index([status, updatedAt])
+  @@schema("platform")
 }
 
 model Account {
@@ -39,6 +112,7 @@ model Account {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
+  @@schema("platform")
 }
 
 model Session {
@@ -47,6 +121,8 @@ model Session {
   userId       String
   expires      DateTime
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@schema("platform")
 }
 
 model VerificationToken {
@@ -55,6 +131,7 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+  @@schema("platform")
 }
 
 // ===== 应用业务表 =====
@@ -67,34 +144,280 @@ model Thread {
 
   // 关联用户
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  // 关联：一个对话对应一个项目工件
-  artifact  Artifact?
-  
   @@index([userId])
+  @@index([projectId])
+  @@schema("platform")
 }
 
 model Artifact {
   id        String            @id @default(uuid())
-  threadId  String            @unique
+  projectId String            @unique
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
-  thread    Thread            @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   versions  ArtifactVersion[]
+
+  @@schema("platform")
 }
 
 model ArtifactVersion {
-  id            String   @id @default(uuid())
-  artifactId    String
-  versionNumber Int
-  description   String?
-  createdAt     DateTime @default(now())
-  artifact      Artifact @relation(fields: [artifactId], references: [id], onDelete: Cascade)
-  files         File[]
-  shares        Share[]  // 分享记录
+  id                  String       @id @default(uuid())
+  artifactId          String
+  versionNumber       Int
+  description         String?
+  generationRequestId String?      @unique
+  createdAt           DateTime     @default(now())
+  requirementSpec     Json?
+  appBlueprint        Json?
+  runtimeManifest     Json?
+  runtimeVersion      String?
+  fileManifest        Json?
+  artifact            Artifact     @relation(fields: [artifactId], references: [id], onDelete: Cascade)
+  files               File[]
+  shares              Share[] // 分享记录
+  deployments         Deployment[]
+  buildJobs           BuildJob[]
+  draftOrigins        DraftWorkspace[]
 
-  @@index([artifactId, versionNumber])
+  @@unique([artifactId, versionNumber])
+  @@schema("platform")
+}
+
+enum DraftWorkspaceStatus {
+  ACTIVE
+  CLOSED
+
+  @@schema("platform")
+}
+
+model DraftWorkspace {
+  id                    String               @id @default(uuid())
+  projectId             String
+  taskId                String               @unique
+  baseArtifactVersionId String?
+  status                DraftWorkspaceStatus @default(ACTIVE)
+  revision              Int                  @default(0)
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  project               Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  baseArtifactVersion   ArtifactVersion?     @relation(fields: [baseArtifactVersionId], references: [id], onDelete: Restrict)
+  files                 DraftFile[]
+  fileRevisions         DraftFileRevision[]
+  writeReceipts         DraftWriteReceipt[]
+  fileChanges           DraftFileChange[]
+  validationRuns        DraftValidationRun[]
+  agentRuns             AgentRun[]
+
+  @@index([projectId, createdAt])
+  @@schema("platform")
+}
+
+enum AgentRunStatus {
+  QUEUED
+  RUNNING
+  READY_TO_VALIDATE
+  NEEDS_INPUT
+  NO_PROGRESS
+  CANCELLED
+  FAILED
+  COMMITTED
+
+  @@schema("platform")
+}
+
+enum AgentStepStatus {
+  DECIDED
+  COMPLETED
+
+  @@schema("platform")
+}
+
+model AgentRun {
+  id           String         @id @default(uuid())
+  workspaceId  String
+  requestId    String         @unique
+  sessionId    String
+  turnId       String
+  nextEventSeq Int            @default(1)
+  goal         String         @db.Text
+  plan         Json?
+  modelName    String         @default("qwen3.7-flash-2026-07-15")
+  runtimeType  RuntimeType
+  requirementSpec Json?
+  appBlueprint Json?
+  status       AgentRunStatus @default(QUEUED)
+  nextStep     Int            @default(0)
+  maxSteps     Int            @default(30)
+  deadlineAt   DateTime
+  leaseToken   String?        @unique
+  leaseUntil   DateTime?
+  summary      String?        @db.Text
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  workspace    DraftWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  steps        AgentRunStep[]
+  events       AgentEvent[]
+
+  @@index([workspaceId, createdAt])
+  @@index([status, leaseUntil])
+  @@schema("platform")
+}
+
+model AgentEvent {
+  id         String   @id @default(uuid())
+  runId      String
+  sequence   Int
+  type       String
+  itemId     String
+  toolCallId String?
+  payload    Json
+  createdAt  DateTime @default(now())
+  run        AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, sequence])
+  @@unique([runId, type, itemId])
+  @@index([runId, createdAt])
+  @@schema("platform")
+}
+
+model AgentRunStep {
+  runId       String
+  number      Int
+  status      AgentStepStatus @default(DECIDED)
+  decision    Json
+  result      Json?
+  createdAt   DateTime        @default(now())
+  completedAt DateTime?
+  run         AgentRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@id([runId, number])
+  @@schema("platform")
+}
+
+model DraftFile {
+  workspaceId String
+  path        String
+  content     String   @db.Text
+  sha256      String
+  revision    Int
+  workspace   DraftWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, path])
+  @@schema("platform")
+}
+
+model DraftFileRevision {
+  workspaceId String
+  path        String
+  revision    Int
+  content     String?  @db.Text
+  sha256      String?
+  workspace   DraftWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, path, revision])
+  @@index([workspaceId, revision])
+  @@schema("platform")
+}
+
+model DraftWriteReceipt {
+  workspaceId String
+  toolCallId  String
+  inputHash   String
+  revision    Int
+  path        String
+  sha256      String
+  workspace   DraftWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, toolCallId])
+  @@schema("platform")
+}
+
+model DraftFileChange {
+  workspaceId  String
+  revision     Int
+  toolCallId   String
+  path         String
+  beforeSha256 String?
+  afterSha256  String?
+  createdAt    DateTime @default(now())
+  workspace    DraftWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, revision])
+  @@unique([workspaceId, toolCallId])
+  @@schema("platform")
+}
+
+model DraftValidationRun {
+  id          String   @id @default(uuid())
+  workspaceId String
+  revision    Int
+  runtimeType RuntimeType
+  contextDigest String?
+  status      String
+  checks      Json
+  diagnostics Json
+  createdAt   DateTime @default(now())
+  workspace   DraftWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, revision, createdAt])
+  @@schema("platform")
+}
+
+model Deployment {
+  id                String           @id @default(uuid())
+  projectId         String
+  artifactVersionId String
+  status            DeploymentStatus @default(BUILDING)
+  buildPath         String?
+  errorMessage      String?          @db.Text
+  createdAt         DateTime         @default(now())
+  activatedAt       DateTime?
+  runtimeType       RuntimeType      @default(STATIC)
+  imageRef          String?
+  migrationVersion  String?
+  verification      Json?
+  endpoint          String?
+
+  project          Project         @relation("ProjectDeployments", fields: [projectId], references: [id], onDelete: Cascade)
+  artifactVersion  ArtifactVersion @relation(fields: [artifactVersionId], references: [id], onDelete: Restrict)
+  activeForProject Project?        @relation("ActiveDeployment")
+  buildJobs        BuildJob[]
+
+  @@index([projectId, createdAt])
+  @@index([status, createdAt])
+  @@schema("platform")
+}
+
+model BuildJob {
+  id                String         @id @default(uuid())
+  type              BuildJobType
+  status            BuildJobStatus @default(QUEUED)
+  projectId         String
+  artifactVersionId String
+  deploymentId      String?
+  attempt           Int            @default(0)
+  leaseToken        String?        @unique
+  leaseExpiresAt    DateTime?
+  log               String?        @db.Text
+  errorMessage      String?        @db.Text
+  previewUrl        String?
+  imageRef          String?
+  createdAt         DateTime       @default(now())
+  startedAt         DateTime?
+  completedAt       DateTime?
+
+  project         Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  artifactVersion ArtifactVersion @relation(fields: [artifactVersionId], references: [id], onDelete: Cascade)
+  deployment      Deployment?     @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([projectId, createdAt])
+  @@index([artifactVersionId, type, status])
+  @@schema("platform")
 }
 
 model File {
@@ -105,6 +428,7 @@ model File {
   artifactVersion   ArtifactVersion @relation(fields: [artifactVersionId], references: [id], onDelete: Cascade)
 
   @@unique([artifactVersionId, path])
+  @@schema("platform")
 }
 
 // 分享表
@@ -116,6 +440,7 @@ model Share {
   createdAt         DateTime        @default(now())
 
   @@index([shareCode])
+  @@schema("platform")
 }
 
 /// MCP 服务器配置表
@@ -127,6 +452,8 @@ model MCPConfig {
   enabled     Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@schema("platform")
 }
 
 model checkpoint_blobs {
@@ -138,10 +465,13 @@ model checkpoint_blobs {
   blob          Bytes?
 
   @@id([thread_id, checkpoint_ns, channel, version])
+  @@schema("public")
 }
 
 model checkpoint_migrations {
   v Int @id
+
+  @@schema("public")
 }
 
 model checkpoint_writes {
@@ -155,6 +485,7 @@ model checkpoint_writes {
   blob          Bytes
 
   @@id([thread_id, checkpoint_ns, checkpoint_id, task_id, idx])
+  @@schema("public")
 }
 
 model checkpoints {
@@ -167,4 +498,5 @@ model checkpoints {
   metadata             Json    @default("{}")
 
   @@id([thread_id, checkpoint_ns, checkpoint_id])
+  @@schema("public")
 }

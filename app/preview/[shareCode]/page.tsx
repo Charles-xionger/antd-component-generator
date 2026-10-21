@@ -104,6 +104,7 @@ export default function SharePreviewPage({
     setTimeout(() => {
       iframeRef.current?.contentWindow?.postMessage(
         {
+          protocolVersion: 1,
           type: "artifacts",
           payload: { files, entryFile },
         },

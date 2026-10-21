@@ -2,17 +2,32 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Code2, FileCode } from "lucide-react";
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Code2,
+  FileCode,
+  RotateCcw,
+} from "lucide-react";
 import type { Artifact } from "@/components/canvas";
+import { Button } from "@/components/ui/button";
+import { buildResultSummary } from "@/lib/chat/item-presentation";
 
 interface CodeGenerationCardProps {
   artifact: Artifact | null;
   isStreaming?: boolean;
+  versionNumber?: number;
+  onViewChanges?: () => void;
+  onUndo?: () => void;
 }
 
 export function CodeGenerationCard({
   artifact,
   isStreaming = false,
+  versionNumber,
+  onViewChanges,
+  onUndo,
 }: CodeGenerationCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -23,6 +38,71 @@ export function CodeGenerationCard({
 
   const fileCount = artifact?.files.length || 0;
   const title = artifact?.title || "代码生成";
+  const result = versionNumber
+    ? buildResultSummary(versionNumber, fileCount)
+    : undefined;
+
+  if (!isStreaming && artifact) {
+    return (
+      <div className="my-3 overflow-hidden rounded-xl border border-emerald-200 bg-emerald-50/40 dark:border-emerald-900 dark:bg-emerald-950/20">
+        <div className="flex items-start gap-3 px-4 py-3">
+          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300">
+            <CheckCircle2 className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-foreground">
+              {result?.title || `${title}已准备`}
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {result?.description || `已生成 ${fileCount} 个文件`}
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {onViewChanges && (
+                <Button size="sm" variant="outline" onClick={onViewChanges}>
+                  查看变化
+                </Button>
+              )}
+              {onUndo && (
+                <Button size="sm" variant="ghost" onClick={onUndo}>
+                  <RotateCcw className="mr-1 h-3.5 w-3.5" />
+                  撤销
+                </Button>
+              )}
+              <button
+                type="button"
+                className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => setIsExpanded((current) => !current)}
+                aria-expanded={isExpanded}
+              >
+                {fileCount} 个文件
+                {isExpanded ? (
+                  <ChevronDown className="h-3.5 w-3.5" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5" />
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+        {isExpanded && (
+          <div className="space-y-1 border-t bg-background/70 p-3">
+            {artifact.files.map((file) => (
+              <div
+                key={file.path}
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted"
+              >
+                <FileCode className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate font-mono">{file.path}</span>
+                <span className="text-muted-foreground">
+                  {file.content.split("\n").length} 行
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="my-3 border rounded-lg overflow-hidden bg-card shadow-sm">

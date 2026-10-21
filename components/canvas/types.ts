@@ -16,6 +16,10 @@ export interface ArtifactVersion {
     path: string;
     content: string;
   }[];
+  runtimeManifest?: {
+    operations?: Array<{ id: string; method: string; path: string }>;
+    seedData?: Record<string, Array<Record<string, unknown>>>;
+  } | null;
 }
 
 export interface HistoryFile {

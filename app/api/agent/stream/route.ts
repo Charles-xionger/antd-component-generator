@@ -13,9 +13,32 @@ import { NextRequest } from "next/server";
 import { HumanMessage } from "@langchain/core/messages";
 import { createGraph } from "@/lib/agent";
 import prisma from "@/lib/database/prisma";
-import { formatCodeContext } from "@/lib/agent/utils";
 import { auth } from "@/lib/auth";
 import { generateThreadTitle } from "@/lib/agent/models";
+import { getOwnedProject, getOwnedThread } from "@/lib/projects/ownership";
+import { WorkspaceError } from "@/lib/workspace/errors";
+
+const NODE_STAGE: Record<string, string> = {
+  intentRouter: "intent",
+  businessAnalyst: "requirements",
+  directResponder: "responding",
+  solutionArchitect: "architecture",
+  workspaceQueue: "coding",
+};
+
+function messageText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return content == null ? "" : String(content);
+  return content
+    .map((block) => {
+      if (typeof block === "string") return block;
+      if (block && typeof block === "object" && "text" in block) {
+        return String((block as { text?: unknown }).text || "");
+      }
+      return "";
+    })
+    .join("");
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -24,7 +47,14 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { message, images, threadId, model } = await request.json();
+    const {
+      message,
+      images,
+      threadId,
+      projectId,
+      generationRequestId,
+      model,
+    } = await request.json();
 
     if (!message && (!images || images.length === 0)) {
       return Response.json(
@@ -33,11 +63,33 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 使用 threadId 作为会话标识，支持多轮对话
-    const finalThreadId = threadId || crypto.randomUUID();
+    if (!threadId) {
+      return Response.json({ error: "Thread not found" }, { status: 404 });
+    }
+
+    const ownedThread = await getOwnedThread(threadId, session.user.id);
+    if (!ownedThread || (projectId && ownedThread.projectId !== projectId)) {
+      return Response.json({ error: "Thread not found" }, { status: 404 });
+    }
+
+    const ownedProject = await getOwnedProject(
+      ownedThread.projectId,
+      session.user.id,
+    );
+    if (!ownedProject) {
+      return Response.json({ error: "Project not found" }, { status: 404 });
+    }
+
+    const finalThreadId = ownedThread.id;
+    const finalProjectId = ownedProject.id;
+    const finalGenerationRequestId =
+      generationRequestId || crypto.randomUUID();
     const config = {
       configurable: {
         thread_id: finalThreadId,
+        project_id: finalProjectId,
+        user_id: session.user.id,
+        generation_request_id: finalGenerationRequestId,
         model: model || "qwen3.7-flash-2026-07-15", // 传递模型参数到 graph
       },
     };
@@ -46,50 +98,25 @@ export async function POST(request: NextRequest) {
     // 1. 获取上下文 (Pre-computation)
     // ==========================================
 
-    // 尝试查找该 thread 下的最新代码快照
+    // 查找 Project 的最新代码快照
     const artifact = await prisma.artifact.findUnique({
-      where: { threadId: finalThreadId },
+      where: { projectId: finalProjectId },
       include: {
         versions: {
           orderBy: { versionNumber: "desc" }, // 取最新版本
           take: 1,
-          include: { files: true },
+          select: { id: true },
         },
       },
     });
 
     const currentVersion = artifact?.versions[0];
-    const currentFiles = currentVersion?.files || [];
-
-    // 格式化当前代码为上下文字符串
-    const codeContext = formatCodeContext(currentFiles);
-
-    // ==========================================
-    // 2. 获取或创建 Thread 记录
-    // ==========================================
-
-    let thread = await prisma.thread.findUnique({
-      where: { id: finalThreadId },
+    const activeWorkspace = await prisma.draftWorkspace.findFirst({
+      where: { projectId: finalProjectId, status: "ACTIVE" },
+      select: { agentRuns: { orderBy: { createdAt: "desc" }, take: 1, select: { status: true } } },
     });
 
-    if (!thread) {
-      // 确保 message 是字符串后再截取
-      const messageText =
-        typeof message === "string"
-          ? message
-          : Array.isArray(message)
-            ? message.find((m) => m.type === "text")?.text || "New Chat"
-            : "New Chat";
-
-      thread = await prisma.thread.create({
-        data: {
-          id: finalThreadId,
-          title:
-            messageText.slice(0, 50) + (messageText.length > 50 ? "..." : ""),
-          userId: session.user.id,
-        },
-      });
-    }
+    const thread = ownedThread;
 
     // ==========================================
     // 3. 创建 Graph
@@ -108,7 +135,6 @@ export async function POST(request: NextRequest) {
 
         try {
           // 构建多模态消息内容（只包含用户输入）
-          // codeContext 通过 state.codeContext 传递，agent 会从消息历史中获取代码上下文
           let messageContent:
             | string
             | Array<{
@@ -164,11 +190,11 @@ export async function POST(request: NextRequest) {
           const inputMessage = new HumanMessage({ content: messageContent });
 
           // 使用 streamEvents 获取流式响应
-          // codeContext 通过 state 传递，agent 通过消息历史获取代码上下文，不在 prompt 中重复注入
           const eventStream = graph.streamEvents(
             {
               messages: [inputMessage],
-              codeContext: codeContext ? codeContext.trim() : "",
+              baseArtifactVersionId: currentVersion?.id,
+              resumePendingWorkspace: activeWorkspace?.agentRuns[0]?.status === "NEEDS_INPUT",
             },
             { ...config, version: "v2" },
           );
@@ -179,6 +205,13 @@ export async function POST(request: NextRequest) {
           let aiResponseContent = ""; // 累积AI回复用于生成标题
           let finalAiContent = ""; // 非流式模型/提供商的最终响应兜底
           let lastHeartbeat = Date.now(); // 心跳时间戳
+          const streamedContentNodes = new Set<string>();
+          const fallbackContentNodes = new Set([
+            "businessAnalyst",
+            "directResponder",
+            "solutionArchitect",
+            "workspaceQueue",
+          ]);
 
           // 心跳机制：防止连接超时
           // 始终启用心跳机制，确保长时间生成不中断
@@ -228,6 +261,44 @@ export async function POST(request: NextRequest) {
               break;
             }
 
+            const graphNode = String(
+              event.metadata?.langgraph_node || event.name || "",
+            );
+            const nodeStage = NODE_STAGE[graphNode];
+
+            // 只在 LangGraph 节点自身开始/结束时发送阶段事件，避免把节点
+            // 内部的模型、解析器等子事件重复展示为产品步骤。
+            if (
+              nodeStage &&
+              event.name === graphNode &&
+              (event.event === "on_chain_start" ||
+                event.event === "on_chain_end")
+            ) {
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    type: "stage",
+                    stage: nodeStage,
+                    node: graphNode,
+                    status:
+                      event.event === "on_chain_start"
+                        ? "running"
+                        : "completed",
+                    threadId: finalThreadId,
+                  })}\n\n`,
+                ),
+              );
+              lastHeartbeat = Date.now();
+            }
+
+            if (event.event === "on_chain_end" && event.name === "workspaceQueue") {
+              const output = event.data?.output as { workspaceId?: string; workspaceRunId?: string } | undefined;
+              if (output?.workspaceId && output.workspaceRunId) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "workspace_queued", workspaceId: output.workspaceId, runId: output.workspaceRunId, projectId: finalProjectId, threadId: finalThreadId })}\n\n`));
+                lastHeartbeat = Date.now();
+              }
+            }
+
             // 流式发送 AI 消息内容
             if (
               event.event === "on_chat_model_stream" &&
@@ -247,6 +318,7 @@ export async function POST(request: NextRequest) {
               // 智能过滤：基于事件元数据和内容特征
               // 定义需要过滤的节点（只过滤纯内部逻辑，不过滤有用户价值的消息）
               const FILTERED_NODES = [
+                "intentRouter", // 意图识别结构化结果（内部路由数据）
                 "routeToSubgraph", // Supervisor 路由决策（纯内部逻辑）
                 // 注意：不过滤 architect，让前端智能渲染为架构规划卡片
               ];
@@ -254,11 +326,13 @@ export async function POST(request: NextRequest) {
               // 检查事件来源（通过 tags 或 name 判断）
               const eventTags = event.tags || [];
               const eventName = event.name || "";
+              const eventNode = graphNode;
               const isFilteredNode = FILTERED_NODES.some(
                 (node) =>
                   eventTags.includes(node) ||
                   eventName.includes(node) ||
-                  eventName === node,
+                  eventName === node ||
+                  eventNode === node,
               );
 
               // 额外的内容特征检测（只过滤纯内部逻辑）
@@ -270,6 +344,8 @@ export async function POST(request: NextRequest) {
                 continue;
               }
 
+              streamedContentNodes.add(eventNode);
+
               // 注意：Architect 消息已经用 <architectPlan> 标签包裹
               // 不再需要过滤，前端会优雅地渲染为卡片
 
@@ -277,6 +353,8 @@ export async function POST(request: NextRequest) {
                 `data: ${JSON.stringify({
                   type: "content",
                   content,
+                  stage: NODE_STAGE[eventNode] || "responding",
+                  node: eventNode,
                   threadId: finalThreadId,
                 })}\n\n`,
               );
@@ -302,7 +380,8 @@ export async function POST(request: NextRequest) {
               // 注意：先发送内容，再检测闭合，确保前端能收到完整的 ARCHITECT 内容
               if (
                 !hasArchitectCompleted &&
-                accumulatedContent.includes("</architectPlan>")
+                (accumulatedContent.includes("</appBlueprint>") ||
+                  accumulatedContent.includes("</architectPlan>"))
               ) {
                 hasArchitectCompleted = true;
 
@@ -317,12 +396,54 @@ export async function POST(request: NextRequest) {
               }
             }
 
+            // 部分 OpenAI 兼容服务只返回节点最终消息，不产生
+            // on_chat_model_stream。节点结束时立即补发完整内容，避免用户
+            // 必须刷新页面后才能看到澄清问题或生成结果。
+            if (
+              event.event === "on_chain_end" &&
+              event.name === graphNode &&
+              fallbackContentNodes.has(graphNode) &&
+              !streamedContentNodes.has(graphNode)
+            ) {
+              const outputMessages = event.data?.output?.messages;
+              const finalMessage = Array.isArray(outputMessages)
+                ? outputMessages[outputMessages.length - 1]
+                : undefined;
+              const completedContent = finalMessage?.content
+                ? typeof finalMessage.content === "string"
+                  ? finalMessage.content
+                  : Array.isArray(finalMessage.content)
+                    ? finalMessage.content
+                        .map((block: { text?: string }) => block.text || "")
+                        .join("")
+                    : String(finalMessage.content)
+                : "";
+
+              if (completedContent) {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      type: "content",
+                      content: completedContent,
+                      stage: NODE_STAGE[graphNode] || "responding",
+                      node: graphNode,
+                      threadId: finalThreadId,
+                    })}\n\n`,
+                  ),
+                );
+                accumulatedContent += completedContent;
+                aiResponseContent += completedContent;
+                finalAiContent = completedContent;
+                lastHeartbeat = Date.now();
+              }
+            }
+
             // 监听 architect 节点完成事件（更可靠的完成信号）
             // 但要注意：只有在确实有 architectPlan 内容时才发送完成事件
             // 闲聊场景下不应该发送 architect_complete，避免前端误判
             if (
               event.event === "on_chain_end" &&
-              event.name === "architect" &&
+              event.name === "solutionArchitect" &&
               !hasArchitectCompleted
             ) {
               const outputMessages = event.data?.output?.messages;
@@ -342,7 +463,10 @@ export async function POST(request: NextRequest) {
 
               // 检查是否包含架构规划标签
               // 只有真正的架构规划才发送 architect_complete 事件
-              if (accumulatedContent.includes("<architectPlan>")) {
+              if (
+                accumulatedContent.includes("<appBlueprint>") ||
+                accumulatedContent.includes("<architectPlan>")
+              ) {
                 hasArchitectCompleted = true;
 
                 // 发送 ARCHITECT 完成事件
@@ -391,6 +515,24 @@ export async function POST(request: NextRequest) {
 
           // 某些 OpenAI 兼容服务不产生 on_chat_model_stream 事件，但会在
           // 节点结束时给出完整消息。此时仍把结果返回给前端，避免空白响应。
+          if (!accumulatedContent && !finalAiContent) {
+            try {
+              const snapshot = await graph.getState(config);
+              const persistedMessages = Array.isArray(snapshot.values?.messages)
+                ? snapshot.values.messages
+                : [];
+              const latestAssistant = [...persistedMessages]
+                .reverse()
+                .find(
+                  (item: { _getType?: () => string }) =>
+                    item?._getType?.() === "ai",
+                );
+              finalAiContent = messageText(latestAssistant?.content);
+            } catch (stateError) {
+              console.error("[Stream] 读取最终消息失败:", stateError);
+            }
+          }
+
           if (!accumulatedContent && finalAiContent) {
             controller.enqueue(
               encoder.encode(
@@ -408,60 +550,17 @@ export async function POST(request: NextRequest) {
           // ==========================================
           // 5. 流式响应结束
           // ==========================================
-          console.log("[Stream] 流式响应结束", {
-            长度: accumulatedContent.length,
-            完整: accumulatedContent.includes("</boltArtifact>"),
+          console.log("[Stream] 对话阶段结束，工作区任务由后台 Worker 独立执行", {
+            messageLength: accumulatedContent.length,
           });
-
-          // 检查内容完整性
-          if (
-            accumulatedContent.includes("<boltArtifact") &&
-            !accumulatedContent.includes("</boltArtifact>")
-          ) {
-            console.warn(
-              "[Stream] ⚠️ 警告：检测到未闭合的 <boltArtifact> 标签，尝试自动修复",
-            );
-
-            // 尝试找到最后一个 <boltAction> 的闭合位置
-            const lastActionEndIndex =
-              accumulatedContent.lastIndexOf("</boltAction>");
-            if (lastActionEndIndex !== -1) {
-              // 在最后一个 action 后面补充闭合标签
-              const closeTag = "\n</boltArtifact>";
-              const closeChunk = encoder.encode(
-                `data: ${JSON.stringify({
-                  type: "content",
-                  content: closeTag,
-                  threadId: finalThreadId,
-                })}\n\n`,
-              );
-
-              try {
-                controller.enqueue(closeChunk);
-                accumulatedContent += closeTag;
-                aiResponseContent += closeTag;
-                console.log("[Stream] ✓ 已自动补全 </boltArtifact> 闭合标签");
-              } catch (error) {
-                console.error("[Stream] ✗ 补全闭合标签失败:", error);
-              }
-            } else {
-              console.error("[Stream] ✗ 无法找到合适的位置补全闭合标签");
-              console.warn(
-                "[Stream] 内容末尾:",
-                accumulatedContent.slice(-200),
-              );
-            }
-          }
-
-          // 注意：artifact 解析和保存已移到前端处理
-          // 前端会在流式完成后调用 /api/artifact/save
 
           // ==========================================
           // 6. 自动生成会话标题（如果是新会话）
           // ==========================================
           const shouldGenerateTitle =
             thread &&
-            (thread.title === "新会话" ||
+            (thread.title === "新项目" ||
+              thread.title === "新会话" ||
               thread.title === "New Chat" ||
               thread.title.endsWith("..."));
 
@@ -482,10 +581,13 @@ export async function POST(request: NextRequest) {
                 model || "qwen3.7-flash-2026-07-15",
               );
 
-              // 更新数据库中的标题
-              await prisma.thread.update({
-                where: { id: finalThreadId },
-                data: { title: newTitle },
+              // Project 是用户可见名称；Primary Thread 同步标题用于兼容旧数据。
+              await prisma.project.update({
+                where: { id: finalProjectId },
+                data: {
+                  name: newTitle,
+                  thread: { update: { title: newTitle } },
+                },
               });
 
               // 发送标题更新事件到前端
@@ -493,6 +595,7 @@ export async function POST(request: NextRequest) {
                 `data: ${JSON.stringify({
                   type: "title_update",
                   threadId: finalThreadId,
+                  projectId: finalProjectId,
                   title: newTitle,
                 })}\n\n`,
               );
@@ -521,6 +624,7 @@ export async function POST(request: NextRequest) {
           const errorChunk = encoder.encode(
             `data: ${JSON.stringify({
               type: "error",
+              code: error instanceof WorkspaceError ? error.code : undefined,
               error: error instanceof Error ? error.message : "Unknown error",
               details: error instanceof Error ? error.stack : undefined,
             })}\n\n`,

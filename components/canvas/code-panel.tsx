@@ -41,12 +41,12 @@ export function CodePanel({
 }: CodePanelProps) {
   return (
     <div
-      className={`absolute inset-0 flex overflow-hidden transition-opacity duration-200 ${
+      className={`workspace-file-panel absolute inset-0 flex flex-col overflow-hidden transition-opacity duration-200 sm:flex-row ${
         isVisible ? "opacity-100 z-10" : "opacity-0 z-0 pointer-events-none"
       }`}
     >
       {/* File Explorer Sidebar */}
-      <div className="w-56 bg-secondary border-r flex flex-col">
+      <div className="workspace-file-browser flex max-h-40 w-full shrink-0 flex-col border-b sm:max-h-none sm:w-56 sm:border-b-0 sm:border-r">
         <div className="px-3 py-2 text-xs font-medium text-secondary-foreground border-b flex items-center justify-between">
           <span>File explorer</span>
           {versions.length > 0 && (
@@ -117,11 +117,11 @@ export function CodePanel({
       </div>
 
       {/* Code Editor Area */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-background">
+      <div className="workspace-code-pane flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {selectedFile ? (
           <>
             {/* File Tab */}
-            <div className="bg-secondary px-4 py-2 border-b flex items-center justify-between">
+            <div className="workspace-code-header px-4 py-2 border-b flex items-center justify-between">
               <div className="flex items-center gap-2 text-sm text-secondary-foreground">
                 <FileIcon language={selectedFile.language} />
                 <span className="font-mono">
@@ -150,8 +150,8 @@ export function CodePanel({
               </Button>
             </div>
             {/* Code Content */}
-            <div className="flex-1 overflow-auto bg-secondary/30">
-              <pre className="p-4 text-sm whitespace-pre font-mono leading-relaxed text-foreground">
+            <div className="workspace-code-content flex-1 overflow-auto">
+              <pre className="workspace-code p-4 text-sm whitespace-pre leading-relaxed">
                 <code>{selectedFile.content}</code>
               </pre>
             </div>

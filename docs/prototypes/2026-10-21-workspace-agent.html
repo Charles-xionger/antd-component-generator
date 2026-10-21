@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Workspace Agent · 交互原型</title>
+  <style>
+    /* Review-only prototype. Colors, typography and spacing follow root DESIGN.md. */
+    :root { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color-scheme: dark; --bg:#090c11; --panel:#11161f; --panel2:#172033; --line:#293241; --text:#e8edf5; --muted:#9ba8ba; --green:#22c55e; --blue:#4c9aff; --red:#f0646e; --amber:#f5b942; --focus:#4c9aff; }
+    body.light { color-scheme: light; --bg:#f3f5f7; --panel:#fff; --panel2:#e9edf2; --line:#cdd5df; --text:#18202b; --muted:#59677a; --green:#16a34a; --blue:#2e7dd1; --red:#d94b57; --amber:#a96b00; --focus:#2e7dd1; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-size:14px; }
+    button, select, textarea { font:inherit; }
+    button, select { cursor:pointer; }
+    button:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+    button { border:1px solid var(--line); border-radius:4px; background:var(--panel); color:var(--text); padding:7px 11px; }
+    button:hover { background:var(--panel2); }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    button.primary { background:var(--green); color:#07110b; border-color:var(--green); font-weight:650; }
+    button.danger { border-color:var(--red); color:var(--red); }
+    button.small { padding:4px 7px; font-size:12px; }
+    .mono, code, pre { font-family:"IBM Plex Mono", SFMono-Regular, Consolas, monospace; }
+    .top { padding:16px 20px 12px; border-bottom:1px solid var(--line); }
+    .top h1 { margin:0 0 6px; font-size:20px; font-weight:600; }
+    .top p { margin:0; color:var(--muted); line-height:1.5; }
+    .controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:12px; }
+    .controls label { display:flex; align-items:center; gap:7px; }
+    select { color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:7px; }
+    .spacer { flex:1; }
+    .boards { display:grid; grid-template-columns:minmax(680px,1fr) 345px; gap:16px; padding:16px 20px; max-width:1650px; margin:auto; }
+    .board { border:1px solid var(--line); background:var(--panel); border-radius:12px; overflow:hidden; min-width:0; }
+    .board-label { display:flex; justify-content:space-between; align-items:center; gap:8px; background:var(--panel2); padding:7px 12px; border-bottom:1px solid var(--line); font-size:12px; color:var(--muted); }
+    .desktop-shell { display:grid; grid-template-columns:minmax(330px,42%) minmax(400px,58%); height:630px; }
+    .chat { min-width:0; border-right:1px solid var(--line); display:flex; flex-direction:column; }
+    .chat-head,.work-head { padding:11px 13px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:8px; align-items:center; }
+    .chat-title,.work-title { font-weight:650; }
+    .messages { padding:14px; overflow:auto; flex:1; }
+    .bubble { padding:10px 12px; border:1px solid var(--line); border-radius:8px; line-height:1.5; margin-bottom:12px; max-width:95%; }
+    .bubble.user { margin-left:18px; background:var(--panel2); }
+    .bubble.agent { border-color:var(--line); }
+    .run-card { border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+    .run-top { display:flex; gap:9px; align-items:flex-start; padding:12px; }
+    .run-main { flex:1; min-width:0; }
+    .run-main strong { display:block; line-height:1.4; }
+    .run-main p { margin:3px 0 0; color:var(--muted); font-size:12px; line-height:1.45; }
+    .tag { border-radius:999px; border:1px solid currentColor; padding:2px 7px; font-size:11px; white-space:nowrap; }
+    .tag.running { color:var(--blue); }.tag.success { color:var(--green); }.tag.error { color:var(--red); }.tag.warning { color:var(--amber); }.tag.neutral { color:var(--muted); }
+    .plan { border-top:1px solid var(--line); padding:10px 12px; }
+    .plan h3,.events h3 { margin:0 0 8px; font-size:12px; color:var(--muted); font-weight:600; }
+    .step { display:flex; align-items:center; gap:8px; padding:4px 0; font-size:12px; }
+    .step .mark { width:18px; text-align:center; color:var(--muted); }
+    .step.done .mark { color:var(--green); }.step.active .mark { color:var(--blue); }
+    .events { border-top:1px solid var(--line); padding:10px 12px; }
+    .event { display:flex; gap:8px; align-items:center; margin:5px 0; font-size:12px; color:var(--muted); }
+    .event .type { flex:0 0 70px; color:var(--text); }
+    .chat-input { border-top:1px solid var(--line); padding:10px; display:flex; gap:7px; }
+    .chat-input textarea { flex:1; min-width:0; min-height:38px; height:38px; resize:vertical; border:1px solid var(--line); border-radius:4px; padding:8px; background:var(--bg); color:var(--text); }
+    .workspace { display:flex; flex-direction:column; min-width:0; }
+    .work-tabs { display:flex; gap:4px; padding:8px; border-bottom:1px solid var(--line); }
+    .work-tabs button.active { border-color:var(--blue); color:var(--blue); }
+    .work-body { display:grid; grid-template-columns:175px minmax(0,1fr); flex:1; min-height:0; }
+    .files { border-right:1px solid var(--line); overflow:auto; padding:8px; }
+    .file { width:100%; display:block; border:0; background:transparent; text-align:left; padding:7px 6px; color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .file.selected { background:var(--panel2); color:var(--text); }
+    .file.changed::before { content:"● "; color:var(--green); }
+    .content { min-width:0; display:flex; flex-direction:column; }
+    .content-head { padding:9px 12px; display:flex; justify-content:space-between; gap:8px; align-items:center; border-bottom:1px solid var(--line); font-size:12px; }
+    .editor { flex:1; min-height:0; overflow:auto; background:var(--bg); color:var(--text); margin:0; padding:14px; font-size:12px; line-height:1.65; white-space:pre; }
+    .diagnostic { margin:10px; border:1px solid var(--red); border-radius:8px; padding:10px; color:var(--text); font-size:12px; line-height:1.5; }
+    .diagnostic strong { color:var(--red); }
+    .inline-actions { display:flex; gap:6px; flex-wrap:wrap; padding:9px 12px; border-top:1px solid var(--line); }
+    .mobile { height:630px; display:flex; flex-direction:column; }
+    .mobile .messages { padding:10px; }
+    .mobile .bubble { max-width:100%; }
+    .mobile .chat-input { margin-top:auto; }
+    .mobile-nav { display:flex; border-top:1px solid var(--line); }
+    .mobile-nav button { flex:1; border:0; border-radius:0; border-right:1px solid var(--line); }
+    .mobile-nav button.active { color:var(--blue); }
+    .mobile-files { overflow:auto; padding:10px; flex:1; }
+    .mobile-files pre { overflow:auto; font-size:11px; line-height:1.55; background:var(--bg); padding:10px; border-radius:4px; }
+    .notice { margin:0 12px 10px; padding:8px; border:1px solid var(--amber); border-radius:4px; color:var(--amber); font-size:12px; }
+    .contract { max-width:1650px; margin:0 auto 24px; padding:0 20px; }
+    .contract details { border:1px solid var(--line); border-radius:8px; padding:10px 13px; background:var(--panel); }
+    .contract summary { cursor:pointer; font-weight:600; }
+    .contract p { margin:8px 0 0; color:var(--muted); line-height:1.5; }
+    .contract pre { overflow:auto; font-size:12px; color:var(--green); margin:8px 0 0; }
+    [hidden] { display:none !important; }
+    @media(max-width:1120px) { .boards { grid-template-columns:1fr; }.mobile-board { max-width:420px; }.desktop-shell { grid-template-columns:minmax(280px,42%) minmax(360px,58%); } }
+    @media(max-width:720px) { .boards { padding:12px; }.desktop-board { display:none; }.mobile-board { max-width:none; }.top { padding:12px; } }
+    @media(prefers-reduced-motion:reduce) { * { animation:none !important; transition:none !important; } }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <h1>Workspace Agent · 交互原型</h1>
+    <p>评审重点：任务状态与代码面板如何分工；刷新、诊断、人工编辑、取消和 Preview 失败如何呈现。此页不连接真实 API。</p>
+    <div class="controls">
+      <label>场景 <select id="scenario" aria-label="选择演示场景">
+        <option value="running">1 · 首次生成中</option><option value="diagnostic">2 · 定向修复中</option><option value="reconnected">3 · 刷新后恢复</option><option value="paused">4 · 人工编辑暂停</option><option value="conflict">5 · 双标签冲突</option><option value="committed">6 · 代码已提交</option><option value="preview_failed">7 · Preview 失败</option><option value="cancelled">8 · 用户取消</option>
+      </select></label>
+      <button id="next">下一状态 →</button><button id="theme">切换亮色</button>
+      <span class="spacer"></span><span id="revision" class="mono"></span>
+    </div>
+  </header>
+  <main class="boards">
+    <section class="board desktop-board" aria-label="桌面版工作区">
+      <div class="board-label"><span>桌面 · 聊天 / 工作区双栏</span><span>沿用当前页面骨架</span></div>
+      <div class="desktop-shell">
+        <div class="chat">
+          <div class="chat-head"><span class="chat-title">项目对话</span><span id="connection" class="tag running">事件已连接</span></div>
+          <div class="messages">
+            <div class="bubble user">创建一个订单管理应用，包含列表、详情和后端操作。</div>
+            <div class="bubble agent">我会建立工作区，逐项写入并验证文件。</div>
+            <div class="run-card">
+              <div class="run-top"><div class="run-main"><strong id="runTitle"></strong><p id="runSubtitle"></p></div><span id="runTag" class="tag"></span></div>
+              <div class="plan"><h3>任务计划 · 可随诊断更新</h3><div id="plan"></div></div>
+              <div class="events"><h3>最近事件 · 展开后可查明细</h3><div id="events"></div><details><summary>查看工具明细</summary><div id="toolDetail" class="mono" style="padding-top:8px;font-size:11px;line-height:1.5"></div></details></div>
+            </div>
+          </div>
+          <div class="chat-input"><textarea id="supplement" aria-label="补充要求" placeholder="补充要求将在安全边界加入任务"></textarea><button id="sendSupplement" class="small">发送</button></div>
+        </div>
+        <div class="workspace">
+          <div class="work-head"><span class="work-title">工作区 <span id="workStatus" class="tag"></span></span><button id="cancel" class="small danger">取消任务</button></div>
+          <div class="work-tabs"><button class="small active" data-tab="code">代码</button><button class="small" data-tab="preview">预览</button><button class="small" data-tab="diagnostics">诊断 <span id="diagCount"></span></button></div>
+          <div class="work-body" id="codeTab"><aside class="files" id="files"></aside><div class="content"><div class="content-head"><span id="filePath" class="mono"></span><span id="fileRevision" class="mono"></span></div><pre class="editor" id="code"></pre><div class="inline-actions"><button id="edit" class="small">人工编辑</button><button id="resume" class="small primary" hidden>保存并恢复 Agent</button><button id="retry" class="small" hidden>继续工作区任务</button></div></div></div>
+          <div id="previewTab" hidden style="padding:20px;line-height:1.7;flex:1"><strong id="previewTitle"></strong><p id="previewText" style="color:var(--muted)"></p><button class="small" id="backDraft" hidden>返回 Draft</button></div>
+          <div id="diagnosticsTab" hidden style="flex:1;overflow:auto"><div id="diagnostics"></div></div>
+        </div>
+      </div>
+    </section>
+    <section class="board mobile-board" aria-label="窄屏版工作区">
+      <div class="board-label"><span>窄屏 · 同一状态</span><span>无横向滚动</span></div>
+      <div class="mobile"><div class="chat-head"><span class="chat-title">订单管理应用</span><span id="mobileTag" class="tag"></span></div><div class="messages" id="mobileMain"></div><div class="chat-input"><textarea aria-label="窄屏补充要求" placeholder="补充要求…"></textarea><button id="mobileSend" class="small">发送</button></div><nav class="mobile-nav" aria-label="窄屏视图"><button data-mobile="task" class="active">任务</button><button data-mobile="files">文件</button><button data-mobile="preview">预览</button></nav></div>
+    </section>
+  </main>
+  <section class="contract"><details open><summary>原型副作用记录 · 实际系统应产生什么</summary><p>这里展示点击带来的语义动作，不伪造真实数据库写入。真实实现中，文件仅由完成且校验通过的工具调用写入；Item/Event 是执行器生成的展示与恢复记录。</p><pre id="sideEffects" aria-live="polite">等待操作…</pre></details></section>
+  <script>
+    const states = ['running','diagnostic','reconnected','paused','conflict','committed','preview_failed','cancelled'];
+    const meta = {
+      running:{title:'正在生成应用',subtitle:'已写入 Migration 和后端；正在校验验收场景。',tag:'运行中',tone:'running',rev:4,stage:2,events:[['文件','backend/operations.go · r3'],['工具','validate_schema · 执行中']],detail:'toolCallId: call-104\nwrite_file: backend/operations.go → r3\nvalidate_schema: acceptance/scenarios.json → in_progress'},
+      diagnostic:{title:'正在修复验收场景',subtitle:'仅修改 acceptance/scenarios.json；其他文件保留。',tag:'修复中',tone:'warning',rev:5,stage:2,events:[['诊断','SCENARIO_SUITE_ROOT_TYPE · $'],['工具','patch_file · acceptance/scenarios.json']],detail:'diagnostic: expected { scenarios: [...] }, actual array\nread_file: acceptance/scenarios.json\npatch_file: acceptance/scenarios.json → r5'},
+      reconnected:{title:'任务已恢复',subtitle:'从工作区修订 r5 继续；成功写入不会重复执行。',tag:'已恢复',tone:'running',rev:5,stage:2,events:[['连接','事件流重新连接'],['恢复','从序号 18 续传，无重复文件']],detail:'checkpoint: revision 5\nlastCompletedToolCallId: call-105\neventSeq: 18 → 19'},
+      paused:{title:'Agent 已暂停写入',subtitle:'你可以编辑 Draft；保存后 Agent 将读取新修订。',tag:'人工编辑',tone:'warning',rev:5,stage:2,events:[['写入权','交给人工编辑'],['工作区','当前修订 r5']],detail:'writerLease: manual_editor\nagentWrite: paused\nexpectedRevision: 5'},
+      conflict:{title:'此项目已有写入者',subtitle:'第二个标签页不能同时修改，先等待或切回活跃标签页。',tag:'写入冲突',tone:'error',rev:5,stage:2,events:[['冲突','当前写入者：标签页 A'],['结果','本次请求没有写入文件']],detail:'write_file: rejected\ncode: WORKSPACE_WRITER_CONFLICT\nrevision remains: 5'},
+      committed:{title:'代码检查通过并已提交',subtitle:'版本 v2 已保存；Preview 是独立的后续验证。',tag:'已提交',tone:'success',rev:9,stage:4,events:[['验证','TypeScript / Go 通过'],['版本','ArtifactVersion v2 · r9']],detail:'workspace revision: 9\ncommit result: ArtifactVersion v2\npreview build: queued'},
+      preview_failed:{title:'代码已提交，Preview 失败',subtitle:'保留 Draft 与错误；P0 不自动回流给 Agent。',tag:'预览失败',tone:'error',rev:9,stage:4,events:[['版本','ArtifactVersion v2 仍保留'],['Preview','构建失败 · 查看详情']],detail:'preview BuildJob: failed\nartifact version: v2, immutable\nagent auto-repair: disabled in P0'},
+      cancelled:{title:'任务已取消',subtitle:'不再调用模型或写入文件；现有 Draft 保留。',tag:'已取消',tone:'neutral',rev:5,stage:2,events:[['取消','执行停止'],['工作区','Draft r5 已保留']],detail:'run status: cancelled\nfuture model calls: none\nfuture file writes: none'}
+    };
+    const files = [
+      ['migrations/0001_init.sql','CREATE TABLE orders (\n  id BIGSERIAL PRIMARY KEY,\n  status TEXT NOT NULL\n);'],
+      ['backend/operations.go','package backend\n\nfunc ListOrders(ctx Context) Result {\n  return QueryOrders(ctx)\n}'],
+      ['acceptance/scenarios.json','{\n  "scenarios": [\n    { "name": "list orders", "steps": [] }\n  ]\n}'],
+      ['frontend/App.tsx','export default function App() {\n  return <OrderList />;\n}']
+    ];
+    let state='running', tab='code', mobile='task', selected=2, manualSaved=false, notes=[];
+    const $=id=>document.getElementById(id);
+    function note(message){ notes.unshift('• '+message); $('sideEffects').textContent=notes.slice(0,7).join('\n'); }
+    function setState(value){ state=value; $('scenario').value=value; render(); note('查看状态 '+meta[value].tag+'；原型不调用真实 API。'); }
+    function render(){
+      const m=meta[state]; $('revision').textContent='Draft r'+m.rev+' · 事件序号 '+(m.rev+13);
+      $('runTitle').textContent=m.title; $('runSubtitle').textContent=m.subtitle; $('runTag').textContent=m.tag; $('runTag').className='tag '+m.tone;
+      $('workStatus').textContent=state==='committed'||state==='preview_failed'?'v2 · Draft r'+m.rev:'Draft r'+m.rev;
+      $('workStatus').className='tag '+(state==='preview_failed'?'warning':m.tone);
+      $('mobileTag').textContent=m.tag; $('mobileTag').className='tag '+m.tone;
+      $('connection').textContent=state==='reconnected'?'已重连':'事件已连接'; $('connection').className='tag '+(state==='reconnected'?'warning':'running');
+      const stepLabels=['Migration','Backend','Acceptance','Frontend','提交 / Preview'];
+      $('plan').innerHTML=stepLabels.map((label,i)=>'<div class="step '+(i<m.stage?'done':i===m.stage?'active':'')+'"><span class="mark">'+(i<m.stage?'✓':i===m.stage?'●':'○')+'</span>'+label+'</div>').join('');
+      $('events').innerHTML=m.events.map(([kind,msg])=>'<div class="event"><span class="type">'+kind+'</span><span>'+msg+'</span></div>').join('');
+      $('toolDetail').textContent=m.detail;
+      $('files').innerHTML=files.map(([path],i)=>'<button class="file mono '+(i===selected?'selected ':'')+(i<3?'changed':'')+'" data-file="'+i+'">'+path+'</button>').join('');
+      $('filePath').textContent=files[selected][0]; $('fileRevision').textContent='r'+m.rev; $('code').textContent=files[selected][1];
+      $('diagnostics').innerHTML=state==='diagnostic'?'<div class="diagnostic"><strong>SCENARIO_SUITE_ROOT_TYPE</strong><br><span class="mono">acceptance/scenarios.json · $</span><br>预期顶层为 { scenarios: [...] }，实际为数组。<br>只需修改此文件。</div>':'<div style="padding:18px;color:var(--muted)">当前修订没有阻塞诊断。</div>';
+      $('diagCount').textContent=state==='diagnostic'?'1':'0';
+      $('cancel').disabled=['committed','preview_failed','cancelled'].includes(state);
+      $('edit').disabled=['cancelled','conflict'].includes(state); $('resume').hidden=state!=='paused'; $('retry').hidden=!['preview_failed','cancelled'].includes(state);
+      $('previewTitle').textContent=state==='preview_failed'?'Preview 构建失败':state==='committed'?'Preview 验证中':'尚未提交可预览版本';
+      $('previewText').textContent=state==='preview_failed'?'v2 仍保留。错误已记录，但 P0 不自动修复。可返回 Draft 发起新任务。':state==='committed'?'Go BuildJob 已排队，结果不会改变“代码已提交”的事实。':'文件先在 Draft 中逐步校验，达到提交门槛后进入 Preview。';
+      $('backDraft').hidden=state!=='preview_failed';
+      for(const t of ['code','preview','diagnostics']) { $(t+'Tab').hidden=tab!==t; document.querySelector('[data-tab="'+t+'"]').classList.toggle('active',tab===t); }
+      let mobileContent='';
+      if(mobile==='task') mobileContent='<div class="bubble user">创建一个订单管理应用。</div><div class="run-card"><div class="run-top"><div class="run-main"><strong>'+m.title+'</strong><p>'+m.subtitle+'</p></div></div><div class="events"><h3>最近事件</h3>'+m.events.map(([k,v])=>'<div class="event"><span class="type">'+k+'</span><span>'+v+'</span></div>').join('')+'</div></div>';
+      if(mobile==='files') mobileContent='<div class="mobile-files"><strong>Draft r'+m.rev+' · 文件</strong>'+files.map(([p],i)=>'<button class="file mono" data-mobile-file="'+i+'">'+p+'</button>').join('')+'<pre>'+files[selected][1].replaceAll('<','&lt;')+'</pre></div>';
+      if(mobile==='preview') mobileContent='<div style="padding:15px;line-height:1.5"><strong>'+$('previewTitle').textContent+'</strong><p>'+$('previewText').textContent+'</p></div>';
+      $('mobileMain').innerHTML=mobileContent; document.querySelectorAll('[data-mobile]').forEach(b=>b.classList.toggle('active',b.dataset.mobile===mobile));
+      $('mobileMain').querySelectorAll('[data-mobile-file]').forEach(b=>b.onclick=()=>{selected=Number(b.dataset.mobileFile);render();});
+      $('files').querySelectorAll('[data-file]').forEach(b=>b.onclick=()=>{selected=Number(b.dataset.file);render();});
+    }
+    $('scenario').onchange=e=>setState(e.target.value);
+    $('next').onclick=()=>setState(states[(states.indexOf(state)+1)%states.length]);
+    $('theme').onclick=()=>{document.body.classList.toggle('light');$('theme').textContent=document.body.classList.contains('light')?'切换暗色':'切换亮色';note('切换主题；状态和文件保持不变。');};
+    document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;render();});
+    document.querySelectorAll('[data-mobile]').forEach(b=>b.onclick=()=>{mobile=b.dataset.mobile;render();});
+    $('edit').onclick=()=>{if(state!=='paused')setState('paused');note('请求人工写入权：暂停 Agent，锁定 Draft r'+meta[state].rev+'。');};
+    $('resume').onclick=()=>{manualSaved=true;setState('reconnected');note('人工编辑通过预期修订提交；Agent 读取新修订后恢复。');};
+    $('retry').onclick=()=>{setState('reconnected');note('创建新的执行段，沿用当前 Draft；不是重发完整项目。');};
+    $('cancel').onclick=()=>{setState('cancelled');note('取消任务：停止后续模型调用与工具写入，保留 Draft。');};
+    $('backDraft').onclick=()=>{tab='code';render();note('返回 Draft r'+meta[state].rev+' 查看文件及诊断。');};
+    $('sendSupplement').onclick=()=>{const value=$('supplement').value.trim();if(!value)return;note('补充要求已排队：'+value+'；当前工具结束后交给 Agent。');$('supplement').value='';};
+    $('mobileSend').onclick=()=>note('窄屏补充要求已排队；当前工具结束后交给 Agent。');
+    render();
+  </script>
+</body>
+</html>

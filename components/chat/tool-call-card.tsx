@@ -1,8 +1,22 @@
 // components/chat/tool-call-card.tsx
 "use client";
 
-import { Loader2, CheckCircle2, XCircle, Wrench } from "lucide-react";
+import { useState } from "react";
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Wrench,
+  XCircle,
+} from "lucide-react";
 import type { ToolCall } from "@/hooks/use-chat";
+import { summarizeToolActivity } from "@/lib/chat/item-presentation";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 
 interface ToolCallCardProps {
   toolCall: ToolCall;
@@ -61,6 +75,49 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
         </div>
       )}
     </div>
+  );
+}
+
+export function ToolActivityGroup({ toolCalls }: { toolCalls: ToolCall[] }) {
+  const summary = summarizeToolActivity(toolCalls);
+  const [open, setOpen] = useState(summary.status === "error");
+
+  if (toolCalls.length === 0) return null;
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="rounded-lg border bg-card">
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          aria-label={`${open ? "收起" : "展开"}工具活动：${summary.label}`}
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            {summary.status === "running" ? (
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+            ) : summary.status === "error" ? (
+              <XCircle className="h-4 w-4 shrink-0 text-destructive" />
+            ) : (
+              <Wrench className="h-4 w-4 shrink-0 text-muted-foreground" />
+            )}
+            <span className="truncate text-sm font-medium">工具活动</span>
+            <span className="truncate text-xs text-muted-foreground">
+              {summary.label}
+            </span>
+          </span>
+          {open ? (
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+          )}
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="space-y-2 border-t bg-muted/30 p-3">
+        {toolCalls.map((toolCall) => (
+          <ToolCallCard key={toolCall.id} toolCall={toolCall} />
+        ))}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 

@@ -1,8 +1,7 @@
 // components/unified-chat.tsx
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
-import { Loader2 } from "lucide-react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { SplitPane, Pane } from "react-split-pane";
 import { toast } from "sonner";
 import "react-split-pane/styles.css";
@@ -11,6 +10,8 @@ import "@/app/split-pane.css";
 // Hooks
 import { useChat } from "@/hooks/use-chat";
 import { useCanvas } from "@/hooks/use-canvas";
+import { useWorkspaceActivity } from "@/hooks/use-workspace-activity";
+import { workspaceEventLabel, workspaceEventSection, workspaceRunLabel } from "@/lib/workspace/presentation";
 import { SANDBOX_ORIGIN } from "@/lib/sandbox-config";
 
 // Components
@@ -25,6 +26,7 @@ import {
 } from "@/stores/use-generation-store";
 
 interface UnifiedChatProps {
+  projectId?: string;
   threadId?: string;
   onThreadUpdate?: () => void;
   initialMessage?: string;
@@ -32,6 +34,7 @@ interface UnifiedChatProps {
 }
 
 export function UnifiedChat({
+  projectId,
   threadId,
   onThreadUpdate,
   initialMessage,
@@ -82,62 +85,108 @@ export function UnifiedChat({
   // Chat hook - 先初始化，回调稍后通过 ref 设置
   const chatCallbacksRef = useRef<{
     onArtifactDetected?: (content: string) => void;
+    onSaved?: () => void;
     onStreamStart?: () => void;
     onStreamComplete?: (content: string) => void;
+    onError?: () => void;
     onTitleUpdate?: (threadId: string, title: string) => void;
+    onWorkspaceQueued?: (workspaceId: string, runId: string) => void;
   }>({});
 
   const chat = useChat({
+    projectId,
     threadId,
     mcpConfigId: selectedMcpId,
     model: selectedModel,
     onArtifactDetected: (content) =>
       chatCallbacksRef.current.onArtifactDetected?.(content),
+    onSaved: () => chatCallbacksRef.current.onSaved?.(),
     onStreamStart: () => chatCallbacksRef.current.onStreamStart?.(),
     onStreamComplete: (content) =>
       chatCallbacksRef.current.onStreamComplete?.(content),
+    onError: () => chatCallbacksRef.current.onError?.(),
     onTitleUpdate: (threadId, title) =>
       chatCallbacksRef.current.onTitleUpdate?.(threadId, title),
+    onWorkspaceQueued: (workspaceId, runId) =>
+      chatCallbacksRef.current.onWorkspaceQueued?.(workspaceId, runId),
   });
 
   // Canvas hook - 传入 messages 用于实时监听
   const canvas = useCanvas({ threadId, messages: chat.messages });
+  const workspaceActivity = useWorkspaceActivity(
+    projectId,
+    canvas.setWorkspaceFiles,
+    (fresh) => {
+      void canvas.refreshVersionList();
+      canvas.setShouldSendToSandbox(true);
+      if (fresh) toast.success("工作区验证通过，已保存版本");
+    },
+  );
+  const attachWorkspaceRun = workspaceActivity.attach;
+  const workspaceBusy = Boolean(workspaceActivity.run && ["QUEUED", "RUNNING", "READY_TO_VALIDATE"].includes(workspaceActivity.run.status));
+  const latestPlan = [...workspaceActivity.events].reverse().find((event) => event.type === "plan.updated" && Array.isArray(event.payload.steps));
+  const planSteps = latestPlan?.payload.steps as Array<{ id: string; title: string; status: string }> | undefined;
+  const visibleEvents = workspaceActivity.events.filter((event) => workspaceEventSection(event.type) === "summary" && workspaceEventLabel(event)).slice(-10);
+  const detailEvents = workspaceActivity.events.filter((event) => workspaceEventSection(event.type) === "details").slice(-20);
+  const openWorkspaceFile = (path: string) => {
+    const file = canvas.artifact?.files.find((entry) => entry.path === path);
+    if (!file) return;
+    canvas.selectFile(file);
+    canvas.setActiveTab("code");
+    setIsCanvasVisible(true);
+  };
+  const cancelWorkspaceRun = useCallback(async () => {
+    if (!workspaceActivity.workspace || !workspaceActivity.run) return;
+    const response = await fetch(`/api/workspaces/${workspaceActivity.workspace.id}/runs/${workspaceActivity.run.id}/cancel`, { method: "POST" });
+    if (!response.ok) toast.error("取消工作区任务失败");
+  }, [workspaceActivity.workspace, workspaceActivity.run]);
+  const latestArtifactMessageId = useMemo(
+    () =>
+      [...chat.messages]
+        .reverse()
+        .find((message) =>
+          message.role === "assistant" && message.content.includes("<boltArtifact"),
+        )?.id,
+    [chat.messages],
+  );
+  const latestVersionNumber =
+    canvas.selectedVersion ??
+    (canvas.versions.length > 0
+      ? Math.max(...canvas.versions.map((version) => version.versionNumber))
+      : undefined);
 
   // 用 ref 跟踪是否已经处理过 initialMessage
   const initialMessageSentRef = useRef(false);
-  const pendingAutoSendRef = useRef(false);
+  const sendInitialMessage = chat.sendMessage;
 
-  // 第一步：接收 initialMessage 和 initialImages，设置输入框和图片
+  // 切换项目时清理上一项目的进度。该 effect 必须先于首条消息发送，
+  // 否则空历史记录的异步渲染会把刚启动的意图识别状态重置掉。
   useEffect(() => {
-    if (initialMessage && !initialMessageSentRef.current) {
+    useGenerationStore.getState().reset();
+  }, [projectId]);
+
+  // 新项目创建完成后，直接发送首页提交的原始需求。
+  // 不再先写入输入框再依赖延时回调，避免页面切换时回调捕获到旧状态。
+  useEffect(() => {
+    const hasInitialContent =
+      Boolean(initialMessage?.trim()) || Boolean(initialImages?.length);
+    if (hasInitialContent && !initialMessageSentRef.current) {
       initialMessageSentRef.current = true;
-      pendingAutoSendRef.current = true;
-      chat.setInput(initialMessage);
-      // 如果有初始图片，也设置到 chat 中
-      if (initialImages && initialImages.length > 0) {
-        chat.setImages(initialImages);
-      }
+      void sendInitialMessage({
+        message: initialMessage || "",
+        images: initialImages || [],
+      });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialMessage, initialImages]);
-
-  // 第二步：监听 chat.input 变化，当输入框被填充后自动发送
-  useEffect(() => {
-    if (pendingAutoSendRef.current && chat.input && !chat.isLoading) {
-      pendingAutoSendRef.current = false;
-
-      // 短暂延迟确保历史加载完成
-      const timer = setTimeout(() => {
-        chat.sendMessage();
-      }, 1000);
-
-      return () => clearTimeout(timer);
-    }
-  }, [chat.input, chat.isLoading, chat.messages.length, chat.sendMessage]);
+  }, [initialMessage, initialImages, sendInitialMessage]);
 
   // 设置 chat 回调（依赖 canvas）
   useEffect(() => {
     chatCallbacksRef.current = {
+      onWorkspaceQueued: (workspaceId, runId) => {
+        attachWorkspaceRun(workspaceId, runId);
+        canvas.setShouldSendToSandbox(false);
+        setIsCanvasVisible(true);
+      },
       onArtifactDetected: (content: string) => {
         // 首次检测到代码时，创建乐观版本用于展示代码生成过程
         if (!canvas.selectedVersion || canvas.selectedVersion === 0) {
@@ -160,66 +209,24 @@ export function UnifiedChat({
         canvas.setIsGenerating(true);
         canvas.setShouldSendToSandbox(false);
       },
-      onStreamComplete: async (content: string) => {
-        // 流式响应完成
-        if (canvas.artifact && canvas.artifact.files.length > 0) {
-          console.log("[UnifiedChat] 代码生成完成，准备保存到后端", {
-            filesCount: canvas.artifact.files.length,
-            contentLength: content.length,
-          });
-
-          // 🛡️ 完整性校验
-          const hasClosingTag = content.includes("</boltArtifact>");
-          const hasEntryFile = canvas.artifact.files.some(
-            (f) =>
-              f.path === "App.tsx" ||
-              f.path === "src/App.tsx" ||
-              f.path.endsWith("/App.tsx"),
-          );
-
-          if (!hasClosingTag) {
-            console.error("[UnifiedChat] ❌ 生成不完整：缺少闭合标签");
-            toast.warning("生成中断，内容不完整");
-            canvas.setIsGenerating(false);
-            return;
-          }
-
-          if (!hasEntryFile) {
-            console.error("[UnifiedChat] ❌ 生成不完整：缺少入口文件 App.tsx");
-            toast.warning("生成结果缺失关键文件，可能无法运行");
-            // 不强制中断，允许尝试加载
-          }
-
-          // 🚀 后端已接管自动保存逻辑 (Server-Side Auto-Save)
-          // 前端只需刷新版本列表即可
-          console.log(
-            "[UnifiedChat] 生成完成，后端应已自动保存，准备刷新版本列表",
-          );
-
-          try {
-            // 短暂延迟确保后端事务完成
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-
-            // 刷新版本列表，获取后端保存的最新版本
-            await canvas.refreshVersionList();
-            console.log("[UnifiedChat] 版本列表刷新完成");
-
-            // 生成完成，禁用 messages 监听（切换为查看历史模式）
-            canvas.setIsGenerating(false);
-
-            // 允许发送到沙箱渲染
-            canvas.setShouldSendToSandbox(true);
-
-            toast.success("代码已生成并保存");
-          } catch (error) {
-            console.error("[UnifiedChat] 刷新版本列表失败:", error);
-            canvas.setIsGenerating(false);
-            toast.error("刷新版本失败，请手动刷新页面");
-          }
-        } else {
-          // 没有代码生成，直接禁用生成模式
+      onSaved: async () => {
+        try {
+          await canvas.refreshVersionList();
+          canvas.setShouldSendToSandbox(true);
+          toast.success("代码已生成、保存并同步预览");
+        } catch (error) {
+          console.error("[UnifiedChat] 刷新已保存版本失败:", error);
+          toast.error("代码已保存，但刷新预览失败，请手动刷新页面");
+        } finally {
           canvas.setIsGenerating(false);
         }
+      },
+      onStreamComplete: () => {
+        canvas.setIsGenerating(false);
+      },
+      onError: () => {
+        canvas.setIsGenerating(false);
+        canvas.setShouldSendToSandbox(false);
       },
       onTitleUpdate: (threadId: string, title: string) => {
         console.log("[UnifiedChat] 🏷️ 标题已更新:", { threadId, title });
@@ -229,7 +236,7 @@ export function UnifiedChat({
         }
       },
     };
-  }, [canvas, threadId, onThreadUpdate]);
+  }, [canvas, threadId, onThreadUpdate, attachWorkspaceRun]);
 
   // 全屏切换处理
   const handleFullscreenToggle = useCallback(() => {
@@ -337,6 +344,7 @@ ${sandboxError}
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.origin !== SANDBOX_ORIGIN) return;
+      if (![1, 2].includes(event.data?.protocolVersion)) return;
 
       const { type, payload } = event.data || {};
 
@@ -457,17 +465,8 @@ ${sandboxError}
     }
   }, [canvas.artifact, canvas.versions]);
 
-  // 🔥 修复：初始加载时重置生成状态
-  // 避免上次会话遗留的状态导致“正在生成内容”卡片错误显示
-  useEffect(() => {
-    // 只有当没有消息或者最新消息不是 assistant 时，才可能是异常状态
-    if (chat.messages.length === 0) {
-      useGenerationStore.getState().reset();
-    }
-  }, [chat.messages.length]);
-
   return (
-    <div className="h-full bg-background">
+    <div className="workspace-chat-layout h-full bg-background" data-mobile-pane={isCanvasVisible ? "canvas" : "chat"}>
       <SplitPane
         // 兼容性修复：react-split-pane 类型定义可能不包含 split 属性，但组件本身支持
         // @ts-expect-error react-split-pane props compatibility
@@ -493,6 +492,7 @@ ${sandboxError}
             <div
               ref={messagesContainerRef}
               className="flex-1 space-y-4 overflow-y-auto p-4 custom-scrollbar"
+              aria-label="项目活动"
             >
               {chat.messages.map((message) => (
                 <MessageItem
@@ -509,21 +509,67 @@ ${sandboxError}
                   onRegenerate={(messageId) => {
                     chat.regenerateFromMessage(messageId);
                   }}
+                  versionNumber={
+                    message.id === latestArtifactMessageId
+                      ? latestVersionNumber
+                      : undefined
+                  }
+                  onViewChanges={
+                    message.id === latestArtifactMessageId
+                      ? () => {
+                          setIsCanvasVisible(true);
+                          canvas.setActiveTab("code");
+                        }
+                      : undefined
+                  }
+                  onUndo={
+                    message.id === latestArtifactMessageId &&
+                    latestVersionNumber &&
+                    latestVersionNumber > 1
+                      ? () => {
+                          setIsCanvasVisible(true);
+                          canvas.selectVersion(latestVersionNumber - 1);
+                        }
+                      : undefined
+                  }
                 />
               ))}
 
               {/* 🔥 生成状态卡片 */}
-              <GenerationStatusCard />
+              {!workspaceActivity.run && <GenerationStatusCard />}
 
-              {chat.isLoading && (
-                <div className="flex justify-start">
-                  <div className="flex items-center gap-2 rounded-lg bg-muted px-4 py-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span className="text-sm text-gray-600 dark:text-gray-400">
-                      思考中...
-                    </span>
+              {workspaceActivity.run && (
+                <section className="workspace-run-card rounded-lg border p-3 text-sm" data-status={workspaceActivity.run.status} aria-label="工作区任务进度">
+                  <div className="flex items-center justify-between gap-2">
+                    <span role="status" aria-live="polite" aria-atomic="true">工作区任务 · {workspaceRunLabel(workspaceActivity.run.status)} · 第 {workspaceActivity.run.nextStep}/{workspaceActivity.run.maxSteps} 步</span>
+                    {workspaceBusy && (
+                      <button className="text-destructive underline" onClick={() => { void cancelWorkspaceRun(); }}>取消</button>
+                    )}
                   </div>
-                </div>
+                  {workspaceActivity.run.summary && <p className="workspace-muted mt-1">{workspaceActivity.run.summary}</p>}
+                  {planSteps && (
+                    <ol className="mt-2 space-y-1" aria-label="工作区计划">
+                      {planSteps.map((step) => <li key={step.id}>{step.status === "completed" ? "✓" : step.status === "in_progress" ? "→" : "○"} {step.title}</li>)}
+                    </ol>
+                  )}
+                  {workspaceActivity.error && <p role="alert" className="mt-1 text-destructive">{workspaceActivity.error}</p>}
+                  <div className="workspace-muted mt-2 max-h-40 space-y-1 overflow-y-auto text-xs">
+                    {visibleEvents.map((event) => {
+                      const diagnostic = event.type === "diagnostic.created" && event.payload.diagnostic && typeof event.payload.diagnostic === "object"
+                        ? event.payload.diagnostic as { file?: string; path?: string; code?: string; raw?: string; expected?: string; actual?: string }
+                        : null;
+                      const file = diagnostic?.file && canvas.artifact?.files.some((entry) => entry.path === diagnostic.file) ? diagnostic.file : null;
+                      return (
+                        <div key={event.sequence} className={diagnostic ? "workspace-diagnostic" : undefined}>
+                          {workspaceEventLabel(event)}
+                          {file && <button type="button" className="ml-1 underline" onClick={() => openWorkspaceFile(file)}>打开文件</button>}
+                          {diagnostic && <details className="ml-2"><summary>诊断详情</summary><pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all">{[diagnostic.code, diagnostic.path, diagnostic.expected && `预期：${diagnostic.expected}`, diagnostic.actual && `实际：${diagnostic.actual}`, diagnostic.raw?.slice(0, 4000)].filter(Boolean).join("\n")}</pre></details>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {detailEvents.length > 0 && <details className="workspace-muted mt-2 text-xs"><summary>工具明细（{detailEvents.length}）</summary><div className="max-h-40 space-y-1 overflow-y-auto">{detailEvents.map((event) => <div key={event.sequence}>{workspaceEventLabel(event) ?? `${event.type} · ${String(event.payload.check ?? event.payload.name ?? "")}`}{event.type === "command.output" && typeof event.payload.output === "string" && <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-all">{event.payload.output.slice(0, 4000)}</pre>}</div>)}</div></details>}
+                </section>
               )}
 
               <div ref={messagesEndRef} />
@@ -534,9 +580,9 @@ ${sandboxError}
               ref={inputRef}
               value={chat.input}
               onChange={chat.setInput}
-              onSubmit={chat.sendMessage}
-              onStop={chat.stop}
-              isLoading={chat.isLoading}
+              onSubmit={() => { if (!workspaceBusy) void chat.sendMessage(); }}
+              onStop={() => { if (workspaceBusy) void cancelWorkspaceRun(); else chat.stop(); }}
+              isLoading={chat.isLoading || workspaceBusy}
               isCanvasMode={true}
               images={chat.images}
               onImagesChange={chat.setImages}
@@ -562,7 +608,9 @@ ${sandboxError}
         {/* Right: Canvas Panel (Always visible) */}
         <Pane minSize="300px">
           <div className="flex h-full flex-col">
+            <button type="button" className="border-b px-3 py-2 text-left text-sm md:hidden" onClick={() => setIsCanvasVisible(false)}>← 返回对话</button>
             <CanvasPanel
+              projectId={projectId}
               canvas={canvas}
               iframeRef={iframeRef}
               isSandboxReady={isSandboxReady}

@@ -6,9 +6,13 @@ import {
 } from "@langchain/core/messages";
 import type { AgentState, SceneType } from "./state";
 import { ARCHITECT_PROMPT, CODER_PROMPT } from "./prompts";
+import { FULLSTACK_CODER_PROMPT, STATIC_APP_CODER_PROMPT } from "./prompts/product";
+import { CURRENT_GO_RUNTIME } from "@/lib/app-contracts";
+import { queueFullstackPreview } from "@/lib/build-jobs/service";
+import { validateGeneratedArtifact } from "@/lib/go-runtime/artifact-validator";
 import { createLLM } from "./models";
 import { parseXmlToFiles } from "./utils";
-import prisma from "@/lib/database/prisma";
+import { saveProjectArtifactVersion } from "@/lib/projects/artifact-service";
 
 /**
  * 压缩 prompt 以节省 token
@@ -385,13 +389,18 @@ export async function architect(
 // Artifact Saver Node: 保存生成的代码到数据库
 export async function artifactSaver(
   state: AgentState,
-  config?: { configurable?: { thread_id?: string } },
+  config?: {
+    configurable?: {
+      project_id?: string;
+      generation_request_id?: string;
+    };
+  },
 ): Promise<Partial<AgentState>> {
   console.log("[ArtifactSaver] 💾 开始执行保存节点");
 
-  const threadId = config?.configurable?.thread_id;
-  if (!threadId) {
-    console.error("[ArtifactSaver] ❌ 缺少 thread_id，无法保存");
+  const projectId = config?.configurable?.project_id;
+  if (!projectId) {
+    console.error("[ArtifactSaver] ❌ 缺少 project_id，无法保存");
     return {};
   }
 
@@ -428,87 +437,16 @@ export async function artifactSaver(
     }
 
     console.log(
-      `[ArtifactSaver] 准备保存 ${files.length} 个文件到 Thread: ${threadId}`,
+      `[ArtifactSaver] 准备保存 ${files.length} 个文件到 Project: ${projectId}`,
     );
 
-    // 3. 数据库操作 (复用 api/artifact/save 的逻辑)
-    // 查找该 thread 下的 artifact
-    const artifact = await prisma.artifact.findUnique({
-      where: { threadId },
-      include: {
-        versions: {
-          orderBy: { versionNumber: "desc" },
-          take: 1,
-          include: { files: true },
-        },
-      },
+    const version = await saveProjectArtifactVersion({
+      projectId,
+      files,
+      generationRequestId: config?.configurable?.generation_request_id,
+      description: "自动保存",
     });
-
-    const currentVersion = artifact?.versions[0];
-    const currentFiles = currentVersion?.files || [];
-
-    if (!artifact) {
-      // 创建新的 Artifact 和第一个版本
-      const newArtifact = await prisma.artifact.create({
-        data: {
-          threadId,
-          versions: {
-            create: {
-              versionNumber: 1,
-              description: "初始版本 (Auto-Saved)",
-              files: {
-                create: files.map((file) => ({
-                  path: file.path,
-                  content: file.content,
-                })),
-              },
-            },
-          },
-        },
-      });
-      console.log("[ArtifactSaver] ✅ 创建新 Artifact:", newArtifact.id);
-    } else {
-      // 合并逻辑：旧文件 + 新文件 = 新快照
-      const currentFilesMap = new Map(
-        currentFiles.map((f) => [f.path, f.content]),
-      );
-
-      // 用新文件覆盖旧文件
-      files.forEach((file) => {
-        currentFilesMap.set(file.path, file.content);
-      });
-
-      const mergedFiles = Array.from(currentFilesMap.entries()).map(
-        ([path, content]) => ({
-          path,
-          content,
-        }),
-      );
-
-      // 重新查询最新版本号
-      const latestVersion = await prisma.artifactVersion.findFirst({
-        where: { artifactId: artifact.id },
-        orderBy: { versionNumber: "desc" },
-        select: { versionNumber: true },
-      });
-      const nextVersionNumber = (latestVersion?.versionNumber || 0) + 1;
-
-      const newVersion = await prisma.artifactVersion.create({
-        data: {
-          artifactId: artifact.id,
-          versionNumber: nextVersionNumber,
-          description: `自动保存于 ${new Date().toLocaleString()}`,
-          files: {
-            create: mergedFiles,
-          },
-        },
-      });
-      console.log(
-        "[ArtifactSaver] ✅ 创建新版本:",
-        newVersion.id,
-        "v" + nextVersionNumber,
-      );
-    }
+    console.log("[ArtifactSaver] ✅ 保存版本:", version.id);
 
     // 可以返回一个系统消息通知保存成功，或者不做任何事
     // return { messages: [new SystemMessage("代码已自动保存到数据库。")] };
@@ -522,7 +460,14 @@ export async function artifactSaver(
 // Coder Node: 生成代码
 export async function coder(
   state: AgentState,
-  config?: { configurable?: { model?: string; thread_id?: string } },
+  config?: {
+    configurable?: {
+      model?: string;
+      thread_id?: string;
+      project_id?: string;
+      generation_request_id?: string;
+    };
+  },
 ): Promise<Partial<AgentState>> {
   console.log("[Coder] 💻 开始执行 coder 节点", {
     messagesCount: state.messages.length,
@@ -579,7 +524,12 @@ export async function coder(
   }
 
   // 准备 prompt，并压缩以节省 token
-  const promptWithContext = compressPrompt(CODER_PROMPT);
+  const isGoApplication = state.appBlueprint?.runtimeType !== "STATIC";
+  const promptWithContext = compressPrompt(
+    state.appBlueprint
+      ? `${isGoApplication ? FULLSTACK_CODER_PROMPT : STATIC_APP_CODER_PROMPT}\nRequirementSpec:\n${JSON.stringify(state.requirementSpec)}\nAppBlueprint:\n${JSON.stringify(state.appBlueprint)}${state.validationErrors?.length ? `\n上一次产物验证失败，必须修复：\n${state.validationErrors.join("\n")}` : ""}`
+      : CODER_PROMPT,
+  );
 
   // 获取相关的对话上下文
   let relevantMessages: typeof state.messages;
@@ -619,7 +569,12 @@ export async function coder(
   // 这样可以强制 Coder 转换角色，将其视为输入指令而不是自己的历史输出
   // 避免 Coder 模仿 Architect 的语气或尝试"完善"计划
   let architectPlanInstruction: HumanMessage | null = null;
-  if (lastArchitectMessage) {
+  if (state.appBlueprint) {
+    architectPlanInstruction = new HumanMessage(
+      `Implement this confirmed full-stack App Blueprint now:\n${JSON.stringify(state.appBlueprint)}`,
+    );
+  }
+  else if (lastArchitectMessage) {
     const planContent =
       typeof lastArchitectMessage.content === "string"
         ? lastArchitectMessage.content
@@ -758,6 +713,26 @@ export async function coder(
     // 创建新的 AIMessage 带上修改后的内容
     const messageWithVersion = new AIMessage(content);
 
+    const generatedFiles = parseXmlToFiles(content);
+    if (state.appBlueprint) {
+      const validationErrors = validateGeneratedArtifact(
+        content,
+        generatedFiles,
+        state.appBlueprint,
+      );
+      if (validationErrors.length > 0) {
+        console.warn(
+          "[Coder] 生成产物验证失败，等待自动修复",
+          validationErrors,
+        );
+        return {
+          messages: [messageWithVersion],
+          generatedArtifact: content,
+          validationErrors,
+        };
+      }
+    }
+
     // ==========================================
     // 🛡️ 后端自动保存逻辑
     // ==========================================
@@ -767,86 +742,47 @@ export async function coder(
         content.includes("<boltArtifact") &&
         content.includes("</boltArtifact>")
       ) {
-        const threadId = config?.configurable?.thread_id;
-        if (threadId) {
+        const projectId = config?.configurable?.project_id;
+        if (projectId) {
           console.log(
-            `[Coder] 💾 自动保存生成结果到数据库... Thread: ${threadId}`,
+            `[Coder] 💾 自动保存生成结果到数据库... Project: ${projectId}`,
           );
 
           // 2. 解析文件
-          const files = parseXmlToFiles(content);
+          const files = generatedFiles;
 
           if (files.length > 0) {
             // 3. 检查入口文件完整性
             const hasAppTsx = files.some(
-              (f) => f.path === "App.tsx" || f.path.endsWith("/App.tsx"),
+              (f) => f.path === "App.tsx" || f.path === "frontend/App.tsx" || f.path.endsWith("/App.tsx"),
             );
 
             if (hasAppTsx) {
-              // 4. 执行保存操作 (模拟 api/artifact/save 逻辑)
-              const artifact = await prisma.artifact.findUnique({
-                where: { threadId },
-                include: {
-                  versions: {
-                    orderBy: { versionNumber: "desc" },
-                    take: 1,
-                    include: { files: true },
-                  },
-                },
-              });
-
-              const currentVersion = artifact?.versions[0];
-              const currentFiles = currentVersion?.files || [];
-
-              if (!artifact) {
-                // 创建新 Artifact
-                await prisma.artifact.create({
-                  data: {
-                    threadId,
-                    versions: {
-                      create: {
-                        versionNumber: 1,
-                        description: "初始版本 (Auto-Saved by Coder)",
-                        files: {
-                          create: files.map((file) => ({
-                            path: file.path,
-                            content: file.content,
-                          })),
-                        },
-                      },
-                    },
-                  },
-                });
-                console.log("[Coder] ✅ 新 Artifact 创建成功");
-              } else {
-                // 合并文件
-                const currentFilesMap = new Map(
-                  currentFiles.map((f) => [f.path, f.content]),
-                );
-                files.forEach((file) => {
-                  currentFilesMap.set(file.path, file.content);
-                });
-                const mergedFiles = Array.from(currentFilesMap.entries()).map(
-                  ([path, content]) => ({ path, content }),
-                );
-
-                // 创建新版本
-                const nextVersionNumber =
-                  (currentVersion?.versionNumber || 0) + 1;
-                await prisma.artifactVersion.create({
-                  data: {
-                    artifactId: artifact.id,
-                    versionNumber: nextVersionNumber,
-                    description: `自动更新于 ${new Date().toLocaleString()} (Auto-Saved)`,
-                    files: {
-                      create: mergedFiles,
-                    },
-                  },
-                });
-                console.log(
-                  `[Coder] ✅ Artifact v${nextVersionNumber} 更新成功`,
-                );
+              let seedData: Record<string, Array<Record<string, unknown>>> = {};
+              const seedFile = files.find((file) => file.path === "acceptance/seed.json");
+              if (seedFile) {
+                try { seedData = JSON.parse(seedFile.content); } catch { console.warn("[Coder] acceptance/seed.json 不是有效 JSON，Sandbox 将使用空数据"); }
               }
+              const version = await saveProjectArtifactVersion({
+                projectId,
+                files,
+                generationRequestId:
+                  config?.configurable?.generation_request_id,
+                description: "AI 自动生成",
+                requirementSpec: state.requirementSpec,
+                appBlueprint: state.appBlueprint,
+                runtimeManifest: state.appBlueprint && isGoApplication ? {
+                  runtimeVersion: CURRENT_GO_RUNTIME,
+                  frontendEntry: "frontend/App.tsx",
+                  migrationDirectory: "migrations",
+                  operations: state.appBlueprint.operations,
+                  seedData,
+                } : undefined,
+                runtimeVersion: state.appBlueprint && isGoApplication ? CURRENT_GO_RUNTIME : undefined,
+                completeSnapshot: Boolean(state.appBlueprint),
+              });
+              console.log(`[Coder] ✅ Artifact v${version.versionNumber} 保存成功`);
+              if (state.appBlueprint && isGoApplication) await queueFullstackPreview(projectId, version.id);
             } else {
               console.warn("[Coder] ⚠️ 生成结果缺少 App.tsx，跳过自动保存");
             }
@@ -861,6 +797,7 @@ export async function coder(
     return {
       messages: [messageWithVersion],
       generatedArtifact: content,
+      validationErrors: [],
     };
   } catch (networkError) {
     console.error("Network error in coder:", networkError);
@@ -870,4 +807,16 @@ export async function coder(
       generatedArtifact: "网络连接错误，请检查网络设置后重试。",
     };
   }
+}
+
+export async function artifactValidator(state: AgentState): Promise<Partial<AgentState>> {
+  if (!state.appBlueprint || !state.generatedArtifact) {
+    return { validationErrors: [] };
+  }
+  const errors = validateGeneratedArtifact(
+    state.generatedArtifact,
+    parseXmlToFiles(state.generatedArtifact),
+    state.appBlueprint,
+  );
+  return { validationErrors: errors, repairAttempts: errors.length ? (state.repairAttempts || 0) + 1 : state.repairAttempts || 0 };
 }

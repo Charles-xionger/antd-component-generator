@@ -17,9 +17,11 @@ import { toast } from "sonner";
 import { CodePanel } from "./code-panel";
 import { PreviewPanel } from "./preview-panel";
 import { PreviewToolbar } from "./preview-toolbar";
+import { PublishFlowDialog } from "@/components/publishing/publish-flow-dialog";
 import type { UseCanvasReturn } from "@/hooks/use-canvas";
 
 interface CanvasPanelProps {
+  projectId?: string;
   canvas: UseCanvasReturn;
   onClose?: () => void;
   iframeRef?: React.RefObject<HTMLIFrameElement | null>;
@@ -34,6 +36,7 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
   function CanvasPanel(
     {
       canvas,
+      projectId,
       iframeRef,
       isSandboxReady = false,
       sandboxError = null,
@@ -71,6 +74,29 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
     const [shareUrl, setShareUrl] = useState("");
     const [isCreatingShare, setIsCreatingShare] = useState(false);
     const [copiedShareUrl, setCopiedShareUrl] = useState(false);
+    const [publishDialogOpen, setPublishDialogOpen] = useState(false);
+    const [fullstackPreview, setFullstackPreview] = useState<{ status: string; previewUrl?: string | null; errorMessage?: string | null } | null>(null);
+    const [fullstackPreviewOpen, setFullstackPreviewOpen] = useState(false);
+
+    useEffect(() => {
+      if (!projectId || !selectedVersion) return;
+      const version = versions.find((item) => item.versionNumber === selectedVersion);
+      if (!version) return;
+      let active = true;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const load = async () => {
+        try {
+          const response = await fetch(`/api/projects/${projectId}/previews?artifactVersionId=${version.id}`);
+          const data = await response.json();
+          if (active && response.ok) setFullstackPreview(data.preview);
+          if (active && data.preview && !["SUCCEEDED", "FAILED"].includes(data.preview.status)) timer = setTimeout(load, 2000);
+        } catch {
+          if (active) timer = setTimeout(load, 4000);
+        }
+      };
+      void load();
+      return () => { active = false; if (timer) clearTimeout(timer); };
+    }, [projectId, selectedVersion, versions]);
 
     // 切换全屏 - 调用父组件回调
     const toggleFullscreen = useCallback(() => {
@@ -125,6 +151,7 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
         if (iframeRef?.current?.contentWindow) {
           iframeRef.current.contentWindow.postMessage(
             {
+              protocolVersion: 2,
               type: "CHANGE_LANGUAGE",
               lng: language,
             },
@@ -186,6 +213,14 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
       toast.success("链接已复制到剪贴板");
       setTimeout(() => setCopiedShareUrl(false), 2000);
     }, [shareUrl]);
+
+    const handlePublish = useCallback(() => {
+      if (!projectId || !selectedVersion) {
+        toast.error("请先生成代码");
+        return;
+      }
+      setPublishDialogOpen(true);
+    }, [projectId, selectedVersion]);
 
     // 沙箱就绪且应该发送文件时才发送（审查通过后）
     useEffect(() => {
@@ -255,6 +290,10 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
             onLanguageChange={handleLanguageChange}
             currentLanguage={currentLanguage}
             onShare={handleShare}
+            isSharing={isCreatingShare}
+            onPublish={projectId ? handlePublish : undefined}
+            fullstackPreview={fullstackPreview}
+            onOpenFullstackPreview={() => setFullstackPreviewOpen(true)}
           />
         )}
 
@@ -265,6 +304,7 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
             ref={isFullscreen ? null : iframeRef}
             isVisible={activeTab === "preview"}
             isSandboxReady={isSandboxReady}
+            sandboxError={sandboxError}
             selectedDevice={selectedDevice}
           />
           {/* Code Panel */}
@@ -307,6 +347,32 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
                 )}
               </Button>
             </div>
+          </DialogContent>
+        </Dialog>
+
+        {projectId && selectedVersion && (() => {
+          const version = versions.find((item) => item.versionNumber === selectedVersion);
+          return version ? (
+            <PublishFlowDialog
+              open={publishDialogOpen}
+              onOpenChange={setPublishDialogOpen}
+              projectId={projectId}
+              artifactVersionId={version.id}
+              versionNumber={version.versionNumber}
+              fileCount={version.files.length}
+              fullstackPreview={fullstackPreview}
+            />
+          ) : null;
+        })()}
+        <Dialog open={fullstackPreviewOpen} onOpenChange={setFullstackPreviewOpen}>
+          <DialogContent className="max-w-[95vw] h-[90vh] p-0 overflow-hidden">
+            <DialogHeader className="sr-only">
+              <DialogTitle>可用版本</DialogTitle>
+              <DialogDescription>连接独立测试数据，可以完整操作和刷新验证</DialogDescription>
+            </DialogHeader>
+            {fullstackPreview?.previewUrl && (
+              <iframe className="w-full h-full border-0" src={fullstackPreview.previewUrl} title="Go full-stack preview" />
+            )}
           </DialogContent>
         </Dialog>
       </div>

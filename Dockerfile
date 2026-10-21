@@ -6,8 +6,12 @@ RUN corepack enable && corepack prepare pnpm@10.14.0 --activate
 WORKDIR /app
 
 FROM base AS dependencies
+ARG PNPM_REGISTRY=https://registry.npmjs.org
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=prompt-web-pnpm,target=/pnpm/store \
+    pnpm config set store-dir /pnpm/store \
+    && pnpm config set registry "$PNPM_REGISTRY" \
+    && pnpm install --frozen-lockfile
 
 FROM dependencies AS builder
 COPY . .
@@ -23,7 +27,7 @@ RUN pnpm prisma:generate && pnpm exec next build
 FROM base AS runner
 ENV NODE_ENV=production
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssl \
+    && apt-get install -y --no-install-recommends openssl docker.io \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
@@ -34,10 +38,12 @@ COPY --from=builder /app/lib ./lib
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/stores ./stores
+COPY --from=builder /app/runtime ./runtime
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.ts ./next.config.ts
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
+COPY --from=builder /app/postcss.config.mjs ./postcss.config.mjs
 
 EXPOSE 3000
 CMD ["sh", "-c", "pnpm prisma:migrate:deploy && pnpm start"]
