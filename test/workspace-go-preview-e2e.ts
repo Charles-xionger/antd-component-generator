@@ -267,6 +267,10 @@ async function main() {
     assert.equal((await client.buildJob.findUniqueOrThrow({ where: { id: publication.job.id } })).status, "SUCCEEDED");
     assert.equal((await client.deployment.findUniqueOrThrow({ where: { id: publication.deployment.id } })).status, "ACTIVE");
     assert.match(await docker(["run", "--rm", "--network", runtimeNetwork, "curlimages/curl:8.12.1", "-fsS", `http://${publicContainer}:8080/healthz`]), /ok/);
+    const publicPage = await docker(["run", "--rm", "--network", runtimeNetwork, "curlimages/curl:8.12.1", "-fsS", `http://${publicContainer}:8080/`]);
+    const publicScript = publicPage.match(/<script type="module" src="\/([^\"]+)"/i)?.[1];
+    assert.ok(publicScript, "Published Go app must serve its frontend entry");
+    assert.match(await docker(["run", "--rm", "--network", runtimeNetwork, "curlimages/curl:8.12.1", "-fsS", `http://${publicContainer}:8080/${publicScript}`]), /Preview changed/);
     assert.match(await docker(["run", "--rm", "--network", runtimeNetwork, "curlimages/curl:8.12.1", "-fsS", "-X", "POST", "-H", "Content-Type: application/json", "--data", "{}", `http://${publicContainer}:8080/api/operations/get.item`]), /"label":"changed"/);
     process.stdout.write("Go workspace modification: v2 preview and public deployment succeeded\n");
     if (process.env.WORKSPACE_GO_BROWSER === "1") await serveBrowserPreview(databaseUrl, user, projectIds);
