@@ -7,6 +7,10 @@ import {
   listDraftFiles,
   readDraftFile,
   writeDraftFile,
+  searchDraftFiles,
+  readDraftFileRange,
+  patchDraftFile,
+  deleteDraftFile,
 } from "./service";
 
 const dbTest = process.env.DATABASE_URL ? test : test.skip;
@@ -103,4 +107,32 @@ dbTest("concurrent writes produce one revision and one event", async () => {
   assert.equal(await prisma.draftFileChange.count({ where: { workspaceId: draft.id } }), 1);
   assert.equal(await prisma.draftWriteReceipt.count({ where: { workspaceId: draft.id } }), 1);
   assert.equal(await prisma.draftFileRevision.count({ where: { workspaceId: draft.id } }), 1);
+});
+
+dbTest("searches and reads bounded ranges from a selected revision", async () => {
+  const draft = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  await writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "range-1", expectedRevision: 0, path: "frontend/App.tsx", content: "alpha\nbeta\nalpha" });
+  await writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "range-2", expectedRevision: 1, path: "frontend/Other.tsx", content: "beta" });
+  assert.deepEqual((await searchDraftFiles({ workspaceId: draft.id, userId, query: "beta", revision: 1 })).map((hit) => [hit.path, hit.line]), [["frontend/App.tsx", 2]]);
+  assert.deepEqual((await searchDraftFiles({ workspaceId: draft.id, userId, query: "beta" })).map((hit) => [hit.path, hit.line]), [["frontend/App.tsx", 2], ["frontend/Other.tsx", 1]]);
+  assert.deepEqual(await readDraftFileRange({ workspaceId: draft.id, userId, path: "frontend/App.tsx", startLine: 2, endLine: 3 }), { path: "frontend/App.tsx", startLine: 2, endLine: 3, totalLines: 3, content: "beta\nalpha" });
+  await assert.rejects(readDraftFileRange({ workspaceId: draft.id, userId, path: "frontend/App.tsx", startLine: 0, endLine: 3 }), { code: "INVALID_RANGE" });
+});
+
+dbTest("patch and delete are CAS protected, idempotent, and retain history", async () => {
+  const draft = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  await writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "start", expectedRevision: 0, path: "frontend/App.tsx", content: "first\nsecond" });
+  const patched = await patchDraftFile({ workspaceId: draft.id, userId, toolCallId: "patch", expectedRevision: 1, path: "frontend/App.tsx", oldText: "second", newText: "revised" });
+  assert.equal(patched.revision, 2);
+  assert.equal((await readDraftFile({ workspaceId: draft.id, userId, path: "frontend/App.tsx" })).content, "first\nrevised");
+  assert.equal((await patchDraftFile({ workspaceId: draft.id, userId, toolCallId: "patch", expectedRevision: 1, path: "frontend/App.tsx", oldText: "second", newText: "revised" })).repeated, true);
+  await assert.rejects(patchDraftFile({ workspaceId: draft.id, userId, toolCallId: "bad-patch", expectedRevision: 2, path: "frontend/App.tsx", oldText: "absent", newText: "x" }), { code: "PATCH_CONFLICT" });
+  const deleted = await deleteDraftFile({ workspaceId: draft.id, userId, toolCallId: "delete", expectedRevision: 2, path: "frontend/App.tsx" });
+  assert.equal(deleted.revision, 3);
+  assert.equal((await deleteDraftFile({ workspaceId: draft.id, userId, toolCallId: "delete", expectedRevision: 2, path: "frontend/App.tsx" })).repeated, true);
+  await assert.rejects(readDraftFile({ workspaceId: draft.id, userId, path: "frontend/App.tsx" }), { code: "FILE_NOT_FOUND" });
+  assert.equal((await readDraftFile({ workspaceId: draft.id, userId, path: "frontend/App.tsx", revision: 2 })).content, "first\nrevised");
+  assert.equal(await prisma.draftFileChange.count({ where: { workspaceId: draft.id } }), 3);
+  assert.equal(await prisma.draftWriteReceipt.count({ where: { workspaceId: draft.id } }), 3);
+  assert.equal((await prisma.draftWorkspace.findUniqueOrThrow({ where: { id: draft.id } })).revision, 3);
 });

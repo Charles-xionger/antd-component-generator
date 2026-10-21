@@ -258,7 +258,7 @@ model DraftFileChange {
   toolCallId   String
   path         String
   beforeSha256 String?
-  afterSha256  String
+  afterSha256  String?
   createdAt    DateTime @default(now())
   workspace    DraftWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
