@@ -7,3 +7,4 @@ export { ThinkingCard } from "./thinking-card";
 export { CodeGenerationCard } from "./code-generation-card";
 export { ChatSidebar } from "./chat-sidebar";
 export { HomeLanding } from "./home-landing";
+export { WorkspaceTurn } from "./workspace-turn";
