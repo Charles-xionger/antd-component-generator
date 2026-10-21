@@ -41,12 +41,12 @@ export function CodePanel({
 }: CodePanelProps) {
   return (
     <div
-      className={`absolute inset-0 flex overflow-hidden transition-opacity duration-200 ${
+      className={`absolute inset-0 flex flex-col overflow-hidden transition-opacity duration-200 sm:flex-row ${
         isVisible ? "opacity-100 z-10" : "opacity-0 z-0 pointer-events-none"
       }`}
     >
       {/* File Explorer Sidebar */}
-      <div className="w-56 bg-secondary border-r flex flex-col">
+      <div className="flex max-h-40 w-full shrink-0 flex-col border-b bg-secondary sm:max-h-none sm:w-56 sm:border-b-0 sm:border-r">
         <div className="px-3 py-2 text-xs font-medium text-secondary-foreground border-b flex items-center justify-between">
           <span>File explorer</span>
           {versions.length > 0 && (
@@ -117,7 +117,7 @@ export function CodePanel({
       </div>
 
       {/* Code Editor Area */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-background">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
         {selectedFile ? (
           <>
             {/* File Tab */}
