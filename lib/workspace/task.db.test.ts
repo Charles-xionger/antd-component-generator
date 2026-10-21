@@ -61,3 +61,56 @@ dbTest("first generation and later modification share a tool loop and commit ful
   assert.match(changed.commit!.version.files.find((file) => file.path === "frontend/App.tsx")!.content, /Second/);
   assert.equal(await prisma.draftFileChange.count({ where: { workspaceId: modified.id } }), 1);
 });
+
+dbTest("Go acceptance root failure is diagnosed and repaired without rewriting passed files", async () => {
+  const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  const blueprint = {
+    blueprintVersion: 1, runtimeType: "GO",
+    product: { name: "Items", goal: "Read an item", actors: ["User"], workflows: ["Read item"], acceptanceCriteria: ["Returns item"] },
+    pages: [], entities: [], operations: [{ id: "get.item", method: "GET", path: "/api/items", description: "Get item" }],
+  };
+  const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Create a Go app", runtimeType: "GO", appBlueprint: blueprint });
+  const backend = `package backend
+import (
+  "context"
+  "encoding/json"
+  "log/slog"
+  "github.com/jackc/pgx/v5/pgxpool"
+)
+func Operations(_ *pgxpool.Pool, _ *slog.Logger) map[string]Operation {
+  return map[string]Operation{"get.item": func(_ context.Context, _ json.RawMessage) (any, error) { return map[string]any{"ok": true}, nil }}
+}`;
+  const scenarios = [{ id: "get.item", description: "Get an item", steps: [{ operationId: "get.item", expectStatus: 200 }] }];
+  const decisions = [
+    { kind: "tool", name: "write_file", arguments: { path: "migrations/001_init.sql", content: "CREATE TABLE items (id int);" } },
+    { kind: "tool", name: "write_file", arguments: { path: "backend/operations.go", content: backend } },
+    { kind: "tool", name: "write_file", arguments: { path: "acceptance/seed.json", content: "{}" } },
+    { kind: "tool", name: "write_file", arguments: { path: "frontend/App.tsx", content: "export default function App() { return <div>Ready</div>; }" } },
+    { kind: "tool", name: "write_file", arguments: { path: "acceptance/scenarios.json", content: "[]" } },
+    { kind: "complete", summary: "Initial files ready" },
+    { kind: "tool", name: "read_file", arguments: { path: "acceptance/scenarios.json" } },
+    { kind: "tool", name: "write_scenarios", arguments: { scenarios } },
+    { kind: "complete", summary: "Acceptance repaired" },
+  ];
+  const result = await executeWorkspaceTask({ runId: run.id, userId, model: { decide: async ({ step, previousResult }: { step: number; previousResult: unknown }) => {
+    if (step === 6) {
+      const validation = (previousResult as { validation?: { diagnostics?: Array<{ code?: string; path?: string; expected?: string; actual?: string }> } })?.validation;
+      assert.deepEqual(validation?.diagnostics?.map(({ code, path, expected, actual }) => ({ code, path, expected, actual })), [{
+        code: "SCENARIO_SUITE_ROOT_TYPE", path: "$", expected: "object with scenarios array", actual: "array",
+      }]);
+    }
+    return decisions[step];
+  } } });
+  assert.equal(result.run.status, "COMMITTED");
+  const changes = await prisma.draftFileChange.findMany({ where: { workspaceId: workspace.id }, orderBy: { revision: "asc" } });
+  assert.deepEqual(changes.map((change) => change.path), [
+    "migrations/001_init.sql", "backend/operations.go", "acceptance/seed.json", "frontend/App.tsx", "acceptance/scenarios.json", "acceptance/scenarios.json",
+  ]);
+  assert.equal(result.commit?.version.files.find((file) => file.path === "backend/operations.go")?.content, backend);
+  assert.deepEqual(JSON.parse(result.commit!.version.files.find((file) => file.path === "acceptance/scenarios.json")!.content), {
+    scenarios: [{ ...scenarios[0], steps: [{ ...scenarios[0].steps[0], input: {}, assertions: [] }] }],
+  });
+  const events = await listAgentEvents({ runId: run.id, userId, limit: 100 });
+  assert.equal(events.events.filter((event) => event.type === "diagnostic.created").length, 1);
+  assert.equal(events.events.at(-1)?.type, "artifact.committed");
+});
