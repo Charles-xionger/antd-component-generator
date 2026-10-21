@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { encode } from "next-auth/jwt";
 import prisma from "@/lib/database/prisma";
 import { processPendingWorkspaceTasks } from "@/lib/workspace/worker";
@@ -37,9 +40,10 @@ async function main() {
   const port = await freePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const authSecret = `workspace-http-e2e-${id}`;
+  const deploymentsRoot = await mkdtemp(path.join(tmpdir(), "workspace-http-deployments-"));
   const server = spawn("pnpm", ["exec", "next", "start", "-p", String(port)], {
     cwd: process.cwd(),
-    env: { ...process.env, AUTH_SECRET: authSecret, NEXTAUTH_URL: baseUrl, GITHUB_ID: "workspace-http-e2e", GITHUB_SECRET: "workspace-http-e2e" },
+    env: { ...process.env, DEPLOYMENTS_ROOT: deploymentsRoot, AUTH_SECRET: authSecret, NEXTAUTH_URL: baseUrl, GITHUB_ID: "workspace-http-e2e", GITHUB_SECRET: "workspace-http-e2e" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let serverOutput = "";
@@ -101,13 +105,26 @@ async function main() {
     assert.deepEqual(versions.map((version) => version.versionNumber), [1, 2]);
     assert.match(versions[1].files.find((file) => file.path === "frontend/App.tsx")!.content, /Second/);
     assert.match(versions[0].files.find((file) => file.path === "frontend/App.tsx")!.content, /First/);
+    const publishResponse = await request(`/api/projects/${project.id}/deployments`, { method: "POST", body: JSON.stringify({ artifactVersionId: versions[1].id }) });
+    const publishBody = await publishResponse.text();
+    assert.equal(publishResponse.status, 201, publishBody);
+    assert.equal(JSON.parse(publishBody).deployment.status, "ACTIVE");
+    const publicResponse = await fetch(`${baseUrl}/published/${project.slug}`);
+    assert.equal(publicResponse.status, 200);
+    const publicHtml = await publicResponse.text();
+    const scriptPath = publicHtml.match(/<script type="module" src="\/([^\"]+)"/i)?.[1];
+    assert.ok(scriptPath, "Published page must reference its built JavaScript");
+    const scriptResponse = await fetch(`${baseUrl}/published/${project.slug}/${scriptPath}`);
+    assert.equal(scriptResponse.status, 200);
+    assert.match(await scriptResponse.text(), /Second/);
     assert.equal((await request(`/api/workspaces/${changed.workspace.id}/files?path=..%2Fsecret`)).status, 400);
     assert.equal((await fetch(`${baseUrl}/api/workspaces/${changed.workspace.id}/files`)).status, 401);
-    process.stdout.write("Workspace HTTP E2E passed: create, worker commit, cursor replay, restore, modify, ownership\n");
+    process.stdout.write("Workspace HTTP E2E passed: create, worker commit, cursor replay, restore, modify, static publish, public files, ownership\n");
   } finally {
     server.kill("SIGTERM");
     if (userId) await prisma.user.delete({ where: { id: userId } });
     await prisma.$disconnect();
+    await rm(deploymentsRoot, { recursive: true, force: true });
   }
 }
 

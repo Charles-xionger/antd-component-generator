@@ -3,7 +3,10 @@ import { randomUUID } from "node:crypto";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import { createServer as createTcpServer } from "node:net";
 import { encode } from "next-auth/jwt";
+import { AIMessage, HumanMessage } from "@langchain/core/messages";
+import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import prisma from "@/lib/database/prisma";
+import { createGraph } from "@/lib/agent";
 import { createAgentRun } from "@/lib/workspace/agent-run";
 import { createDraftWorkspace, writeDraftFile } from "@/lib/workspace/service";
 import { executeWorkspaceTask } from "@/lib/workspace/task";
@@ -200,6 +203,17 @@ async function main() {
   const project = await prisma.project.create({ data: { userId: user.id, name: "新项目", slug: `workspace-browser-${id}`, thread: { create: { userId: user.id, title: "新项目" } } } });
   const interrupted = process.env.WORKSPACE_BROWSER_RECOVERY_SEED === "1" ? await seedInterruptedRun(project.id, user.id) : null;
   const secondaryProject = await prisma.project.create({ data: { userId: user.id, name: "并行项目", slug: `workspace-parallel-${id}`, thread: { create: { userId: user.id, title: "并行项目" } } } });
+  const legacyProject = process.env.WORKSPACE_BROWSER_LEGACY_SEED === "1"
+    ? await prisma.project.create({ data: { userId: user.id, name: "旧版项目", slug: `workspace-legacy-${id}`, thread: { create: { userId: user.id, title: "旧版项目" } } } })
+    : null;
+  const legacyThread = legacyProject ? await prisma.thread.findUniqueOrThrow({ where: { projectId: legacyProject.id } }) : null;
+  if (legacyThread) {
+    const graph = await createGraph();
+    await graph.updateState({ configurable: { thread_id: legacyThread.id } }, { messages: [
+      new HumanMessage("创建旧版欢迎页"),
+      new AIMessage('旧版页面已生成。\n<boltArtifact id="legacy-page" title="旧版欢迎页"><boltAction type="file" filePath="frontend/App.tsx">export default function App() { return <h1>旧版欢迎页</h1>; }</boltAction></boltArtifact>'),
+    ] });
+  }
   const goProject = process.env.WORKSPACE_BROWSER_GO_SEED === "1"
     ? await prisma.project.create({ data: { userId: user.id, name: "Go 修改项目", slug: `workspace-go-${id}`, thread: { create: { userId: user.id, title: "Go 修改项目" } } } })
     : null;
@@ -235,6 +249,11 @@ async function main() {
       response.end();
       return;
     }
+    if (request.url === "/__test_auth_legacy" && legacyProject) {
+      response.writeHead(302, { "Set-Cookie": `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax`, Location: `/projects/${legacyProject.id}` });
+      response.end();
+      return;
+    }
     if (request.url === "/__test_auth_go" && goProject) {
       response.writeHead(302, { "Set-Cookie": `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax`, Location: `/projects/${goProject.id}` });
       response.end();
@@ -265,6 +284,11 @@ async function main() {
     clearInterval(ticker);
     next.kill("SIGTERM");
     await Promise.all([new Promise<void>((resolve) => proxy.close(() => resolve())), new Promise<void>((resolve) => modelServer.close(() => resolve()))]);
+    if (legacyThread) {
+      const checkpointer = PostgresSaver.fromConnString(process.env.DATABASE_URL!);
+      await checkpointer.deleteThread(legacyThread.id);
+      await checkpointer.end();
+    }
     await prisma.user.delete({ where: { id: user.id } });
     await prisma.user.delete({ where: { id: otherUser.id } });
     await prisma.$disconnect();
@@ -272,7 +296,7 @@ async function main() {
   };
   process.once("SIGINT", () => { void stop(); });
   process.once("SIGTERM", () => { void stop(); });
-  process.stdout.write(`BROWSER_FIXTURE_URL=${baseUrl}/__test_auth\nSECONDARY_URL=${baseUrl}/__test_auth_secondary\n${goProject ? `GO_URL=${baseUrl}/__test_auth_go\nGO_PROJECT_ID=${goProject.id}\n` : ""}${interrupted ? `RECOVERY_WORKSPACE_ID=${interrupted.workspaceId}\nRECOVERY_RUN_ID=${interrupted.runId}\nRESUME_WORKER_URL=${baseUrl}/__test_resume_worker\n` : ""}PROJECT_ID=${project.id}\nSECONDARY_PROJECT_ID=${secondaryProject.id}\nPRIVATE_PROJECT_ID=${privateProject.id}\n`);
+  process.stdout.write(`BROWSER_FIXTURE_URL=${baseUrl}/__test_auth\nSECONDARY_URL=${baseUrl}/__test_auth_secondary\n${legacyProject ? `LEGACY_URL=${baseUrl}/__test_auth_legacy\nLEGACY_PROJECT_ID=${legacyProject.id}\n` : ""}${goProject ? `GO_URL=${baseUrl}/__test_auth_go\nGO_PROJECT_ID=${goProject.id}\n` : ""}${interrupted ? `RECOVERY_WORKSPACE_ID=${interrupted.workspaceId}\nRECOVERY_RUN_ID=${interrupted.runId}\nRESUME_WORKER_URL=${baseUrl}/__test_resume_worker\n` : ""}PROJECT_ID=${project.id}\nSECONDARY_PROJECT_ID=${secondaryProject.id}\nPRIVATE_PROJECT_ID=${privateProject.id}\n`);
 }
 
 void main().catch((error) => { console.error(error); process.exitCode = 1; });
