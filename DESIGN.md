@@ -90,6 +90,15 @@ components:
     ReleaseHistory:
       description: "默认降级的历史列表，展开后显示冻结状态。"
       variants: { collapsed: "最近记录摘要", expanded: "完整列表" }
+    WorkspaceRunCard:
+      description: "P0 工作区任务摘要：目标、只读计划、最近 Item 与执行结果；工具详情默认收起。"
+      variants: { running: "蓝色进度", needs_input: "琥珀色待用户决定", stopped: "中性停止", failed: "红色失败", committed: "绿色代码已提交" }
+    WorkspaceDiagnostic:
+      description: "可定位诊断：人话原因优先，文件与字段路径其次，编译器原文按需展开。"
+      variants: { blocking: "红色", warning: "琥珀色", resolved: "中性历史记录" }
+    WorkspaceFilePanel:
+      description: "P0 只读文件清单、当前修订与单文件代码；窄屏作为独立视图，不提供人工保存。"
+      variants: { loading: "结构化占位", ready: "文件与代码", empty: "暂无文件" }
   business:
     PublishPreflight:
       description: "发布前检查和旧版本保护说明。"
