@@ -18,4 +18,5 @@ test("valid static files pass contract, typecheck and frontend build", async () 
   const result = await validateWorkspaceFiles([{ path: "frontend/App.tsx", content: "export default function App() { return <div>Hello</div>; }" }], "STATIC");
   assert.deepEqual(result.diagnostics, []);
   assert.equal(result.checks.find((item) => item.name === "frontend_build")?.status, "passed");
+  assert.equal(result.checks.find((item) => item.name === "frontend_build")?.exitCode, 0);
 });

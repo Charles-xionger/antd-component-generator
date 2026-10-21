@@ -1,6 +1,7 @@
 import type { AppBlueprint } from "@/lib/app-contracts";
 import prisma from "@/lib/database/prisma";
 import { buildWorkspaceFrontend } from "./frontend-build";
+import type { CommandResult } from "./command";
 import { compileBackendGo } from "./go-check";
 import { typecheckFrontend } from "./typecheck";
 import { validateJsonFile, validateWorkspaceFileContract, type WorkspaceDiagnostic } from "./diagnostics";
@@ -8,18 +9,26 @@ import { listDraftFiles, readDraftFile } from "./service";
 
 type WorkspaceFile = { path: string; content: string };
 type CheckName = "contract" | "typescript" | "frontend_build" | "go_build";
-type Check = { name: CheckName; status: "passed" | "failed" | "skipped"; durationMs?: number };
+type Check = { name: CheckName; status: "passed" | "failed" | "skipped"; durationMs?: number; exitCode?: number | null; timedOut?: boolean; outputTruncated?: boolean; output?: string };
 
 export async function validateWorkspaceFiles(files: WorkspaceFile[], runtimeType: "STATIC" | "GO", blueprint?: AppBlueprint) {
   const checks: Check[] = ["contract", "typescript", "frontend_build", "go_build"].map((name) => ({ name: name as CheckName, status: "skipped" }));
   const diagnostics: WorkspaceDiagnostic[] = [];
-  const run = async (name: CheckName, action: () => Promise<WorkspaceDiagnostic[]> | WorkspaceDiagnostic[]) => {
+  const run = async (name: CheckName, action: () => Promise<WorkspaceDiagnostic[] | { diagnostics: WorkspaceDiagnostic[]; command?: CommandResult }> | WorkspaceDiagnostic[]) => {
     const check = checks.find((item) => item.name === name)!;
     const started = Date.now();
     try {
       const result = await action();
-      diagnostics.push(...result);
-      check.status = result.length ? "failed" : "passed";
+      const found = Array.isArray(result) ? result : result.diagnostics;
+      const command = Array.isArray(result) ? undefined : result.command;
+      diagnostics.push(...found);
+      check.status = found.length ? "failed" : "passed";
+      if (command) {
+        check.exitCode = command.exitCode;
+        check.timedOut = command.timedOut;
+        check.outputTruncated = command.outputTruncated;
+        check.output = command.output.slice(0, 4096);
+      }
     } catch (error) {
       check.status = "failed";
       diagnostics.push({ id: `command:${name}:infrastructure`, source: "command", severity: "error", code: "VALIDATOR_FAILED", message: error instanceof Error ? error.message.slice(0, 4096) : String(error).slice(0, 4096) });
@@ -34,8 +43,8 @@ export async function validateWorkspaceFiles(files: WorkspaceFile[], runtimeType
   ]);
   if (!contractPassed) return { checks, diagnostics };
   if (!await run("typescript", () => typecheckFrontend(files))) return { checks, diagnostics };
-  if (!await run("frontend_build", async () => (await buildWorkspaceFrontend(files)).diagnostics)) return { checks, diagnostics };
-  if (runtimeType === "GO") await run("go_build", async () => (await compileBackendGo(files)).diagnostics);
+  if (!await run("frontend_build", () => buildWorkspaceFrontend(files))) return { checks, diagnostics };
+  if (runtimeType === "GO") await run("go_build", () => compileBackendGo(files));
   return { checks, diagnostics };
 }
 
