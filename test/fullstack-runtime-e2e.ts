@@ -37,7 +37,7 @@ async function freePort() {
 async function waitForDatabase() {
   for (let attempt = 0; attempt < 30; attempt += 1) {
     try {
-      await docker(["exec", databaseContainer, "pg_isready", "-U", "postgres", "-d", "runtime_e2e"]);
+      await docker(["exec", databaseContainer, "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "runtime_e2e"]);
       return;
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 500));

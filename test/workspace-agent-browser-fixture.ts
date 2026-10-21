@@ -236,6 +236,11 @@ async function main() {
   await waitForNext(nextPort, next, () => nextOutput);
   let workerPaused = process.env.WORKSPACE_BROWSER_START_PAUSED === "1";
   const proxy = createServer((request, response) => {
+    if (request.url === "/__test_resume_worker" && request.method === "GET") {
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end('<!doctype html><html><title>Workspace worker control</title><body><button type="button" onclick="fetch(\'/__test_resume_worker\',{method:\'POST\'}).then(r=>{document.querySelector(\'output\').textContent=r.status})">Resume worker</button><output></output></body></html>');
+      return;
+    }
     if (request.url === "/__test_screenshot" && request.method === "GET") {
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       response.end(`<!doctype html><html><title>Workspace screenshot archive</title><body>
