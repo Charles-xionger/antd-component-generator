@@ -539,9 +539,9 @@ ${sandboxError}
               {!workspaceActivity.run && <GenerationStatusCard />}
 
               {workspaceActivity.run && (
-                <section className="rounded-lg border border-border bg-muted/40 p-3 text-sm" aria-label="工作区任务进度" aria-live="polite">
+                <section className="rounded-lg border border-border bg-muted/40 p-3 text-sm" aria-label="工作区任务进度">
                   <div className="flex items-center justify-between gap-2">
-                    <span>工作区任务 · {workspaceRunLabel(workspaceActivity.run.status)} · 第 {workspaceActivity.run.nextStep}/{workspaceActivity.run.maxSteps} 步</span>
+                    <span role="status" aria-live="polite" aria-atomic="true">工作区任务 · {workspaceRunLabel(workspaceActivity.run.status)} · 第 {workspaceActivity.run.nextStep}/{workspaceActivity.run.maxSteps} 步</span>
                     {workspaceBusy && (
                       <button className="text-destructive underline" onClick={() => { void cancelWorkspaceRun(); }}>取消</button>
                     )}
@@ -552,7 +552,7 @@ ${sandboxError}
                       {planSteps.map((step) => <li key={step.id}>{step.status === "completed" ? "✓" : step.status === "in_progress" ? "→" : "○"} {step.title}</li>)}
                     </ol>
                   )}
-                  {workspaceActivity.error && <p className="mt-1 text-destructive">{workspaceActivity.error}</p>}
+                  {workspaceActivity.error && <p role="alert" className="mt-1 text-destructive">{workspaceActivity.error}</p>}
                   <div className="mt-2 max-h-40 space-y-1 overflow-y-auto text-xs text-muted-foreground">
                     {visibleEvents.map((event) => {
                       const diagnostic = event.type === "diagnostic.created" && event.payload.diagnostic && typeof event.payload.diagnostic === "object"
