@@ -85,6 +85,10 @@ export function validateWorkspaceFileContract(files: WorkspaceFile[], runtimeTyp
       errors.push(diagnostic("contract", "FILE_PATH_NOT_ALLOWED", "文件路径不在当前运行时允许的目录中", file.path));
       continue;
     }
+    if (runtimeType === "GO" && (file.path === "backend/runtime.go" || file.path === "backend/register.go")) {
+      errors.push(diagnostic("contract", "PROTECTED_SCAFFOLD_FILE", "不能覆盖平台提供的 Go Scaffold 文件", file.path));
+      continue;
+    }
     validFiles.push(file);
   }
   if (!seen.has("frontend/App.tsx")) errors.push(diagnostic("contract", "REQUIRED_FILE_MISSING", "缺少 frontend/App.tsx", "frontend/App.tsx"));

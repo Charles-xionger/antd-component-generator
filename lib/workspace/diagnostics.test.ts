@@ -45,3 +45,8 @@ test("Go file-level checks return structured migration and scenario diagnostics 
   assert.ok(diagnostics.some((diagnostic) => diagnostic.code === "SCENARIO_SUITE_ROOT_TYPE"));
   assert.ok(diagnostics.every((diagnostic) => !diagnostic.message.includes("boltArtifact")));
 });
+
+test("generated files cannot replace protected Go runtime code", () => {
+  const diagnostics = validateWorkspaceFileContract([{ path: "backend/runtime.go", content: "package backend" }], "GO");
+  assert.ok(diagnostics.some((item) => item.code === "PROTECTED_SCAFFOLD_FILE" && item.file === "backend/runtime.go"));
+});
