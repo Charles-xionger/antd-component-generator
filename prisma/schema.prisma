@@ -244,6 +244,7 @@ model AgentRun {
   turnId       String
   nextEventSeq Int            @default(1)
   goal         String         @db.Text
+  modelName    String         @default("qwen3.7-flash-2026-07-15")
   runtimeType  RuntimeType
   requirementSpec Json?
   appBlueprint Json?

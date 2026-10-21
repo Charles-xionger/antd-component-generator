@@ -11,6 +11,12 @@ function textContent(content: unknown) {
   return String(content || "");
 }
 
+function boundedConversation(state: AgentState) {
+  return state.messages
+    .filter((message) => !textContent(message.content).includes("<boltArtifact"))
+    .slice(-8);
+}
+
 function taggedJson(content: string, tag: string) {
   const match = content.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`));
   return match ? JSON.parse(match[1]) : undefined;
@@ -278,6 +284,9 @@ export function businessBlueprintIssues(blueprint: AppBlueprint, requirement: Re
 }
 
 export async function intentRouter(state: AgentState, config?: { configurable?: { model?: string } }): Promise<Partial<AgentState>> {
+  if (state.resumePendingWorkspace) {
+    return { intentResult: { intent: "MODIFY_APP", confidence: 1, requiresClarification: false, reason: "用户正在回答工作区任务的待确认问题", requestedCapabilities: [] } };
+  }
   const lastHuman = [...state.messages].reverse().find((message) => message._getType() === "human");
   const lastHumanText = textContent(lastHuman?.content);
   const requirement = state.requirementSpec ?? requirementFromMessages(state);
@@ -287,7 +296,7 @@ export async function intentRouter(state: AgentState, config?: { configurable?: 
   if (requirement && isProceedCommand(lastHumanText)) {
     return { intentResult: { intent: "CREATE_APP", confidence: 1, requiresClarification: false, reason: "用户确认已有需求规格", requestedCapabilities: [] } };
   }
-  const response = await modelFor(config).invoke([new SystemMessage(INTENT_ROUTER_PROMPT), ...state.messages]);
+  const response = await modelFor(config).invoke([new SystemMessage(INTENT_ROUTER_PROMPT), ...boundedConversation(state)]);
   try {
     return { intentResult: intentResultSchema.parse(taggedJson(textContent(response.content), "intentResult")) };
   } catch {
@@ -316,11 +325,11 @@ export async function businessAnalyst(state: AgentState, config?: { configurable
     ? "\n用户已明确授权你采用合理默认值。本轮禁止继续提问，必须只输出 requirementSpec，并将 confirmed 设为 true。"
     : "";
   const model = modelFor(config);
-  let response = await model.invoke([new SystemMessage(BUSINESS_ANALYST_PROMPT + existing + delegatedInstruction), ...state.messages]);
+  let response = await model.invoke([new SystemMessage(BUSINESS_ANALYST_PROMPT + existing + delegatedInstruction), ...boundedConversation(state)]);
   if (delegatedDefaults && !textContent(response.content).includes("<requirementSpec>")) {
     response = await model.invoke([
       new SystemMessage(BUSINESS_ANALYST_PROMPT + existing),
-      ...state.messages,
+      ...boundedConversation(state),
       new SystemMessage("用户已授权采用合理默认值。不要解释、不要提问，只输出 <requirementSpec>JSON</requirementSpec>，confirmed 必须为 true。"),
     ]);
   }

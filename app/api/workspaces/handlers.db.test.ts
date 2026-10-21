@@ -41,6 +41,9 @@ dbTest("authenticated API queues a run, exposes cursor events and files, and rej
   assert.equal(data.run.status, "QUEUED");
   const workspaceId = data.workspace.id as string;
   const runId = data.run.id as string;
+  const projectView = await api.list(new Request(`http://localhost/api/workspaces?projectId=${projectId}`));
+  assert.equal((await projectView.json()).run.id, runId);
+  assert.equal((await outsider.list(new Request(`http://localhost/api/workspaces?projectId=${projectId}`))).status, 404);
   assert.equal((await api.create(request())).status, 202);
   assert.equal(await prisma.agentRun.count({ where: { requestId } }), 1);
 

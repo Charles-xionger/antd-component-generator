@@ -6,11 +6,11 @@ import { validateAcceptanceScenarios, validateJsonFile } from "./diagnostics";
 import { appendAgentEvent } from "./events";
 import { WorkspacePathError } from "./path";
 import { deleteDraftFile, listDraftFiles, patchDraftFile, readDraftFile, readDraftFileRange, searchDraftFiles, WorkspaceError, writeDraftFile } from "./service";
-import { inspectWorkspaceDiagnostics, validateAndRecordWorkspaceRevision } from "./validation";
+import { inspectWorkspaceDiagnostics, runWorkspaceCommand, validateAndRecordWorkspaceRevision } from "./validation";
 
 const toolDecisionSchema = z.object({
   kind: z.literal("tool"),
-  name: z.enum(["list_files", "search_files", "read_file", "read_file_range", "write_file", "patch_file", "delete_file", "validate_json", "validate_schema", "validate_workspace", "inspect_diagnostics"]),
+  name: z.enum(["list_files", "search_files", "read_file", "read_file_range", "write_file", "patch_file", "delete_file", "validate_json", "validate_schema", "validate_workspace", "inspect_diagnostics", "run_command"]),
   arguments: z.record(z.string(), z.unknown()),
 }).strict();
 const decisionSchema = z.discriminatedUnion("kind", [
@@ -35,6 +35,7 @@ const writeSchema = locationSchema.extend({ content: z.string().max(1024 * 1024)
 const patchSchema = locationSchema.extend({ oldText: z.string().min(1), newText: z.string() });
 const searchSchema = z.object({ query: z.string().min(1).max(512), maxResults: z.number().int().min(1).max(100).optional() }).strict();
 const rangeSchema = locationSchema.extend({ startLine: z.number().int().min(1), endLine: z.number().int().min(1) });
+const commandSchema = z.object({ command: z.enum(["typecheck_frontend", "build_frontend", "build_backend"]) }).strict();
 const diagnosticFingerprint = (value: unknown) => Array.isArray(value)
   ? value.map((item) => {
       const diagnostic = item as Record<string, unknown>;
@@ -48,8 +49,9 @@ async function ownedRun(runId: string, userId: string) {
   return run;
 }
 
-export async function createAgentRun(input: { workspaceId: string; userId: string; requestId: string; goal: string; runtimeType: "STATIC" | "GO"; requirementSpec?: unknown; appBlueprint?: unknown; maxSteps?: number; timeoutMs?: number }) {
+export async function createAgentRun(input: { workspaceId: string; userId: string; requestId: string; goal: string; runtimeType: "STATIC" | "GO"; modelName?: string; requirementSpec?: unknown; appBlueprint?: unknown; maxSteps?: number; timeoutMs?: number }) {
   if (!input.requestId || input.requestId.length > 128 || !input.goal || input.goal.length > 16_000) throw new WorkspaceError("INVALID_REQUEST", "Invalid agent run request");
+  if (input.modelName !== undefined && (!/^[a-zA-Z0-9_.-]{2,100}$/.test(input.modelName))) throw new WorkspaceError("INVALID_MODEL", "Invalid model name");
   const maxSteps = input.maxSteps ?? 30;
   const timeoutMs = input.timeoutMs ?? 30 * 60_000;
   if (!Number.isInteger(maxSteps) || maxSteps < 1 || maxSteps > 100 || !Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 60 * 60_000) throw new WorkspaceError("INVALID_REQUEST", "Invalid run limits");
@@ -60,15 +62,15 @@ export async function createAgentRun(input: { workspaceId: string; userId: strin
   if (appBlueprint && appBlueprint.runtimeType !== input.runtimeType) throw new WorkspaceError("RUNTIME_CONFLICT", "Blueprint runtime does not match run runtime");
   const existing = await prisma.agentRun.findUnique({ where: { requestId: input.requestId } });
   if (existing) {
-    if (existing.workspaceId !== workspace.id || existing.goal !== input.goal || existing.runtimeType !== input.runtimeType) throw new WorkspaceError("REQUEST_CONFLICT", "Request ID already used");
+    if (existing.workspaceId !== workspace.id || existing.goal !== input.goal || existing.runtimeType !== input.runtimeType || existing.modelName !== (input.modelName ?? "qwen3.7-flash-2026-07-15")) throw new WorkspaceError("REQUEST_CONFLICT", "Request ID already used");
     return existing;
   }
   try {
-    return await prisma.agentRun.create({ data: { workspaceId: workspace.id, requestId: input.requestId, sessionId: workspace.project.thread?.id ?? workspace.projectId, turnId: randomUUID(), nextEventSeq: 2, goal: input.goal, runtimeType: input.runtimeType, requirementSpec: requirementSpec ? JSON.parse(JSON.stringify(requirementSpec)) : undefined, appBlueprint: appBlueprint ? JSON.parse(JSON.stringify(appBlueprint)) : undefined, maxSteps, deadlineAt: new Date(Date.now() + timeoutMs), events: { create: { sequence: 1, type: "plan.updated", itemId: randomUUID(), payload: { goal: input.goal, phase: "queued" } } } } });
+    return await prisma.agentRun.create({ data: { workspaceId: workspace.id, requestId: input.requestId, sessionId: workspace.project.thread?.id ?? workspace.projectId, turnId: randomUUID(), nextEventSeq: 2, goal: input.goal, modelName: input.modelName, runtimeType: input.runtimeType, requirementSpec: requirementSpec ? JSON.parse(JSON.stringify(requirementSpec)) : undefined, appBlueprint: appBlueprint ? JSON.parse(JSON.stringify(appBlueprint)) : undefined, maxSteps, deadlineAt: new Date(Date.now() + timeoutMs), events: { create: { sequence: 1, type: "plan.updated", itemId: randomUUID(), payload: { goal: input.goal, phase: "queued" } } } } });
   } catch (error) {
     if (typeof error === "object" && error && "code" in error && error.code === "P2002") {
       const raced = await prisma.agentRun.findUnique({ where: { requestId: input.requestId } });
-      if (raced?.workspaceId === workspace.id && raced.goal === input.goal && raced.runtimeType === input.runtimeType) return raced;
+      if (raced?.workspaceId === workspace.id && raced.goal === input.goal && raced.runtimeType === input.runtimeType && raced.modelName === (input.modelName ?? "qwen3.7-flash-2026-07-15")) return raced;
       throw new WorkspaceError("REQUEST_CONFLICT", "Request ID already used or workspace has an active run");
     }
     throw error;
@@ -96,6 +98,7 @@ async function executeTool(decision: Extract<Decision, { kind: "tool" }>, contex
     }
     case "validate_workspace": return validateAndRecordWorkspaceRevision({ ...scope, revision: context.expectedRevision, runtimeType: context.runtimeType, blueprint: context.appBlueprint as never });
     case "inspect_diagnostics": return inspectWorkspaceDiagnostics({ ...scope, revision: context.expectedRevision });
+    case "run_command": return runWorkspaceCommand({ ...scope, revision: context.expectedRevision, runtimeType: context.runtimeType, ...commandSchema.parse(decision.arguments) });
   }
 }
 
@@ -198,6 +201,12 @@ export async function executeAgentRun(input: { runId: string; userId: string; mo
         if (updated.count !== 1) throw new WorkspaceError("RUN_LEASE_LOST", "Agent run lease was lost before completing a step");
         await tx.agentRunStep.update({ where: { runId_number: { runId: run.id, number: run.nextStep } }, data: { status: "COMPLETED", result: JSON.parse(JSON.stringify(result)), completedAt: new Date() } });
         await appendAgentEvent(tx, { runId: run.id, type: "tool.completed", itemId, toolCallId: itemId, payload: { name: decision.name, revision: expectedRevision, ok: result.ok, error: result.error ?? null } });
+        if (result.ok && (decision.name === "run_command" || decision.name === "validate_workspace") && result.value && typeof result.value === "object") {
+          const check = result.value as { command?: string; output?: string; diagnostics?: Array<{ id?: string }> ; status?: string };
+          if (check.output) await appendAgentEvent(tx, { runId: run.id, type: "command.output", itemId, payload: { revision: expectedRevision, check: check.command ?? decision.name, output: check.output } });
+          if (check.status) await appendAgentEvent(tx, { runId: run.id, type: "validation.completed", itemId, payload: { revision: expectedRevision, status: check.status, diagnosticCount: check.diagnostics?.length ?? 0 } });
+          for (const diagnostic of check.diagnostics ?? []) await appendAgentEvent(tx, { runId: run.id, type: "diagnostic.created", itemId: `${itemId}:${diagnostic.id ?? randomUUID()}`, payload: { revision: expectedRevision, diagnostic } });
+        }
         if (noProgress) await appendAgentEvent(tx, { runId: run.id, type: "run.stopped", itemId: run.id, payload: { reason: "no_progress", revision: expectedRevision } });
       });
       if (noProgress) return ownedRun(run.id, input.userId);

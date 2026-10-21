@@ -18,6 +18,7 @@ const toolDefinitions = [
   ["validate_schema", "Validate acceptance/scenarios.json against the scenario suite schema.", {}],
   ["validate_workspace", "Run all required contract, TypeScript, frontend build, and applicable Go checks for the current revision.", {}],
   ["inspect_diagnostics", "Read the most recent validation diagnostics for the current revision.", {}],
+  ["run_command", "Run one allowlisted workspace check without shell access: typecheck_frontend, build_frontend, or build_backend.", { command: { type: "string", enum: ["typecheck_frontend", "build_frontend", "build_backend"] } }],
   ["complete", "Finish the coding phase when the workspace is ready for validation.", { summary: stringField }],
   ["ask_question", "Stop when a user decision is essential.", { question: stringField }],
 ] as const;

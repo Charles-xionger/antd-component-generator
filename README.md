@@ -224,7 +224,23 @@ pnpm dev
 
 访问 `http://localhost:3000`。
 
-### 6. 启动全栈构建 Worker（可选）
+### 6. 启动工作区 Agent 与全栈构建 Worker
+
+新建和修改应用会排队为数据库中的 Workspace Agent 任务。主应用 HTTP 进程不会执行任务；需要另起持续运行的 Worker：
+
+```bash
+pnpm worker:agent
+```
+
+Go 全栈工作区校验还需先在该 Worker 可访问的 Docker daemon 中构建固定校验镜像：
+
+```bash
+pnpm build:workspace-validator
+```
+
+Worker 必须与主应用连接同一数据库，并具备模型 API 凭据。生产部署需将其配置为独立、自动重启的服务；否则新任务会一直停在 `QUEUED`。
+
+全栈 Preview 与发布另需启动构建 Worker：
 
 需要验证 Go 全栈预览与发布时，请先准备 Docker、运行时网络及数据库权限，再执行：
 

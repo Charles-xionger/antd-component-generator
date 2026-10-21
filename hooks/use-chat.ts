@@ -51,6 +51,7 @@ export interface UseChatOptions {
   onArtifactDetected?: (content: string) => void;
   /** 后端保存成功时的回调 */
   onSaved?: () => void;
+  onWorkspaceQueued?: (workspaceId: string, runId: string) => void;
   /** 流式响应开始时的回调 */
   onStreamStart?: () => void;
   /** 流式响应完成时的回调 */
@@ -83,6 +84,7 @@ export function useChat(options: UseChatOptions = {}) {
     model,
     onArtifactDetected,
     onSaved,
+    onWorkspaceQueued,
     onStreamStart,
     onStreamComplete,
     onToolCall,
@@ -107,6 +109,7 @@ export function useChat(options: UseChatOptions = {}) {
   // 使用 ref 存储回调，避免依赖变化导致死循环
   const onArtifactDetectedRef = useRef(onArtifactDetected);
   const onSavedRef = useRef(onSaved);
+  const onWorkspaceQueuedRef = useRef(onWorkspaceQueued);
   const onStreamStartRef = useRef(onStreamStart);
   const onStreamCompleteRef = useRef(onStreamComplete);
   const onToolCallRef = useRef(onToolCall);
@@ -117,6 +120,7 @@ export function useChat(options: UseChatOptions = {}) {
   useEffect(() => {
     onArtifactDetectedRef.current = onArtifactDetected;
     onSavedRef.current = onSaved;
+    onWorkspaceQueuedRef.current = onWorkspaceQueued;
     onStreamStartRef.current = onStreamStart;
     onStreamCompleteRef.current = onStreamComplete;
     onToolCallRef.current = onToolCall;
@@ -480,6 +484,8 @@ export function useChat(options: UseChatOptions = {}) {
                 }
               } else if (data.type === "artifact_saved") {
                 onSavedRef.current?.();
+              } else if (data.type === "workspace_queued") {
+                onWorkspaceQueuedRef.current?.(String(data.workspaceId), String(data.runId));
               } else if (data.type === "error") {
                 streamFailure = new Error(
                   data.error || "应用生成过程中发生错误",

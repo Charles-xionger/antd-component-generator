@@ -84,6 +84,24 @@ dbTest("compiler diagnostics return to the same run and trigger a one-file patch
   await closeDraftWorkspace({ workspaceId: workspace.id, userId });
 });
 
+dbTest("run_command accepts only named checks and leaves workspace files unchanged", async () => {
+  const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  await writeDraftFile({ workspaceId: workspace.id, userId, toolCallId: "seed-command", expectedRevision: 0, path: "frontend/App.tsx", content: "export default function App() { return null; }" });
+  const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Check the page", runtimeType: "STATIC", maxSteps: 4 });
+  const decisions = [
+    { kind: "tool", name: "run_command", arguments: { command: "sh -c cat /etc/passwd" } },
+    { kind: "tool", name: "run_command", arguments: { command: "typecheck_frontend" } },
+    { kind: "complete", summary: "Checked" },
+  ];
+  const result = await executeAgentRun({ runId: run.id, userId, model: { decide: async ({ step }) => decisions[step] } });
+  assert.equal(result.status, "READY_TO_VALIDATE");
+  const steps = await prisma.agentRunStep.findMany({ where: { runId: run.id }, orderBy: { number: "asc" } });
+  assert.equal((steps[0].result as { ok: boolean }).ok, false);
+  assert.deepEqual((steps[1].result as { value: { diagnostics: unknown[] } }).value.diagnostics, []);
+  assert.equal(await prisma.draftFileChange.count({ where: { workspaceId: workspace.id } }), 1);
+  await closeDraftWorkspace({ workspaceId: workspace.id, userId });
+});
+
 dbTest("reclaims a decided write after a crash without rewriting its receipt", async () => {
   const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
   const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Resume a page", runtimeType: "STATIC", maxSteps: 3 });

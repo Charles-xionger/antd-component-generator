@@ -27,6 +27,10 @@ export interface AgentState {
   appBlueprint?: AppBlueprint;
   validationErrors?: string[];
   repairAttempts?: number;
+  baseArtifactVersionId?: string;
+  workspaceId?: string;
+  workspaceRunId?: string;
+  resumePendingWorkspace?: boolean;
 }
 
 // LangGraph state annotation
@@ -80,4 +84,8 @@ export const StateAnnotations = Annotation.Root({
   appBlueprint: Annotation<AppBlueprint | undefined>({ reducer: (x, y) => y ?? x, default: () => undefined }),
   validationErrors: Annotation<string[]>({ reducer: (_x, y) => y, default: () => [] }),
   repairAttempts: Annotation<number>({ reducer: (_x, y) => y, default: () => 0 }),
+  baseArtifactVersionId: Annotation<string | undefined>({ reducer: (x, y) => y ?? x, default: () => undefined }),
+  workspaceId: Annotation<string | undefined>({ reducer: (x, y) => y ?? x, default: () => undefined }),
+  workspaceRunId: Annotation<string | undefined>({ reducer: (x, y) => y ?? x, default: () => undefined }),
+  resumePendingWorkspace: Annotation<boolean>({ reducer: (_x, y) => y ?? false, default: () => false }),
 });

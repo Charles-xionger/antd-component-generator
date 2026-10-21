@@ -52,9 +52,31 @@ export async function validateWorkspaceFiles(files: WorkspaceFile[], runtimeType
 
 export async function validateWorkspaceRevision(input: { workspaceId: string; userId: string; revision: number; runtimeType: "STATIC" | "GO"; blueprint?: AppBlueprint }) {
   const listed = await listDraftFiles(input);
-  const files = await Promise.all(listed.map(async (file) => readDraftFile({ ...input, path: file.path })));
+  const files = await Promise.all(listed.map(async (file) => readDraftFile({ ...input, path: file.path, revision: input.revision })));
   const result = await validateWorkspaceFiles(files, input.runtimeType, input.blueprint);
   return { workspaceId: input.workspaceId, revision: input.revision, ...result };
+}
+
+export async function runWorkspaceCommand(input: { workspaceId: string; userId: string; revision: number; runtimeType: "STATIC" | "GO"; command: "typecheck_frontend" | "build_frontend" | "build_backend" }) {
+  const listed = await listDraftFiles(input);
+  const files = await Promise.all(listed.map(async (file) => readDraftFile({ workspaceId: input.workspaceId, userId: input.userId, path: file.path, revision: input.revision })));
+  if (input.command === "build_backend" && input.runtimeType !== "GO") {
+    return { revision: input.revision, command: input.command, diagnostics: [], skipped: true };
+  }
+  if (input.command === "typecheck_frontend") {
+    return { revision: input.revision, command: input.command, diagnostics: await typecheckFrontend(files), skipped: false };
+  }
+  const result = input.command === "build_frontend" ? await buildWorkspaceFrontend(files) : await compileBackendGo(files);
+  return {
+    revision: input.revision,
+    command: input.command,
+    diagnostics: result.diagnostics,
+    skipped: false,
+    exitCode: result.command.exitCode,
+    timedOut: result.command.timedOut,
+    outputTruncated: result.command.outputTruncated,
+    output: scrubHostPaths(result.command.output.slice(0, 4096)),
+  };
 }
 
 export async function validateAndRecordWorkspaceRevision(input: { workspaceId: string; userId: string; revision: number; runtimeType: "STATIC" | "GO"; blueprint?: AppBlueprint }) {

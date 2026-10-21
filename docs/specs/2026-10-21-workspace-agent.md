@@ -1,6 +1,6 @@
 # P0 Workspace Agent：从一次性代码生成到可恢复的工作区执行
 
-> 状态：待用户 review。范围仅为 P0；Preview 诊断自动回流与专门的 Bug Fix 子 Agent 属于 P1。
+> 状态：用户已确认，P0 实施中。范围仅为 P0；Preview 诊断自动回流与专门的 Bug Fix 子 Agent 属于 P1。
 
 ## 问题陈述
 

@@ -61,6 +61,19 @@ export function createWorkspaceApi(deps: { authenticate: Auth }) {
   };
 
   return {
+    list(request: Request) {
+      return withAuth(async (userId) => {
+        const projectId = new URL(request.url).searchParams.get("projectId");
+        if (!projectId || !z.string().uuid().safeParse(projectId).success) throw new WorkspaceError("INVALID_REQUEST", "Project ID is required");
+        const project = await prisma.project.findFirst({ where: { id: projectId, userId, status: "ACTIVE" }, select: { id: true } });
+        if (!project) throw new WorkspaceError("NOT_FOUND", "Project not found");
+        const workspace = await prisma.draftWorkspace.findFirst({
+          where: { projectId }, orderBy: { createdAt: "desc" },
+          select: { id: true, projectId: true, revision: true, status: true, agentRuns: { orderBy: { createdAt: "desc" }, take: 1 } },
+        });
+        return Response.json({ workspace: workspace ? { id: workspace.id, projectId, revision: workspace.revision, status: workspace.status } : null, run: workspace?.agentRuns[0] ? runView(workspace.agentRuns[0]) : null });
+      });
+    },
     create(request: Request) {
       return withAuth(async (userId) => {
         const body = createSchema.parse(await request.json().catch(() => ({})));

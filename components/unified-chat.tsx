@@ -10,6 +10,8 @@ import "@/app/split-pane.css";
 // Hooks
 import { useChat } from "@/hooks/use-chat";
 import { useCanvas } from "@/hooks/use-canvas";
+import { useWorkspaceActivity } from "@/hooks/use-workspace-activity";
+import { workspaceEventLabel, workspaceRunLabel } from "@/lib/workspace/presentation";
 import { SANDBOX_ORIGIN } from "@/lib/sandbox-config";
 
 // Components
@@ -88,6 +90,7 @@ export function UnifiedChat({
     onStreamComplete?: (content: string) => void;
     onError?: () => void;
     onTitleUpdate?: (threadId: string, title: string) => void;
+    onWorkspaceQueued?: (workspaceId: string, runId: string) => void;
   }>({});
 
   const chat = useChat({
@@ -104,10 +107,28 @@ export function UnifiedChat({
     onError: () => chatCallbacksRef.current.onError?.(),
     onTitleUpdate: (threadId, title) =>
       chatCallbacksRef.current.onTitleUpdate?.(threadId, title),
+    onWorkspaceQueued: (workspaceId, runId) =>
+      chatCallbacksRef.current.onWorkspaceQueued?.(workspaceId, runId),
   });
 
   // Canvas hook - 传入 messages 用于实时监听
   const canvas = useCanvas({ threadId, messages: chat.messages });
+  const workspaceActivity = useWorkspaceActivity(
+    projectId,
+    canvas.setWorkspaceFiles,
+    () => {
+      void canvas.refreshVersionList();
+      canvas.setShouldSendToSandbox(true);
+      toast.success("工作区验证通过，已保存版本");
+    },
+  );
+  const attachWorkspaceRun = workspaceActivity.attach;
+  const workspaceBusy = Boolean(workspaceActivity.run && ["QUEUED", "RUNNING", "READY_TO_VALIDATE"].includes(workspaceActivity.run.status));
+  const cancelWorkspaceRun = useCallback(async () => {
+    if (!workspaceActivity.workspace || !workspaceActivity.run) return;
+    const response = await fetch(`/api/workspaces/${workspaceActivity.workspace.id}/runs/${workspaceActivity.run.id}/cancel`, { method: "POST" });
+    if (!response.ok) toast.error("取消工作区任务失败");
+  }, [workspaceActivity.workspace, workspaceActivity.run]);
   const latestArtifactMessageId = useMemo(
     () =>
       [...chat.messages]
@@ -150,6 +171,11 @@ export function UnifiedChat({
   // 设置 chat 回调（依赖 canvas）
   useEffect(() => {
     chatCallbacksRef.current = {
+      onWorkspaceQueued: (workspaceId, runId) => {
+        attachWorkspaceRun(workspaceId, runId);
+        canvas.setShouldSendToSandbox(false);
+        setIsCanvasVisible(true);
+      },
       onArtifactDetected: (content: string) => {
         // 首次检测到代码时，创建乐观版本用于展示代码生成过程
         if (!canvas.selectedVersion || canvas.selectedVersion === 0) {
@@ -199,7 +225,7 @@ export function UnifiedChat({
         }
       },
     };
-  }, [canvas, threadId, onThreadUpdate]);
+  }, [canvas, threadId, onThreadUpdate, attachWorkspaceRun]);
 
   // 全屏切换处理
   const handleFullscreenToggle = useCallback(() => {
@@ -501,6 +527,24 @@ ${sandboxError}
               {/* 🔥 生成状态卡片 */}
               <GenerationStatusCard />
 
+              {workspaceActivity.run && (
+                <section className="rounded-lg border border-border bg-muted/40 p-3 text-sm" aria-label="工作区任务进度">
+                  <div className="flex items-center justify-between gap-2">
+                    <span>工作区任务 · {workspaceRunLabel(workspaceActivity.run.status)} · 第 {workspaceActivity.run.nextStep}/{workspaceActivity.run.maxSteps} 步</span>
+                    {workspaceBusy && (
+                      <button className="text-destructive underline" onClick={() => { void cancelWorkspaceRun(); }}>取消</button>
+                    )}
+                  </div>
+                  {workspaceActivity.run.summary && <p className="mt-1 text-muted-foreground">{workspaceActivity.run.summary}</p>}
+                  {workspaceActivity.error && <p className="mt-1 text-destructive">{workspaceActivity.error}</p>}
+                  <div className="mt-2 max-h-40 space-y-1 overflow-y-auto text-xs text-muted-foreground">
+                    {workspaceActivity.events.filter((event) => workspaceEventLabel(event)).slice(-10).map((event) => (
+                      <div key={event.sequence}>{workspaceEventLabel(event)}</div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
               <div ref={messagesEndRef} />
             </div>
 
@@ -509,9 +553,9 @@ ${sandboxError}
               ref={inputRef}
               value={chat.input}
               onChange={chat.setInput}
-              onSubmit={chat.sendMessage}
-              onStop={chat.stop}
-              isLoading={chat.isLoading}
+              onSubmit={() => { if (!workspaceBusy) void chat.sendMessage(); }}
+              onStop={() => { if (workspaceBusy) void cancelWorkspaceRun(); else chat.stop(); }}
+              isLoading={chat.isLoading || workspaceBusy}
               isCanvasMode={true}
               images={chat.images}
               onImagesChange={chat.setImages}

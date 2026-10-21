@@ -13,7 +13,6 @@ import { NextRequest } from "next/server";
 import { HumanMessage } from "@langchain/core/messages";
 import { createGraph } from "@/lib/agent";
 import prisma from "@/lib/database/prisma";
-import { formatCodeContext } from "@/lib/agent/utils";
 import { auth } from "@/lib/auth";
 import { generateThreadTitle } from "@/lib/agent/models";
 import { getOwnedProject, getOwnedThread } from "@/lib/projects/ownership";
@@ -23,8 +22,7 @@ const NODE_STAGE: Record<string, string> = {
   businessAnalyst: "requirements",
   directResponder: "responding",
   solutionArchitect: "architecture",
-  coder: "coding",
-  artifactValidator: "validating",
+  workspaceQueue: "coding",
 };
 
 function messageText(content: unknown): string {
@@ -89,6 +87,7 @@ export async function POST(request: NextRequest) {
       configurable: {
         thread_id: finalThreadId,
         project_id: finalProjectId,
+        user_id: session.user.id,
         generation_request_id: finalGenerationRequestId,
         model: model || "qwen3.7-flash-2026-07-15", // 传递模型参数到 graph
       },
@@ -105,16 +104,16 @@ export async function POST(request: NextRequest) {
         versions: {
           orderBy: { versionNumber: "desc" }, // 取最新版本
           take: 1,
-          include: { files: true },
+          select: { id: true },
         },
       },
     });
 
     const currentVersion = artifact?.versions[0];
-    const currentFiles = currentVersion?.files || [];
-
-    // 格式化当前代码为上下文字符串
-    const codeContext = formatCodeContext(currentFiles);
+    const activeWorkspace = await prisma.draftWorkspace.findFirst({
+      where: { projectId: finalProjectId, status: "ACTIVE" },
+      select: { agentRuns: { orderBy: { createdAt: "desc" }, take: 1, select: { status: true } } },
+    });
 
     const thread = ownedThread;
 
@@ -135,7 +134,6 @@ export async function POST(request: NextRequest) {
 
         try {
           // 构建多模态消息内容（只包含用户输入）
-          // codeContext 通过 state.codeContext 传递，agent 会从消息历史中获取代码上下文
           let messageContent:
             | string
             | Array<{
@@ -191,11 +189,11 @@ export async function POST(request: NextRequest) {
           const inputMessage = new HumanMessage({ content: messageContent });
 
           // 使用 streamEvents 获取流式响应
-          // codeContext 通过 state 传递，agent 通过消息历史获取代码上下文，不在 prompt 中重复注入
           const eventStream = graph.streamEvents(
             {
               messages: [inputMessage],
-              codeContext: codeContext ? codeContext.trim() : "",
+              baseArtifactVersionId: currentVersion?.id,
+              resumePendingWorkspace: activeWorkspace?.agentRuns[0]?.status === "NEEDS_INPUT",
             },
             { ...config, version: "v2" },
           );
@@ -206,13 +204,12 @@ export async function POST(request: NextRequest) {
           let aiResponseContent = ""; // 累积AI回复用于生成标题
           let finalAiContent = ""; // 非流式模型/提供商的最终响应兜底
           let lastHeartbeat = Date.now(); // 心跳时间戳
-          let coderRunCount = 0;
           const streamedContentNodes = new Set<string>();
           const fallbackContentNodes = new Set([
             "businessAnalyst",
             "directResponder",
             "solutionArchitect",
-            "coder",
+            "workspaceQueue",
           ]);
 
           // 心跳机制：防止连接超时
@@ -276,19 +273,11 @@ export async function POST(request: NextRequest) {
               (event.event === "on_chain_start" ||
                 event.event === "on_chain_end")
             ) {
-              let stage = nodeStage;
-              if (graphNode === "coder" && event.event === "on_chain_start") {
-                coderRunCount += 1;
-                if (coderRunCount > 1) stage = "repairing";
-              } else if (graphNode === "coder" && coderRunCount > 1) {
-                stage = "repairing";
-              }
-
               controller.enqueue(
                 encoder.encode(
                   `data: ${JSON.stringify({
                     type: "stage",
-                    stage,
+                    stage: nodeStage,
                     node: graphNode,
                     status:
                       event.event === "on_chain_start"
@@ -299,6 +288,14 @@ export async function POST(request: NextRequest) {
                 ),
               );
               lastHeartbeat = Date.now();
+            }
+
+            if (event.event === "on_chain_end" && event.name === "workspaceQueue") {
+              const output = event.data?.output as { workspaceId?: string; workspaceRunId?: string } | undefined;
+              if (output?.workspaceId && output.workspaceRunId) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "workspace_queued", workspaceId: output.workspaceId, runId: output.workspaceRunId, projectId: finalProjectId, threadId: finalThreadId })}\n\n`));
+                lastHeartbeat = Date.now();
+              }
             }
 
             // 流式发送 AI 消息内容
@@ -552,78 +549,9 @@ export async function POST(request: NextRequest) {
           // ==========================================
           // 5. 流式响应结束
           // ==========================================
-          console.log("[Stream] 流式响应结束", {
-            长度: accumulatedContent.length,
-            完整: accumulatedContent.includes("</boltArtifact>"),
+          console.log("[Stream] 对话阶段结束，工作区任务由后台 Worker 独立执行", {
+            messageLength: accumulatedContent.length,
           });
-
-          // 检查内容完整性
-          if (
-            accumulatedContent.includes("<boltArtifact") &&
-            !accumulatedContent.includes("</boltArtifact>")
-          ) {
-            console.warn(
-              "[Stream] ⚠️ 警告：检测到未闭合的 <boltArtifact> 标签，尝试自动修复",
-            );
-
-            // 尝试找到最后一个 <boltAction> 的闭合位置
-            const lastActionEndIndex =
-              accumulatedContent.lastIndexOf("</boltAction>");
-            if (lastActionEndIndex !== -1) {
-              // 在最后一个 action 后面补充闭合标签
-              const closeTag = "\n</boltArtifact>";
-              const closeChunk = encoder.encode(
-                `data: ${JSON.stringify({
-                  type: "content",
-                  content: closeTag,
-                  threadId: finalThreadId,
-                })}\n\n`,
-              );
-
-              try {
-                controller.enqueue(closeChunk);
-                accumulatedContent += closeTag;
-                aiResponseContent += closeTag;
-                console.log("[Stream] ✓ 已自动补全 </boltArtifact> 闭合标签");
-              } catch (error) {
-                console.error("[Stream] ✗ 补全闭合标签失败:", error);
-              }
-            } else {
-              console.error("[Stream] ✗ 无法找到合适的位置补全闭合标签");
-              console.warn(
-                "[Stream] 内容末尾:",
-                accumulatedContent.slice(-200),
-              );
-            }
-          }
-
-          // Coder 运行过就必须存在本次 request 对应的持久化版本。
-          // 不能再把“模型输出了代码”误报成“代码已保存并可预览”。
-          if (coderRunCount > 0) {
-            const savedVersion = await prisma.artifactVersion.findFirst({
-              where: {
-                generationRequestId: finalGenerationRequestId,
-                artifact: { projectId: finalProjectId },
-              },
-              select: { id: true, versionNumber: true },
-            });
-            if (!savedVersion) {
-              throw new Error(
-                "生成结果未通过产物校验或未成功保存，请重试生成",
-              );
-            }
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({
-                  type: "artifact_saved",
-                  artifactVersionId: savedVersion.id,
-                  versionNumber: savedVersion.versionNumber,
-                  threadId: finalThreadId,
-                  projectId: finalProjectId,
-                })}\n\n`,
-              ),
-            );
-          }
 
           // ==========================================
           // 6. 自动生成会话标题（如果是新会话）
