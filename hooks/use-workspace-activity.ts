@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export type WorkspaceEvent = { sequence: number; type: string; payload: Record<string, unknown> };
-type RunView = { id: string; workspaceId: string; status: string; summary: string | null; nextStep: number; maxSteps: number };
+type RunView = { id: string; workspaceId: string; status: string; summary: string | null; nextStep: number; maxSteps: number; createdAt?: string; updatedAt?: string };
 type WorkspaceView = { id: string; revision: number; status: string };
 
 export function useWorkspaceActivity(projectId?: string, onFiles?: (workspaceId: string, files: Array<{ path: string; content: string }>) => void, onCommitted?: (fresh: boolean) => void) {
@@ -24,7 +24,8 @@ export function useWorkspaceActivity(projectId?: string, onFiles?: (workspaceId:
     setEvents([]);
     attachedRunRef.current = runId;
     setWorkspace({ id: workspaceId, revision: 0, status: "ACTIVE" });
-    setRun({ id: runId, workspaceId, status: "QUEUED", summary: null, nextStep: 0, maxSteps: 30 });
+    const createdAt = new Date().toISOString();
+    setRun({ id: runId, workspaceId, status: "QUEUED", summary: null, nextStep: 0, maxSteps: 30, createdAt, updatedAt: createdAt });
     setError(null);
   }, []);
 

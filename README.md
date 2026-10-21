@@ -157,6 +157,14 @@ Go 运行时细节见 [Go 全栈轻应用运行时](docs/go-fullstack-runtime.md
 
 ## 本地启动
 
+完成依赖和数据库初始化后，推荐从主应用目录一次启动 Web、Workspace Agent Worker、Build Worker 与 Sandbox：
+
+```bash
+pnpm dev:all
+```
+
+`dev:all` 会在任一关键进程退出时停止其余子进程，避免页面仍可访问、但工作区任务因 Agent Worker 缺失而永久停在 `QUEUED`。如果 Sandbox 不在相邻的 `../antd-sandbox`，请通过绝对路径设置 `SANDBOX_DIR`。
+
 ### 环境要求
 
 - Node.js >= 20.19.0，推荐 Node.js 22
