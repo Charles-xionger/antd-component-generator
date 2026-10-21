@@ -62,10 +62,17 @@ export async function createDraftWorkspace(input: {
     if (typeof error === "object" && error && "code" in error && error.code === "P2002") {
       const raced = await prisma.draftWorkspace.findUnique({ where: { taskId: input.taskId } });
       if (raced?.projectId === input.projectId && raced.baseArtifactVersionId === (input.baseArtifactVersionId ?? null)) return raced;
-      throw new WorkspaceError("TASK_CONFLICT", "Task ID already belongs to another workspace");
+      if (raced) throw new WorkspaceError("TASK_CONFLICT", "Task ID already belongs to another workspace");
+      throw new WorkspaceError("WORKSPACE_BUSY", "Another draft workspace is active for this project");
     }
     throw error;
   }
+}
+
+export async function closeDraftWorkspace(input: { workspaceId: string; userId: string }) {
+  const workspace = await ownedWorkspace(input.workspaceId, input.userId);
+  if (workspace.status === "CLOSED") return workspace;
+  return prisma.draftWorkspace.update({ where: { id: workspace.id }, data: { status: "CLOSED" } });
 }
 
 export async function listDraftFiles(input: { workspaceId: string; userId: string; revision?: number }) {

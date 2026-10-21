@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { after, before, test } from "node:test";
+import { after, afterEach, before, test } from "node:test";
 import prisma from "@/lib/database/prisma";
 import {
   createDraftWorkspace,
+  closeDraftWorkspace,
   listDraftFiles,
   readDraftFile,
   writeDraftFile,
@@ -33,6 +34,11 @@ after(async () => {
   if (!process.env.DATABASE_URL) return;
   await prisma.user.delete({ where: { id: userId } });
   await prisma.$disconnect();
+});
+
+afterEach(async () => {
+  if (!process.env.DATABASE_URL) return;
+  await prisma.draftWorkspace.updateMany({ where: { projectId, status: "ACTIVE" }, data: { status: "CLOSED" } });
 });
 
 dbTest("creates an empty draft and persists idempotent CAS writes", async () => {
@@ -77,6 +83,14 @@ dbTest("creates an empty draft and persists idempotent CAS writes", async () => 
   assert.equal((await listDraftFiles({ workspaceId: draft.id, userId })).length, 1);
   assert.deepEqual(await listDraftFiles({ workspaceId: draft.id, userId, revision: 0 }), []);
   await assert.rejects(readDraftFile({ workspaceId: draft.id, userId, path: first.path, revision: 0 }), { code: "FILE_NOT_FOUND" });
+});
+
+dbTest("allows only one active draft writer for a project", async () => {
+  const first = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  await assert.rejects(createDraftWorkspace({ projectId, userId, taskId: randomUUID() }), { code: "WORKSPACE_BUSY" });
+  await closeDraftWorkspace({ workspaceId: first.id, userId });
+  const next = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  assert.notEqual(next.id, first.id);
 });
 
 dbTest("copies a base version and denies access from another user", async () => {
