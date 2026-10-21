@@ -27,4 +27,5 @@ test("workspace activity displays file and diagnosis without source content", ()
   assert.equal(workspaceEventLabel({ type: "file.changed", payload: { path: "frontend/App.tsx", revision: 2, content: "secret code" } }), "已更新 frontend/App.tsx · 修订 2");
   assert.equal(workspaceEventLabel({ type: "command.output", payload: { output: "compiler raw text" } }), null);
   assert.match(workspaceEventLabel({ type: "diagnostic.created", payload: { diagnostic: { file: "frontend/App.tsx", message: "Syntax error" } } }) || "", /Syntax error/);
+  assert.match(workspaceEventLabel({ type: "model.response_rejected", payload: { revision: 2, error: { code: "MODEL_TOOL_CALL_INVALID" } } }) || "", /工作区重试/);
 });

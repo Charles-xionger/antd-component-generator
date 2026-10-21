@@ -30,6 +30,7 @@ export function workspaceEventLabel(event: { type: string; payload: Record<strin
     case "run.started": return "开始处理工作区";
     case "tool.started": return `正在执行 ${String(payload.name ?? "工具")}${path ? ` · ${path}` : ""}`;
     case "tool.completed": return payload.ok === false ? `工具失败：${String(payload.name ?? "工具")}${payload.error && typeof payload.error === "object" ? ` · ${String((payload.error as { message?: unknown }).message ?? "")}` : ""}` : null;
+    case "model.response_rejected": return "模型调用不完整或暂时失败，正在从当前工作区重试";
     case "file.changed": return `已更新 ${path ?? "文件"} · 修订 ${String(payload.revision ?? "?")}`;
     case "validation.completed": return payload.status === "PASSED" ? "代码检查通过" : `代码检查发现 ${String(payload.diagnosticCount ?? "若干")} 项问题`;
     case "diagnostic.created": {

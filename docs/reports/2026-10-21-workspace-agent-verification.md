@@ -6,7 +6,7 @@
 
 | 接缝 | 当前证据 |
 | --- | --- |
-| 固定脚本模型 + 真实 PostgreSQL + 隔离命令 | `lib/workspace/*.test.ts` 与 `lib/agent/workspace-node.db.test.ts`：59/59；包含断点恢复、CAS、诊断、定向修复、Go/TS 检查、提交。 |
+| 固定脚本模型 + 真实 PostgreSQL + 隔离命令 | `lib/workspace/*.test.ts`、`lib/agent/workspace-node.db.test.ts` 与工作区 API 测试：63/63；包含断点恢复、CAS、诊断、定向修复、截断工具调用重试、Go/TS 检查、提交。 |
 | 真实 Next.js HTTP + 工作区 Worker | `pnpm test:workspace-http-e2e`：静态首次生成 → 修改 → v1/v2 → 发布 API → 公开 HTML/JS 文件，且所有权、事件游标通过。 |
 | Go 容器与真实运行时 | `pnpm test:workspace-go-preview-e2e`：成功/失败 Preview 分支；成功项目 v2 定向修改后，经部署 API 发布，容器 `/healthz`、前端 JS 和业务 API 均返回 v2 内容。隔离 Traefik 的 Docker provider 通过 HTTPS Host 规则转发 Preview 与发布地址的页面/JS；失败 Preview 不触发 Agent 自动修复。 |
 | 既有安全网 | 截图归档后重跑：`lib/workspace/*.test.ts` + `workspace-node.db.test.ts` 59/59，`pnpm test:app-runtime` 72/72，`pnpm test:data-gateway` 8/8，Workspace HTTP、Go Preview、全栈运行时与发布 E2E 均通过；`pnpm lint` 0 错误、7 个原有 warning；`pnpm exec next build` 通过。全栈 E2E 曾因 `pg_isready` 对初始化临时 Unix socket 提前返回而失败，改为检查容器 TCP 后同一测试重跑通过。 |
@@ -38,7 +38,7 @@
 | 20 | 通过：结构化 Item、序号游标与去重，`workspace-agent-http-e2e.ts`、BOT-3；浏览器刷新后事件序列连续。 |
 | 21 | 通过：旧 XML 历史仍可读；新任务编译失败/修复/提交为独立 Item，代码仅在文件面板，BOT-7。 |
 | 22 | 通过：跨用户项目/工作区 API 拒绝、路径和日志不暴露 Secret，`service.db.test.ts`、HTTP E2E、BOT-5。 |
-| 23 | 通过：截断、多调用、伪造事件和无效参数不提前落库；成功事件由执行器生成，`model-adapter.test.ts`、`agent-run.db.test.ts`。 |
+| 23 | 通过：截断、多调用、伪造事件和无效参数不提前落库；不完整调用作为失败步骤持久化，保留先前文件并从当前工作区重试，重复失败有界停止；成功事件由执行器生成，`model-adapter.test.ts`、`agent-run.db.test.ts`。 |
 
 ## UI 与 BOT 核对
 
@@ -53,6 +53,10 @@
 ### 最后审查补充：文件读取快照一致性
 
 审查发现，未指定修订号的文件列表原先可能在 Agent 写入期间读取旧清单，却在 HTTP 响应中标记较新的修订号。现已让 API 先固定逻辑修订，并让列表与单文件读取均从不可变文件修订记录还原，避免混读可变当前行。补充了服务及 API 回归断言；使用新建的隔离 PostgreSQL 实例重跑 Workspace/Agent/路由测试 61/61、Next 构建、真实 HTTP E2E，全部通过；`pnpm lint` 为 0 错误、7 个既有 warning。测试容器已清理。
+
+### 最后审查补充：不完整模型调用的局部恢复
+
+原先模型适配器会正确拒绝截断/多条工具调用，但执行循环将其直接升级为整段任务 `FAILED`。现改为持久化不含文件变更的失败步骤与 `model.response_rejected` 事件，把结构化错误交回下一轮模型决策；已有文件不重写，同类失败连续出现则以 `NO_PROGRESS` 停止。新建隔离 PostgreSQL 下完整 Workspace/Agent/API 测试 63/63、Next 构建、真实 HTTP E2E 通过；`pnpm lint` 为 0 错误、7 个既有 warning。测试容器已清理。
 
 ## 用户 Review 与目标环境待办
 

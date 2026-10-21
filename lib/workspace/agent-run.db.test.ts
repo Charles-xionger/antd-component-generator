@@ -65,6 +65,41 @@ dbTest("invalid model tool args return a structured failure and permit a local r
   await closeDraftWorkspace({ workspaceId: workspace.id, userId });
 });
 
+dbTest("an interrupted model tool call retries without losing earlier workspace files", async () => {
+  const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Create two files", runtimeType: "STATIC", maxSteps: 5 });
+  const model = { decide: async ({ step }: { step: number }) => {
+    if (step === 0) return { kind: "tool", name: "write_file", arguments: { path: "frontend/App.tsx", content: "export default function App() { return null; }" } };
+    if (step === 1) throw new Error("MODEL_TOOL_CALL_INVALID");
+    if (step === 2) return { kind: "tool", name: "write_file", arguments: { path: "frontend/Other.tsx", content: "export const other = 1;" } };
+    return { kind: "complete", summary: "Ready" };
+  } };
+  const result = await executeAgentRun({ runId: run.id, userId, model });
+  assert.equal(result.status, "READY_TO_VALIDATE", result.summary ?? undefined);
+  const failedStep = await prisma.agentRunStep.findUniqueOrThrow({ where: { runId_number: { runId: run.id, number: 1 } } });
+  assert.equal((failedStep.result as { error: { code: string } }).error.code, "MODEL_TOOL_CALL_INVALID");
+  assert.equal((failedStep.decision as { expectedRevision: number }).expectedRevision, 1);
+  assert.equal(await prisma.draftFileChange.count({ where: { workspaceId: workspace.id } }), 2);
+  assert.equal(await prisma.agentEvent.count({ where: { runId: run.id, type: "file.changed" } }), 2);
+  assert.equal(await prisma.agentEvent.count({ where: { runId: run.id, type: "model.response_rejected" } }), 1);
+  assert.match((await readDraftFile({ workspaceId: workspace.id, userId, path: "frontend/App.tsx" })).content, /return null/);
+  await closeDraftWorkspace({ workspaceId: workspace.id, userId });
+});
+
+dbTest("repeated invalid model calls stop without writing a file", async () => {
+  const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Create a page", runtimeType: "STATIC", maxSteps: 5 });
+  let calls = 0;
+  const result = await executeAgentRun({ runId: run.id, userId, model: { decide: async () => { calls += 1; return { kind: "tool", name: "write_file", arguments: [] }; } } });
+  assert.equal(result.status, "NO_PROGRESS");
+  assert.equal(calls, 2);
+  const firstStep = await prisma.agentRunStep.findUniqueOrThrow({ where: { runId_number: { runId: run.id, number: 0 } } });
+  assert.equal((firstStep.result as { error: { code: string } }).error.code, "MODEL_DECISION_INVALID");
+  assert.equal(await prisma.draftFileChange.count({ where: { workspaceId: workspace.id } }), 0);
+  assert.equal(await prisma.agentEvent.count({ where: { runId: run.id, type: "file.changed" } }), 0);
+  await closeDraftWorkspace({ workspaceId: workspace.id, userId });
+});
+
 dbTest("compiler diagnostics return to the same run and trigger a one-file patch", async () => {
   const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
   const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Fix the page", runtimeType: "STATIC", maxSteps: 5 });

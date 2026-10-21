@@ -18,9 +18,21 @@ const decisionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("complete"), summary: z.string().min(1).max(4000) }).strict(),
   z.object({ kind: z.literal("question"), question: z.string().min(1).max(4000) }).strict(),
 ]);
-const persistedDecisionSchema = z.object({ decision: decisionSchema, expectedRevision: z.number().int().nonnegative() }).strict();
+const modelErrorSchema = z.object({ kind: z.literal("model_error"), code: z.enum(["MODEL_TOOL_CALL_INVALID", "MODEL_MUST_CALL_ONE_TOOL", "MODEL_DECISION_INVALID", "MODEL_RESPONSE_INTERRUPTED"]) }).strict();
+const persistedDecisionSchema = z.object({ decision: z.union([decisionSchema, modelErrorSchema]), expectedRevision: z.number().int().nonnegative() }).strict();
 
 type Decision = z.infer<typeof decisionSchema>;
+type ModelErrorDecision = z.infer<typeof modelErrorSchema>;
+const modelErrorMessages: Record<ModelErrorDecision["code"], string> = {
+  MODEL_TOOL_CALL_INVALID: "Model returned an incomplete or invalid tool call",
+  MODEL_MUST_CALL_ONE_TOOL: "Model must call exactly one tool",
+  MODEL_DECISION_INVALID: "Model tool decision failed schema validation",
+  MODEL_RESPONSE_INTERRUPTED: "Model response was interrupted; retry the current step",
+};
+function modelErrorDecision(error: unknown): ModelErrorDecision {
+  if (error instanceof Error && (error.message === "MODEL_TOOL_CALL_INVALID" || error.message === "MODEL_MUST_CALL_ONE_TOOL")) return { kind: "model_error", code: error.message };
+  return { kind: "model_error", code: error instanceof z.ZodError ? "MODEL_DECISION_INVALID" : "MODEL_RESPONSE_INTERRUPTED" };
+}
 export type AgentModel = { decide(observation: {
   goal: string;
   workspaceId: string;
@@ -186,8 +198,15 @@ export async function executeAgentRun(input: { runId: string; userId: string; mo
           const args = choice?.kind === "tool" ? choice.arguments : null;
           return { step: entry.number, action: choice?.kind === "tool" ? choice.name : choice?.kind ?? "unknown", path: typeof args?.path === "string" ? args.path : undefined, outcome: typeof error?.code === "string" ? error.code : typeof validation?.status === "string" ? validation.status : result?.ok === true ? "ok" : undefined };
         });
-        const response = await input.model.decide({ goal: run.goal, workspaceId: run.workspaceId, revision: run.workspace.revision, step: run.nextStep, plan: run.plan, previousResult: prior?.result, history });
-        const decision = decisionSchema.parse(response);
+        let decision: Decision | ModelErrorDecision;
+        try {
+          const response = await input.model.decide({ goal: run.goal, workspaceId: run.workspaceId, revision: run.workspace.revision, step: run.nextStep, plan: run.plan, previousResult: prior?.result, history });
+          decision = decisionSchema.parse(response);
+        } catch (error) {
+          // An incomplete model response is one failed step, not a failed
+          // workspace. Earlier successful file writes remain available.
+          decision = modelErrorDecision(error);
+        }
         await renew();
         if (leaseLost) throw new WorkspaceError("RUN_LEASE_LOST", "Agent run lease was lost");
         step = await prisma.agentRunStep.create({ data: { runId: run.id, number: run.nextStep, decision: JSON.parse(JSON.stringify({ decision, expectedRevision: run.workspace.revision })) } });
@@ -225,11 +244,15 @@ export async function executeAgentRun(input: { runId: string; userId: string; mo
         continue;
       }
       let result: { ok: boolean; value?: unknown; error?: { code: string; message: string } };
-      try {
-        result = { ok: true, value: await executeTool(decision, { workspaceId: run.workspaceId, userId: input.userId, expectedRevision, toolCallId: `${run.id}:${run.nextStep}`, runId: run.id, leaseToken, runtimeType: run.runtimeType, appBlueprint: run.appBlueprint ?? run.workspace.baseArtifactVersion?.appBlueprint ?? undefined }) };
-      } catch (error) {
-        if (!(error instanceof WorkspaceError) && !(error instanceof WorkspacePathError) && !(error instanceof z.ZodError)) throw error;
-        result = { ok: false, error: { code: error instanceof WorkspaceError || error instanceof WorkspacePathError ? error.code : "INVALID_TOOL_ARGUMENTS", message: error.message.slice(0, 1000) } };
+      if (decision.kind === "model_error") {
+        result = { ok: false, error: { code: decision.code, message: modelErrorMessages[decision.code] } };
+      } else {
+        try {
+          result = { ok: true, value: await executeTool(decision, { workspaceId: run.workspaceId, userId: input.userId, expectedRevision, toolCallId: `${run.id}:${run.nextStep}`, runId: run.id, leaseToken, runtimeType: run.runtimeType, appBlueprint: run.appBlueprint ?? run.workspace.baseArtifactVersion?.appBlueprint ?? undefined }) };
+        } catch (error) {
+          if (!(error instanceof WorkspaceError) && !(error instanceof WorkspacePathError) && !(error instanceof z.ZodError)) throw error;
+          result = { ok: false, error: { code: error instanceof WorkspaceError || error instanceof WorkspacePathError ? error.code : "INVALID_TOOL_ARGUMENTS", message: error.message.slice(0, 1000) } };
+        }
       }
       const previous = prior?.result && typeof prior.result === "object" ? prior.result as { ok?: unknown; error?: { code?: string; message?: string }; revision?: number } : null;
       const noProgress = !result.ok && previous?.ok === false && previous.error?.code === result.error?.code && previous.error?.message === result.error?.message && expectedRevision === run.workspace.revision;
@@ -237,8 +260,10 @@ export async function executeAgentRun(input: { runId: string; userId: string; mo
         const updated = await tx.agentRun.updateMany({ where: { id: run.id, status: "RUNNING", leaseToken, leaseUntil: { gt: new Date() } }, data: { nextStep: { increment: 1 }, ...(noProgress ? { status: "NO_PROGRESS", summary: "Same tool error repeated without a workspace change", leaseToken: null, leaseUntil: null } : { leaseUntil: new Date(Date.now() + 120_000) }) } });
         if (updated.count !== 1) throw new WorkspaceError("RUN_LEASE_LOST", "Agent run lease was lost before completing a step");
         await tx.agentRunStep.update({ where: { runId_number: { runId: run.id, number: run.nextStep } }, data: { status: "COMPLETED", result: JSON.parse(JSON.stringify(result)), completedAt: new Date() } });
-        await appendAgentEvent(tx, { runId: run.id, type: "tool.completed", itemId, toolCallId: itemId, payload: { name: decision.name, revision: expectedRevision, ok: result.ok, error: result.error ?? null } });
-        if (result.ok && (decision.name === "run_command" || decision.name === "validate_workspace") && result.value && typeof result.value === "object") {
+        await appendAgentEvent(tx, decision.kind === "model_error"
+          ? { runId: run.id, type: "model.response_rejected", itemId, payload: { revision: expectedRevision, error: result.error } }
+          : { runId: run.id, type: "tool.completed", itemId, toolCallId: itemId, payload: { name: decision.name, revision: expectedRevision, ok: result.ok, error: result.error ?? null } });
+        if (decision.kind === "tool" && result.ok && (decision.name === "run_command" || decision.name === "validate_workspace") && result.value && typeof result.value === "object") {
           const check = result.value as { command?: string; output?: string; diagnostics?: Array<{ id?: string }> ; status?: string };
           if (check.output) await appendAgentEvent(tx, { runId: run.id, type: "command.output", itemId, payload: { revision: expectedRevision, check: check.command ?? decision.name, output: check.output } });
           if (check.status) await appendAgentEvent(tx, { runId: run.id, type: "validation.completed", itemId, payload: { revision: expectedRevision, status: check.status, diagnosticCount: check.diagnostics?.length ?? 0 } });
