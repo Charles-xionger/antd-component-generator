@@ -46,13 +46,13 @@
 | --- | --- |
 | AC-UI-1/2/3 | 双栏、状态文字、诊断定位与明细折叠已在 BOT-1/2/4/6/7 走查；`presentation.test.ts` 覆盖状态投影。 |
 | AC-UI-4 | BOT-3 刷新及 Worker 恢复后任务、计划、文件与事件仍在；事件期间聚焦的 Code 标签保持焦点；live region 仅包状态，工具日志不逐行播报。 |
-| AC-UI-5 | 精确 `innerWidth=390`、`scrollWidth=390`，文件列表在代码上方；亮色计算样式与 `DESIGN.md` token 一致。`DARK_MODE_URL` 内实际 `matchMedia('(prefers-color-scheme: dark)').matches === true`，任务面板计算背景/正文为 `rgb(17, 22, 31)` / `rgb(232, 237, 245)`，代码文件按钮为 `rgb(30, 41, 59)` / `rgb(248, 250, 252)`；暗色诊断与最终版本均已浏览器目视检查。设计 token 的正文/次级文本在亮暗面板上的计算对比度依次为 16.40/5.76 和 15.42/7.51。暗色 390px 视口 `scrollWidth=390`；窄屏 Code → 两个文件 → 复制按钮可按 Tab 到达且焦点环可见。截图已在本次浏览器验收记录中展示，尚未归档到仓库。 |
-| BOT-1/2/3/4/5/7 | 实际 Next 页面和隔离 PostgreSQL 走查通过；夹具提供重复启动/清理方式。截图只留在本次浏览器验收记录中，尚未归档到仓库。 |
-| BOT-6 | Go 成功/失败及静态 Sandbox 页面状态已走查；Go 预览和发布容器的前端/API 实测可用，隔离 Traefik 实测 HTTPS Host 路由。外部 DNS/可信证书仍需环境确认。 |
+| AC-UI-5 | 精确 `innerWidth=390`、`scrollWidth=390`，文件列表在代码上方；亮色计算样式与 `DESIGN.md` token 一致。`DARK_MODE_URL` 内实际 `matchMedia('(prefers-color-scheme: dark)').matches === true`，任务面板计算背景/正文为 `rgb(17, 22, 31)` / `rgb(232, 237, 245)`，代码文件按钮为 `rgb(30, 41, 59)` / `rgb(248, 250, 252)`；[暗色诊断与最终版本截图](assets/workspace-agent/README.md)已归档。设计 token 的正文/次级文本在亮暗面板上的计算对比度依次为 16.40/5.76 和 15.42/7.51。暗色 390px 视口 `scrollWidth=390`；窄屏 Code → 两个文件 → 复制按钮可按 Tab 到达且焦点环可见。 |
+| BOT-1/2/3/4/5/7 | 实际 Next 页面和隔离 PostgreSQL 走查通过；夹具提供重复启动/清理方式。14 张真实页面截图已归档，逐项映射见 [验收截图索引](assets/workspace-agent/README.md)。其中 BOT-3、BOT-5 尚缺 spec 指定的部分时刻截图。 |
+| BOT-6 | [Go 成功与失败截图](assets/workspace-agent/README.md)已归档，静态 Sandbox 页面状态已走查；Go 预览和发布容器的前端/API 实测可用，隔离 Traefik 实测 HTTPS Host 路由。Preview 验证中尚缺截图，外部 DNS/可信证书仍需环境确认。 |
 
 ## 进入用户 Review 前仍需补齐
 
 1. 在目标环境核对 Go Preview 与发布返回的 HTTPS 地址，包括真实 DNS、可信证书与公网入口。隔离 Docker E2E 已通过 Traefik 的 HTTPS Host 路由验证页面/JS，但使用自签名测试证书和容器内 Host 解析，不能替代环境验收。测试还发现 API 与 Worker 原有默认域名不一致；现已共用 `getPublishedAppsDomain()`，部署时仍应明确配置相同的 `PUBLISHED_APPS_DOMAIN`。
-2. 将 spec 中 BOT-1 至 BOT-7 要求的关键截图归档到可复查的验收资产。浏览器手工结果不能替代可追溯截图；暗色目视截图目前也只保留在本次浏览器验收记录中。
+2. [截图索引](assets/workspace-agent/README.md)已有 BOT-1/2/3/4/5/6/7 与暗色模式的关键画面；仍需补 BOT-3 刷新前/后、BOT-5 不同项目同时运行、BOT-6 Preview 验证中。现有截图不能代替这些状态的可追溯证据。
 
 以上未补齐前，不合并到共享分支，也不发布 stage/production。用户 Review 通过后再讨论后续合并/发布动作。

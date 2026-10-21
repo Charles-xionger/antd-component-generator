@@ -1,7 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import { createServer as createTcpServer } from "node:net";
+import path from "node:path";
 import { encode } from "next-auth/jwt";
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
@@ -234,6 +236,31 @@ async function main() {
   await waitForNext(nextPort, next, () => nextOutput);
   let workerPaused = process.env.WORKSPACE_BROWSER_START_PAUSED === "1";
   const proxy = createServer((request, response) => {
+    if (request.url === "/__test_screenshot" && request.method === "GET") {
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end(`<!doctype html><html><title>Workspace screenshot archive</title><body>
+        <label>Evidence name <input aria-label="Evidence name" placeholder="bot-1-diagnostic"></label>
+        <label>JPEG base64 <textarea aria-label="JPEG base64"></textarea></label>
+        <button type="button" onclick="fetch('/__test_screenshot?name='+encodeURIComponent(document.querySelector('input').value),{method:'POST',body:document.querySelector('textarea').value}).then(async r=>{document.querySelector('output').textContent=r.status+' '+await r.text()})">Save screenshot</button>
+        <output></output></body></html>`);
+      return;
+    }
+    if (request.url?.startsWith("/__test_screenshot?name=") && request.method === "POST") {
+      if (request.headers.origin !== baseUrl) { response.writeHead(403).end("Same-origin fixture only"); return; }
+      const name = new URL(request.url, baseUrl).searchParams.get("name") ?? "";
+      if (!/^(?:bot-[1-7]|dark)-[a-z0-9-]{1,50}$/.test(name)) { response.writeHead(400).end("Invalid evidence name"); return; }
+      const chunks: Buffer[] = [];
+      let size = 0;
+      request.on("data", (chunk: Buffer) => { size += chunk.length; if (size > 5_000_000) request.destroy(); else chunks.push(chunk); });
+      request.on("end", () => {
+        const base64 = Buffer.concat(chunks).toString("utf8");
+        const image = Buffer.from(base64, "base64");
+        if (!image.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff])) || image.length > 3_750_000) { response.writeHead(400).end("Invalid JPEG"); return; }
+        const relativePath = `docs/reports/assets/workspace-agent/${name}.jpg`;
+        void mkdir(path.dirname(relativePath), { recursive: true }).then(() => writeFile(relativePath, image)).then(() => response.writeHead(201).end(relativePath)).catch((error: unknown) => response.writeHead(500).end(String(error)));
+      });
+      return;
+    }
     if (request.url === "/__test_resume_worker" && request.method === "POST") {
       workerPaused = false;
       response.writeHead(204).end();
@@ -280,6 +307,7 @@ async function main() {
     void Promise.all([
       processPendingWorkspaceTasks({ projectId: project.id, limit: 1 }),
       processPendingWorkspaceTasks({ projectId: secondaryProject.id, limit: 1 }),
+      ...(legacyProject ? [processPendingWorkspaceTasks({ projectId: legacyProject.id, limit: 1 })] : []),
       ...(goProject ? [processPendingWorkspaceTasks({ projectId: goProject.id, limit: 1 })] : []),
     ]).catch((error) => console.error("Fixture worker error:", error)).finally(() => { busy = false; });
   }, 1000);
@@ -302,7 +330,7 @@ async function main() {
   };
   process.once("SIGINT", () => { void stop(); });
   process.once("SIGTERM", () => { void stop(); });
-  process.stdout.write(`BROWSER_FIXTURE_URL=${baseUrl}/__test_auth\nDARK_MODE_URL=${baseUrl}/__test_dark\nSECONDARY_URL=${baseUrl}/__test_auth_secondary\n${legacyProject ? `LEGACY_URL=${baseUrl}/__test_auth_legacy\nLEGACY_PROJECT_ID=${legacyProject.id}\n` : ""}${goProject ? `GO_URL=${baseUrl}/__test_auth_go\nGO_PROJECT_ID=${goProject.id}\n` : ""}${interrupted ? `RECOVERY_WORKSPACE_ID=${interrupted.workspaceId}\nRECOVERY_RUN_ID=${interrupted.runId}\nRESUME_WORKER_URL=${baseUrl}/__test_resume_worker\n` : ""}PROJECT_ID=${project.id}\nSECONDARY_PROJECT_ID=${secondaryProject.id}\nPRIVATE_PROJECT_ID=${privateProject.id}\n`);
+  process.stdout.write(`BROWSER_FIXTURE_URL=${baseUrl}/__test_auth\nDARK_MODE_URL=${baseUrl}/__test_dark\nSCREENSHOT_ARCHIVE_URL=${baseUrl}/__test_screenshot\nSECONDARY_URL=${baseUrl}/__test_auth_secondary\n${legacyProject ? `LEGACY_URL=${baseUrl}/__test_auth_legacy\nLEGACY_PROJECT_ID=${legacyProject.id}\n` : ""}${goProject ? `GO_URL=${baseUrl}/__test_auth_go\nGO_PROJECT_ID=${goProject.id}\n` : ""}${interrupted ? `RECOVERY_WORKSPACE_ID=${interrupted.workspaceId}\nRECOVERY_RUN_ID=${interrupted.runId}\nRESUME_WORKER_URL=${baseUrl}/__test_resume_worker\n` : ""}PROJECT_ID=${project.id}\nSECONDARY_PROJECT_ID=${secondaryProject.id}\nPRIVATE_PROJECT_ID=${privateProject.id}\n`);
 }
 
 void main().catch((error) => { console.error(error); process.exitCode = 1; });

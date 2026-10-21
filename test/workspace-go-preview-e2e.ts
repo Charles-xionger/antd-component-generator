@@ -123,13 +123,20 @@ async function serveBrowserPreview(databaseUrl: string, user: { id: string; emai
     process.stdin.setEncoding("utf8");
     process.stdin.resume();
     await new Promise<void>((resolve) => {
-      const onData = (chunk: string) => {
-        if (chunk.trim() !== "stop") return;
+      const finish = () => {
         process.stdin.off("data", onData);
+        process.off("SIGINT", finish);
+        process.off("SIGTERM", finish);
         process.stdin.pause();
         resolve();
       };
+      const onData = (chunk: string) => {
+        if (chunk.trim() !== "stop") return;
+        finish();
+      };
       process.stdin.on("data", onData);
+      process.once("SIGINT", finish);
+      process.once("SIGTERM", finish);
     });
     await new Promise<void>((resolve) => proxy.close(() => resolve()));
   } finally {
