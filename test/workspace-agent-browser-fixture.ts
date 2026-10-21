@@ -259,6 +259,12 @@ async function main() {
       response.end();
       return;
     }
+    if (request.url === "/__test_dark") {
+      // Embedded documents inherit the iframe's color-scheme for prefers-color-scheme.
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end(`<!doctype html><html><head><title>Workspace dark-mode check</title><style>html,body{margin:0;background:#111827}iframe{display:block;width:100%;height:100vh;border:0;color-scheme:dark}</style></head><body><iframe title="Workspace dark-mode check" src="/projects/${project.id}"></iframe></body></html>`);
+      return;
+    }
     const upstream = httpRequest({ hostname: "127.0.0.1", port: nextPort, path: request.url, method: request.method, headers: { ...request.headers, host: `127.0.0.1:${proxyPort}`, "x-forwarded-host": `127.0.0.1:${proxyPort}` } }, (remote) => {
       response.writeHead(remote.statusCode ?? 502, remote.headers);
       remote.pipe(response);
@@ -296,7 +302,7 @@ async function main() {
   };
   process.once("SIGINT", () => { void stop(); });
   process.once("SIGTERM", () => { void stop(); });
-  process.stdout.write(`BROWSER_FIXTURE_URL=${baseUrl}/__test_auth\nSECONDARY_URL=${baseUrl}/__test_auth_secondary\n${legacyProject ? `LEGACY_URL=${baseUrl}/__test_auth_legacy\nLEGACY_PROJECT_ID=${legacyProject.id}\n` : ""}${goProject ? `GO_URL=${baseUrl}/__test_auth_go\nGO_PROJECT_ID=${goProject.id}\n` : ""}${interrupted ? `RECOVERY_WORKSPACE_ID=${interrupted.workspaceId}\nRECOVERY_RUN_ID=${interrupted.runId}\nRESUME_WORKER_URL=${baseUrl}/__test_resume_worker\n` : ""}PROJECT_ID=${project.id}\nSECONDARY_PROJECT_ID=${secondaryProject.id}\nPRIVATE_PROJECT_ID=${privateProject.id}\n`);
+  process.stdout.write(`BROWSER_FIXTURE_URL=${baseUrl}/__test_auth\nDARK_MODE_URL=${baseUrl}/__test_dark\nSECONDARY_URL=${baseUrl}/__test_auth_secondary\n${legacyProject ? `LEGACY_URL=${baseUrl}/__test_auth_legacy\nLEGACY_PROJECT_ID=${legacyProject.id}\n` : ""}${goProject ? `GO_URL=${baseUrl}/__test_auth_go\nGO_PROJECT_ID=${goProject.id}\n` : ""}${interrupted ? `RECOVERY_WORKSPACE_ID=${interrupted.workspaceId}\nRECOVERY_RUN_ID=${interrupted.runId}\nRESUME_WORKER_URL=${baseUrl}/__test_resume_worker\n` : ""}PROJECT_ID=${project.id}\nSECONDARY_PROJECT_ID=${secondaryProject.id}\nPRIVATE_PROJECT_ID=${privateProject.id}\n`);
 }
 
 void main().catch((error) => { console.error(error); process.exitCode = 1; });
