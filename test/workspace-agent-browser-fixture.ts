@@ -40,6 +40,7 @@ export default function App() {
   </main>;
 }
 `;
+const brokenAppFile = "export default function App() { return <div>Broken";
 
 function scriptedResponse(requestBody: Record<string, unknown>) {
   const messages = Array.isArray(requestBody.messages) ? requestBody.messages as Array<{ role?: string; content?: unknown }> : [];
@@ -51,7 +52,14 @@ function scriptedResponse(requestBody: Record<string, unknown>) {
     const observation = JSON.parse(String(latestUser?.content ?? "{}")) as { goal?: string; step?: number };
     const modification = /按钮|blue|颜色/i.test(observation.goal ?? "");
     const questionFlow = /需要确认/.test(observation.goal ?? "");
-    if (/取消测试/.test(observation.goal ?? "")) {
+    if (/诊断测试/.test(observation.goal ?? "")) {
+      tool = observation.step === 0 ? { name: "update_plan", arguments: { summary: "编写页面并修复编译错误", steps: [{ id: "frontend", title: "编写页面", status: "in_progress" }, { id: "repair", title: "修复诊断并提交", status: "pending" }] } }
+        : observation.step === 1 ? { name: "write_file", arguments: { path: "frontend/App.tsx", content: brokenAppFile } }
+          : observation.step === 2 ? { name: "complete", arguments: { summary: "检查页面" } }
+            : observation.step === 3 ? { name: "read_file", arguments: { path: "frontend/App.tsx" } }
+              : observation.step === 4 ? { name: "patch_file", arguments: { path: "frontend/App.tsx", oldText: brokenAppFile, newText: appFile } }
+                : { name: "complete", arguments: { summary: "编译错误已定向修复" } };
+    } else if (/取消测试/.test(observation.goal ?? "")) {
       tool = observation.step === 0
         ? { name: "write_file", arguments: { path: "frontend/App.tsx", content: appFile } }
         : { name: "complete", arguments: { summary: "取消测试任务" } };
@@ -87,7 +95,7 @@ function fakeModelServer() {
       const messages = Array.isArray(body.messages) ? body.messages as Array<{ role?: string; content?: unknown }> : [];
       const latestUser = [...messages].reverse().find((message) => message.role === "user");
       const observation = JSON.parse(String(latestUser?.content ?? "{}")) as { goal?: string; step?: number };
-      if (/取消测试/.test(observation.goal ?? "") && observation.step === 0) await new Promise((resolve) => setTimeout(resolve, 8000));
+      if ((/取消测试/.test(observation.goal ?? "") && observation.step === 0) || (/诊断测试/.test(observation.goal ?? "") && observation.step === 3)) await new Promise((resolve) => setTimeout(resolve, 8000));
     }
     const result = scriptedResponse(body);
     const toolCalls = result.tool ? [{ index: 0, id: `call-${randomUUID()}`, type: "function", function: { name: result.tool.name, arguments: JSON.stringify(result.tool.arguments) } }] : undefined;

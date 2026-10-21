@@ -97,7 +97,10 @@ export function useWorkspaceActivity(projectId?: string, onFiles?: (workspaceId:
         }
         setError(null);
       } catch (reason) {
-        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
+        if (!cancelled) {
+          const detail = reason instanceof Error ? reason.message : String(reason);
+          setError(`工作区同步中断，正在重试；当前保留上次状态。${detail}`);
+        }
       } finally {
         if (!cancelled) timer = setTimeout(poll, 2000);
       }
