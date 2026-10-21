@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { shouldDisplayWorkspaceRun } from "@/lib/workspace/turn-presentation";
 
 export type WorkspaceEvent = { sequence: number; type: string; payload: Record<string, unknown> };
 type RunView = { id: string; workspaceId: string; status: string; summary: string | null; nextStep: number; maxSteps: number; createdAt?: string; updatedAt?: string };
@@ -29,6 +30,14 @@ export function useWorkspaceActivity(projectId?: string, onFiles?: (workspaceId:
     setError(null);
   }, []);
 
+  const dismiss = useCallback(() => {
+    attachedRunRef.current = null;
+    cursorRef.current = 0;
+    setRun(null);
+    setEvents([]);
+    setError(null);
+  }, []);
+
   useEffect(() => {
     cursorRef.current = 0;
     revisionRef.current = -1;
@@ -43,9 +52,9 @@ export function useWorkspaceActivity(projectId?: string, onFiles?: (workspaceId:
     void fetch(`/api/workspaces?projectId=${encodeURIComponent(projectId)}`)
       .then(async (response) => { if (!response.ok) throw new Error("工作区恢复失败"); return response.json(); })
       .then((data) => {
-        if (cancelled || attachedRunRef.current || !data.workspace || !data.run) return;
+        if (cancelled || attachedRunRef.current || !data.workspace) return;
         setWorkspace(data.workspace);
-        setRun(data.run);
+        if (data.run && shouldDisplayWorkspaceRun(data.run.status)) setRun(data.run);
       })
       .catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason)); });
     return () => { cancelled = true; };
@@ -71,7 +80,7 @@ export function useWorkspaceActivity(projectId?: string, onFiles?: (workspaceId:
         const currentWorkspace = workspaceData.workspace as WorkspaceView;
         const currentRun = workspaceData.run as RunView;
         setWorkspace(currentWorkspace);
-        if (currentRun?.id === runId) setRun(currentRun);
+        if (currentRun?.id === runId) setRun(shouldDisplayWorkspaceRun(currentRun.status) ? currentRun : null);
         const incoming = (eventData.events || []) as WorkspaceEvent[];
         const committed = incoming.some((event) => event.type === "artifact.committed");
         if (incoming.length) {
@@ -110,5 +119,5 @@ export function useWorkspaceActivity(projectId?: string, onFiles?: (workspaceId:
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, [workspaceId, runId]);
 
-  return { workspace, run, events, error, attach };
+  return { workspace, run, events, error, attach, dismiss };
 }

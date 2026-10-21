@@ -122,6 +122,7 @@ export function UnifiedChat({
     },
   );
   const attachWorkspaceRun = workspaceActivity.attach;
+  const dismissWorkspaceRun = workspaceActivity.dismiss;
   const workspaceBusy = Boolean(workspaceActivity.run && ["QUEUED", "RUNNING", "READY_TO_VALIDATE"].includes(workspaceActivity.run.status));
   const openWorkspaceFile = (path: string) => {
     const file = canvas.artifact?.files.find((entry) => entry.path === path);
@@ -134,7 +135,8 @@ export function UnifiedChat({
     if (!workspaceActivity.workspace || !workspaceActivity.run) return;
     const response = await fetch(`/api/workspaces/${workspaceActivity.workspace.id}/runs/${workspaceActivity.run.id}/cancel`, { method: "POST" });
     if (!response.ok) toast.error("取消工作区任务失败");
-  }, [workspaceActivity.workspace, workspaceActivity.run]);
+    else dismissWorkspaceRun();
+  }, [workspaceActivity.workspace, workspaceActivity.run, dismissWorkspaceRun]);
   const latestArtifactMessageId = useMemo(
     () =>
       [...chat.messages]
@@ -535,6 +537,7 @@ ${sandboxError}
 
               {workspaceActivity.run && (
                 <WorkspaceTurn
+                  key={workspaceActivity.run.id}
                   run={workspaceActivity.run}
                   events={workspaceActivity.events}
                   error={workspaceActivity.error}

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildWorkspaceTurnItems, workspaceTurnHeading } from "./turn-presentation";
+import { buildWorkspaceTurnItems, shouldDisplayWorkspaceRun, workspaceTurnHeading } from "./turn-presentation";
 
 const run = {
   status: "RUNNING",
@@ -43,4 +43,11 @@ test("queued runs explain that execution is waiting for an Agent worker", () => 
   );
 
   assert.match(JSON.stringify(items), /等待执行器领取/);
+});
+
+test("cancelled runs remain persisted but are not restored into the message stream", () => {
+  assert.equal(shouldDisplayWorkspaceRun("CANCELLED"), false);
+  assert.equal(shouldDisplayWorkspaceRun("RUNNING"), true);
+  assert.equal(shouldDisplayWorkspaceRun("FAILED"), true);
+  assert.equal(shouldDisplayWorkspaceRun("COMMITTED"), true);
 });

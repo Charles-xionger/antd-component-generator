@@ -22,6 +22,10 @@ export type WorkspaceTurnItem =
 
 const terminalStatuses = new Set(["NEEDS_INPUT", "NO_PROGRESS", "CANCELLED", "FAILED", "COMMITTED"]);
 
+export function shouldDisplayWorkspaceRun(status: string): boolean {
+  return status !== "CANCELLED";
+}
+
 export function workspaceTurnHeading(status: string): string {
   const headings: Record<string, string> = {
     QUEUED: "等待开始",
