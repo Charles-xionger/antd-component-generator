@@ -5,7 +5,7 @@ export class WorkspacePathError extends Error {
 const MAX_PATH_BYTES = 512;
 
 export function normalizeWorkspacePath(value: string): string {
-  if (typeof value !== "string" || !value || Buffer.byteLength(value, "utf8") > MAX_PATH_BYTES) {
+  if (typeof value !== "string" || !value || !value.isWellFormed() || Buffer.byteLength(value, "utf8") > MAX_PATH_BYTES) {
     throw new WorkspacePathError("Invalid workspace path length");
   }
   if (/[%\\\u0000-\u001f\u007f]/.test(value) || value.startsWith("/") || /^[a-z]:/i.test(value)) {

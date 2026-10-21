@@ -126,7 +126,7 @@ async function writeDraftFileInternal(input: {
 }) {
   const path = normalizeWorkspacePath(input.path);
   if (!input.toolCallId || input.toolCallId.length > 128) throw new WorkspaceError("INVALID_TOOL_CALL", "Invalid tool call ID");
-  if (typeof input.content !== "string" || Buffer.byteLength(input.content, "utf8") > MAX_FILE_BYTES || input.content.includes("\0")) {
+  if (typeof input.content !== "string" || !input.content.isWellFormed() || Buffer.byteLength(input.content, "utf8") > MAX_FILE_BYTES || input.content.includes("\0")) {
     throw new WorkspaceError("INVALID_CONTENT", "File content is invalid or too large");
   }
   if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 0) throw new WorkspaceError("INVALID_REVISION", "Invalid expected revision");

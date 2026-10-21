@@ -77,6 +77,15 @@ dbTest("creates an empty draft and persists idempotent CAS writes", async () => 
   assert.equal(changes[0].beforeSha256, null);
   assert.equal(changes[0].afterSha256, first.sha256);
   await assert.rejects(
+    writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "invalid-encoding", expectedRevision: 1, path: "frontend/invalid.tsx", content: "\uD800" }),
+    { code: "INVALID_CONTENT" },
+  );
+  await assert.rejects(
+    writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "too-large", expectedRevision: 1, path: "frontend/large.tsx", content: "x".repeat(1024 * 1024 + 1) }),
+    { code: "INVALID_CONTENT" },
+  );
+  assert.equal((await prisma.draftWorkspace.findUniqueOrThrow({ where: { id: draft.id } })).revision, 1);
+  await assert.rejects(
     writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "call-2", expectedRevision: 0, path: "frontend/App.tsx", content: "changed" }),
     { code: "REVISION_CONFLICT" },
   );
