@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { after, before, test } from "node:test";
 import prisma from "@/lib/database/prisma";
 import {
@@ -12,6 +14,7 @@ import {
   patchDraftFile,
   deleteDraftFile,
 } from "./service";
+import { materializeDraftRevision } from "./projection";
 
 const dbTest = process.env.DATABASE_URL ? test : test.skip;
 const userId = randomUUID();
@@ -135,4 +138,16 @@ dbTest("patch and delete are CAS protected, idempotent, and retain history", asy
   assert.equal(await prisma.draftFileChange.count({ where: { workspaceId: draft.id } }), 3);
   assert.equal(await prisma.draftWriteReceipt.count({ where: { workspaceId: draft.id } }), 3);
   assert.equal((await prisma.draftWorkspace.findUniqueOrThrow({ where: { id: draft.id } })).revision, 3);
+});
+
+dbTest("reconstructs an older workspace revision after later writes", async () => {
+  const draft = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  await writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "projection-1", expectedRevision: 0, path: "frontend/App.tsx", content: "old" });
+  await writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "projection-2", expectedRevision: 1, path: "frontend/App.tsx", content: "new" });
+  const projection = await materializeDraftRevision({ workspaceId: draft.id, userId, revision: 1 });
+  try {
+    assert.equal(await readFile(path.join(projection.directory, "frontend/App.tsx"), "utf8"), "old");
+  } finally {
+    await projection.dispose();
+  }
 });
