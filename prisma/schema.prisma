@@ -209,6 +209,7 @@ model DraftWorkspace {
   fileRevisions         DraftFileRevision[]
   writeReceipts         DraftWriteReceipt[]
   fileChanges           DraftFileChange[]
+  validationRuns        DraftValidationRun[]
 
   @@index([projectId, createdAt])
   @@schema("platform")
@@ -264,6 +265,21 @@ model DraftFileChange {
 
   @@id([workspaceId, revision])
   @@unique([workspaceId, toolCallId])
+  @@schema("platform")
+}
+
+model DraftValidationRun {
+  id          String   @id @default(uuid())
+  workspaceId String
+  revision    Int
+  runtimeType RuntimeType
+  status      String
+  checks      Json
+  diagnostics Json
+  createdAt   DateTime @default(now())
+  workspace   DraftWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, revision, createdAt])
   @@schema("platform")
 }
 

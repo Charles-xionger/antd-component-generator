@@ -15,6 +15,7 @@ import {
   deleteDraftFile,
 } from "./service";
 import { materializeDraftRevision } from "./projection";
+import { inspectWorkspaceDiagnostics, validateAndRecordWorkspaceRevision } from "./validation";
 
 const dbTest = process.env.DATABASE_URL ? test : test.skip;
 const userId = randomUUID();
@@ -150,4 +151,16 @@ dbTest("reconstructs an older workspace revision after later writes", async () =
   } finally {
     await projection.dispose();
   }
+});
+
+dbTest("persists validation against its source revision and keeps it readable after a later edit", async () => {
+  const draft = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  await writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "validate-1", expectedRevision: 0, path: "frontend/App.tsx", content: "export default function App() { return <div>Hello</div>; }" });
+  const result = await validateAndRecordWorkspaceRevision({ workspaceId: draft.id, userId, revision: 1, runtimeType: "STATIC" });
+  assert.equal(result.status, "PASSED");
+  await writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "validate-2", expectedRevision: 1, path: "frontend/App.tsx", content: "broken" });
+  const recorded = await inspectWorkspaceDiagnostics({ workspaceId: draft.id, userId, revision: 1 });
+  assert.equal(recorded?.id, result.validationRunId);
+  assert.equal(recorded?.revision, 1);
+  await assert.rejects(inspectWorkspaceDiagnostics({ workspaceId: draft.id, userId: randomUUID(), revision: 1 }), { code: "NOT_FOUND" });
 });

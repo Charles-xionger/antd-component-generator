@@ -1,4 +1,5 @@
 import type { AppBlueprint } from "@/lib/app-contracts";
+import prisma from "@/lib/database/prisma";
 import { buildWorkspaceFrontend } from "./frontend-build";
 import { compileBackendGo } from "./go-check";
 import { typecheckFrontend } from "./typecheck";
@@ -43,4 +44,26 @@ export async function validateWorkspaceRevision(input: { workspaceId: string; us
   const files = await Promise.all(listed.map(async (file) => readDraftFile({ ...input, path: file.path })));
   const result = await validateWorkspaceFiles(files, input.runtimeType, input.blueprint);
   return { workspaceId: input.workspaceId, revision: input.revision, ...result };
+}
+
+export async function validateAndRecordWorkspaceRevision(input: { workspaceId: string; userId: string; revision: number; runtimeType: "STATIC" | "GO"; blueprint?: AppBlueprint }) {
+  const result = await validateWorkspaceRevision(input);
+  const record = await prisma.draftValidationRun.create({
+    data: {
+      workspaceId: input.workspaceId, revision: input.revision, runtimeType: input.runtimeType,
+      status: result.diagnostics.length ? "FAILED" : "PASSED",
+      checks: JSON.parse(JSON.stringify(result.checks)),
+      diagnostics: JSON.parse(JSON.stringify(result.diagnostics)),
+    },
+  });
+  return { ...result, validationRunId: record.id, status: record.status };
+}
+
+export async function inspectWorkspaceDiagnostics(input: { workspaceId: string; userId: string; revision: number }) {
+  // Ownership is checked by the same file service used for validation tools.
+  await listDraftFiles(input);
+  return prisma.draftValidationRun.findFirst({
+    where: { workspaceId: input.workspaceId, revision: input.revision },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+  });
 }
