@@ -102,14 +102,15 @@ export function createWorkspaceApi(deps: { authenticate: Auth }) {
       return withAuth(async (userId) => {
         const query = new URL(request.url).searchParams;
         const revisionValue = query.get("revision");
-        const revision = revisionValue === null ? undefined : Number(revisionValue);
+        const workspace = await ownedWorkspace(workspaceId, userId);
+        const revision = revisionValue === null ? workspace.revision : Number(revisionValue);
         const path = query.get("path");
         if (path !== null) {
           const file = await readDraftFile({ workspaceId, userId, path, revision });
           return Response.json({ file });
         }
         const files = await listDraftFiles({ workspaceId, userId, revision });
-        return Response.json({ files, revision: revision ?? (await ownedWorkspace(workspaceId, userId)).revision });
+        return Response.json({ files, revision });
       });
     },
     getRun(workspaceId: string, runId: string) {

@@ -50,6 +50,10 @@
 | BOT-1/2/3/4/5/7 | 实际 Next 页面和隔离 PostgreSQL 走查通过；夹具提供重复启动/清理方式。19 张真实页面截图已归档，逐项映射见 [验收截图索引](assets/workspace-agent/README.md)。BOT-3 的暂停→刷新→恢复，以及 BOT-5 的同项目占用/不同项目并行现均有独立画面。 |
 | BOT-6 | [Go 验证中、成功、失败截图](assets/workspace-agent/README.md)已归档；中间态经数据库证实为真实 `FULLSTACK_PREVIEW` `QUEUED` Job，成功/失败来自另一隔离 E2E，不冒充同一 Job 时间线。静态 Sandbox 页面状态已走查；Go 预览和发布容器的前端/API 实测可用，隔离 Traefik 实测 HTTPS Host 路由。外部 DNS/可信证书仍需环境确认。 |
 
+### 最后审查补充：文件读取快照一致性
+
+审查发现，未指定修订号的文件列表原先可能在 Agent 写入期间读取旧清单，却在 HTTP 响应中标记较新的修订号。现已让 API 先固定逻辑修订，并让列表与单文件读取均从不可变文件修订记录还原，避免混读可变当前行。补充了服务及 API 回归断言；使用新建的隔离 PostgreSQL 实例重跑 Workspace/Agent/路由测试 61/61、Next 构建、真实 HTTP E2E，全部通过；`pnpm lint` 为 0 错误、7 个既有 warning。测试容器已清理。
+
 ## 用户 Review 与目标环境待办
 
 ### 分支集成门槛

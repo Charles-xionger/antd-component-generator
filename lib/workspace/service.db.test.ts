@@ -168,6 +168,10 @@ dbTest("reconstructs an older workspace revision after later writes", async () =
   const draft = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
   await writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "projection-1", expectedRevision: 0, path: "frontend/App.tsx", content: "old" });
   await writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "projection-2", expectedRevision: 1, path: "frontend/App.tsx", content: "new" });
+  const oldFiles = await listDraftFiles({ workspaceId: draft.id, userId, revision: 1 });
+  assert.deepEqual(oldFiles.map((file) => [file.path, file.revision]), [["frontend/App.tsx", 1]]);
+  assert.equal(oldFiles[0].sha256, (await readDraftFile({ workspaceId: draft.id, userId, path: "frontend/App.tsx", revision: 1 })).sha256);
+  assert.equal((await readDraftFile({ workspaceId: draft.id, userId, path: "frontend/App.tsx" })).content, "new");
   const projection = await materializeDraftRevision({ workspaceId: draft.id, userId, revision: 1 });
   try {
     assert.equal(await readFile(path.join(projection.directory, "frontend/App.tsx"), "utf8"), "old");

@@ -87,14 +87,17 @@ export async function listDraftFiles(input: { workspaceId: string; userId: strin
   const workspace = await ownedWorkspace(input.workspaceId, input.userId);
   const revision = input.revision ?? workspace.revision;
   if (!Number.isInteger(revision) || revision < 0 || revision > workspace.revision) throw new WorkspaceError("INVALID_REVISION", "Invalid workspace revision");
-  if (revision === workspace.revision) {
-    return prisma.draftFile.findMany({ where: { workspaceId: workspace.id }, select: { path: true, sha256: true, revision: true }, orderBy: { path: "asc" } });
-  }
-  const history = await prisma.draftFileRevision.findMany({ where: { workspaceId: workspace.id, revision: { lte: revision } }, orderBy: [{ revision: "asc" }, { path: "asc" }] });
+  // A current-file read could race with the next write after we captured the
+  // workspace revision. Immutable revision rows keep this snapshot coherent.
+  const history = await prisma.draftFileRevision.findMany({
+    where: { workspaceId: workspace.id, revision: { lte: revision } },
+    select: { path: true, sha256: true, revision: true },
+    orderBy: [{ revision: "asc" }, { path: "asc" }],
+  });
   const files = new Map<string, { path: string; sha256: string; revision: number }>();
   for (const row of history) {
-    if (row.content === null) files.delete(row.path);
-    else files.set(row.path, { path: row.path, sha256: row.sha256!, revision: row.revision });
+    if (row.sha256 === null) files.delete(row.path);
+    else files.set(row.path, { path: row.path, sha256: row.sha256, revision: row.revision });
   }
   return [...files.values()].sort((a, b) => a.path.localeCompare(b.path));
 }
@@ -104,11 +107,8 @@ export async function readDraftFile(input: { workspaceId: string; userId: string
   const workspace = await ownedWorkspace(input.workspaceId, input.userId);
   const revision = input.revision ?? workspace.revision;
   if (!Number.isInteger(revision) || revision < 0 || revision > workspace.revision) throw new WorkspaceError("INVALID_REVISION", "Invalid workspace revision");
-  if (revision === workspace.revision) {
-    const file = await prisma.draftFile.findUnique({ where: { workspaceId_path: { workspaceId: workspace.id, path } } });
-    if (!file) throw new WorkspaceError("FILE_NOT_FOUND", "File not found");
-    return file;
-  }
+  // Always read the immutable history: a concurrent write may advance the
+  // mutable DraftFile row between reading workspace.revision and this query.
   const file = await prisma.draftFileRevision.findFirst({ where: { workspaceId: workspace.id, path, revision: { lte: revision } }, orderBy: { revision: "desc" } });
   if (!file || file.content === null || file.sha256 === null) throw new WorkspaceError("FILE_NOT_FOUND", "File not found");
   return { path: file.path, content: file.content, sha256: file.sha256, revision: file.revision };

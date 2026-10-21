@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import prisma from "@/lib/database/prisma";
 import { executeAgentRun } from "@/lib/workspace/agent-run";
+import { writeDraftFile } from "@/lib/workspace/service";
 import { createWorkspaceApi } from "./handlers";
 
 const dbTest = process.env.DATABASE_URL ? test : test.skip;
@@ -55,7 +56,16 @@ dbTest("authenticated API queues a run, exposes cursor events and files, and rej
   const status = await api.getRun(workspaceId, runId);
   assert.equal((await status.json()).run.status, "NEEDS_INPUT");
   const files = await api.getFiles(new Request(`http://localhost/api/workspaces/${workspaceId}/files`), workspaceId);
-  assert.deepEqual((await files.json()).files.map((file: { path: string }) => file.path), ["frontend/App.tsx"]);
+  const firstSnapshot = await files.json();
+  assert.equal(firstSnapshot.revision, 1);
+  assert.deepEqual(firstSnapshot.files.map((file: { path: string }) => file.path), ["frontend/App.tsx"]);
+  await writeDraftFile({ workspaceId, userId, toolCallId: "api-newer-revision", expectedRevision: 1, path: "frontend/Other.tsx", content: "export default 1" });
+  const oldSnapshot = await api.getFiles(new Request(`http://localhost/api/workspaces/${workspaceId}/files?revision=1`), workspaceId);
+  assert.equal((await oldSnapshot.json()).files.length, 1);
+  const currentSnapshot = await api.getFiles(new Request(`http://localhost/api/workspaces/${workspaceId}/files`), workspaceId);
+  const currentData = await currentSnapshot.json();
+  assert.equal(currentData.revision, 2);
+  assert.deepEqual(currentData.files.map((entry: { path: string }) => entry.path), ["frontend/App.tsx", "frontend/Other.tsx"]);
   const file = await api.getFiles(new Request(`http://localhost/api/workspaces/${workspaceId}/files?path=frontend%2FApp.tsx`), workspaceId);
   assert.match((await file.json()).file.content, /export default/);
   const firstPage = await api.getEvents(new Request(`http://localhost/api/workspaces/${workspaceId}/runs/${runId}/events?after=0&limit=2`), workspaceId, runId);
