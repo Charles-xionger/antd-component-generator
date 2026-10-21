@@ -1,16 +1,24 @@
 import { createHash } from "node:crypto";
 import prisma from "@/lib/database/prisma";
+import { appendAgentEvent } from "./events";
+import { WorkspaceError } from "./errors";
 import { normalizeWorkspacePath } from "./path";
+
+export { WorkspaceError } from "./errors";
 
 const MAX_FILE_BYTES = 1024 * 1024;
 
-export class WorkspaceError extends Error {
-  constructor(readonly code: string, message: string) {
-    super(message);
-  }
-}
-
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+type AgentLease = { runId: string; leaseToken: string };
+
+async function fenceAgentLease(tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0], workspaceId: string, agentLease?: AgentLease) {
+  if (!agentLease) return;
+  const fenced = await tx.agentRun.updateMany({
+    where: { id: agentLease.runId, workspaceId, status: "RUNNING", leaseToken: agentLease.leaseToken, leaseUntil: { gt: new Date() } },
+    data: { leaseUntil: new Date(Date.now() + 120_000) },
+  });
+  if (fenced.count !== 1) throw new WorkspaceError("RUN_LEASE_LOST", "Agent run lease was lost before file write");
+}
 
 async function ownedWorkspace(workspaceId: string, userId: string) {
   const workspace = await prisma.draftWorkspace.findFirst({
@@ -114,6 +122,7 @@ async function writeDraftFileInternal(input: {
   path: string;
   content: string;
   operation: "write" | "patch";
+  agentLease?: AgentLease;
 }) {
   const path = normalizeWorkspacePath(input.path);
   if (!input.toolCallId || input.toolCallId.length > 128) throw new WorkspaceError("INVALID_TOOL_CALL", "Invalid tool call ID");
@@ -131,6 +140,7 @@ async function writeDraftFileInternal(input: {
       if (receipt.inputHash !== inputHash) throw new WorkspaceError("TOOL_CALL_CONFLICT", "Tool call ID reused with different arguments");
       return { revision: receipt.revision, path: receipt.path, sha256: receipt.sha256, repeated: true };
     }
+    await fenceAgentLease(tx, input.workspaceId, input.agentLease);
     const updated = await tx.draftWorkspace.updateMany({
       where: { id: input.workspaceId, revision: input.expectedRevision, status: "ACTIVE" },
       data: { revision: { increment: 1 } },
@@ -151,6 +161,7 @@ async function writeDraftFileInternal(input: {
     await tx.draftFileChange.create({
       data: { workspaceId: input.workspaceId, revision, toolCallId: input.toolCallId, path, beforeSha256: before?.sha256, afterSha256: sha256 },
     });
+    if (input.agentLease) await appendAgentEvent(tx, { runId: input.agentLease.runId, type: "file.changed", itemId: input.toolCallId, toolCallId: input.toolCallId, payload: { workspaceId: input.workspaceId, path, beforeRevision: input.expectedRevision, revision, beforeSha256: before?.sha256 ?? null, afterSha256: sha256 } });
     return { revision, path, sha256, repeated: false };
   });
 
@@ -174,6 +185,7 @@ export function writeDraftFile(input: {
   expectedRevision: number;
   path: string;
   content: string;
+  agentLease?: AgentLease;
 }) {
   return writeDraftFileInternal({ ...input, operation: "write" });
 }
@@ -186,6 +198,7 @@ export async function patchDraftFile(input: {
   path: string;
   oldText: string;
   newText: string;
+  agentLease?: AgentLease;
 }) {
   if (!input.oldText || typeof input.newText !== "string") throw new WorkspaceError("INVALID_PATCH", "Patch requires a non-empty old text and replacement text");
   const file = await readDraftFile({ workspaceId: input.workspaceId, userId: input.userId, path: input.path, revision: input.expectedRevision });
@@ -203,6 +216,7 @@ export async function deleteDraftFile(input: {
   toolCallId: string;
   expectedRevision: number;
   path: string;
+  agentLease?: AgentLease;
 }) {
   const path = normalizeWorkspacePath(input.path);
   if (!input.toolCallId || input.toolCallId.length > 128) throw new WorkspaceError("INVALID_TOOL_CALL", "Invalid tool call ID");
@@ -217,6 +231,7 @@ export async function deleteDraftFile(input: {
         if (receipt.inputHash !== inputHash) throw new WorkspaceError("TOOL_CALL_CONFLICT", "Tool call ID reused with different arguments");
         return { revision: receipt.revision, path: receipt.path, repeated: true };
       }
+      await fenceAgentLease(tx, input.workspaceId, input.agentLease);
       const updated = await tx.draftWorkspace.updateMany({
         where: { id: input.workspaceId, revision: input.expectedRevision, status: "ACTIVE" },
         data: { revision: { increment: 1 } },
@@ -229,6 +244,7 @@ export async function deleteDraftFile(input: {
       await tx.draftFileRevision.create({ data: { workspaceId: input.workspaceId, path, revision, content: null, sha256: null } });
       await tx.draftWriteReceipt.create({ data: { workspaceId: input.workspaceId, toolCallId: input.toolCallId, inputHash, path, revision, sha256: "" } });
       await tx.draftFileChange.create({ data: { workspaceId: input.workspaceId, revision, toolCallId: input.toolCallId, path, beforeSha256: before.sha256, afterSha256: null } });
+      if (input.agentLease) await appendAgentEvent(tx, { runId: input.agentLease.runId, type: "file.changed", itemId: input.toolCallId, toolCallId: input.toolCallId, payload: { workspaceId: input.workspaceId, path, beforeRevision: input.expectedRevision, revision, beforeSha256: before.sha256, afterSha256: null } });
       return { revision, path, repeated: false };
     });
   } catch (error) {

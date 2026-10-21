@@ -7,6 +7,7 @@ import { compileBackendGo } from "./go-check";
 import { typecheckFrontend } from "./typecheck";
 import { validateJsonFile, validateWorkspaceFileContract, type WorkspaceDiagnostic } from "./diagnostics";
 import { listDraftFiles, readDraftFile } from "./service";
+import { validationContextDigest } from "./validation-context";
 
 type WorkspaceFile = { path: string; content: string };
 type CheckName = "contract" | "typescript" | "frontend_build" | "go_build";
@@ -61,6 +62,7 @@ export async function validateAndRecordWorkspaceRevision(input: { workspaceId: s
   const record = await prisma.draftValidationRun.create({
     data: {
       workspaceId: input.workspaceId, revision: input.revision, runtimeType: input.runtimeType,
+      contextDigest: validationContextDigest(input.runtimeType, input.blueprint),
       status: result.diagnostics.length ? "FAILED" : "PASSED",
       checks: JSON.parse(JSON.stringify(result.checks)),
       diagnostics: JSON.parse(JSON.stringify(result.diagnostics)),

@@ -210,8 +210,89 @@ model DraftWorkspace {
   writeReceipts         DraftWriteReceipt[]
   fileChanges           DraftFileChange[]
   validationRuns        DraftValidationRun[]
+  agentRuns             AgentRun[]
 
   @@index([projectId, createdAt])
+  @@schema("platform")
+}
+
+enum AgentRunStatus {
+  QUEUED
+  RUNNING
+  READY_TO_VALIDATE
+  NEEDS_INPUT
+  NO_PROGRESS
+  CANCELLED
+  FAILED
+  COMMITTED
+
+  @@schema("platform")
+}
+
+enum AgentStepStatus {
+  DECIDED
+  COMPLETED
+
+  @@schema("platform")
+}
+
+model AgentRun {
+  id           String         @id @default(uuid())
+  workspaceId  String
+  requestId    String         @unique
+  sessionId    String
+  turnId       String
+  nextEventSeq Int            @default(1)
+  goal         String         @db.Text
+  runtimeType  RuntimeType
+  requirementSpec Json?
+  appBlueprint Json?
+  status       AgentRunStatus @default(QUEUED)
+  nextStep     Int            @default(0)
+  maxSteps     Int            @default(30)
+  deadlineAt   DateTime
+  leaseToken   String?        @unique
+  leaseUntil   DateTime?
+  summary      String?        @db.Text
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  workspace    DraftWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  steps        AgentRunStep[]
+  events       AgentEvent[]
+
+  @@index([workspaceId, createdAt])
+  @@index([status, leaseUntil])
+  @@schema("platform")
+}
+
+model AgentEvent {
+  id         String   @id @default(uuid())
+  runId      String
+  sequence   Int
+  type       String
+  itemId     String
+  toolCallId String?
+  payload    Json
+  createdAt  DateTime @default(now())
+  run        AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, sequence])
+  @@unique([runId, type, itemId])
+  @@index([runId, createdAt])
+  @@schema("platform")
+}
+
+model AgentRunStep {
+  runId       String
+  number      Int
+  status      AgentStepStatus @default(DECIDED)
+  decision    Json
+  result      Json?
+  createdAt   DateTime        @default(now())
+  completedAt DateTime?
+  run         AgentRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@id([runId, number])
   @@schema("platform")
 }
 
@@ -273,6 +354,7 @@ model DraftValidationRun {
   workspaceId String
   revision    Int
   runtimeType RuntimeType
+  contextDigest String?
   status      String
   checks      Json
   diagnostics Json
