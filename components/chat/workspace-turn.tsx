@@ -119,9 +119,8 @@ function elapsedLabel(createdAt?: string, updatedAt?: string, active = false, no
 }
 
 export function WorkspaceTurn({ run, events, error, busy, onCancel, onOpenFile, availableFiles }: WorkspaceTurnProps) {
-  const [now, setNow] = useState<number | null>(null);
+  const [now, setNow] = useState(() => new Date(run.createdAt || run.updatedAt || 0).getTime());
   useEffect(() => {
-    setNow(Date.now());
     if (!busy) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
@@ -132,7 +131,7 @@ export function WorkspaceTurn({ run, events, error, busy, onCancel, onOpenFile, 
   return (
     <section className="workspace-turn" data-status={run.status} aria-label="工作区任务">
       <div className="workspace-turn-header">
-        <div><span className="workspace-turn-status-dot" aria-hidden="true" /><div><strong>{workspaceTurnHeading(run.status)}</strong><span>{elapsedLabel(run.createdAt, run.updatedAt, busy, now ?? new Date(run.createdAt || run.updatedAt || 0).getTime())} · 已完成 {run.nextStep} 个步骤</span></div></div>
+        <div><span className="workspace-turn-status-dot" aria-hidden="true" /><div><strong>{workspaceTurnHeading(run.status)}</strong><span>{elapsedLabel(run.createdAt, run.updatedAt, busy, now)} · 已完成 {run.nextStep} 个步骤</span></div></div>
         {busy && <button type="button" className="workspace-turn-cancel" onClick={onCancel}>停止</button>}
       </div>
       <div className="workspace-turn-items">
