@@ -113,4 +113,36 @@ func Operations(_ *pgxpool.Pool, _ *slog.Logger) map[string]Operation {
   const events = await listAgentEvents({ runId: run.id, userId, limit: 100 });
   assert.equal(events.events.filter((event) => event.type === "diagnostic.created").length, 1);
   assert.equal(events.events.at(-1)?.type, "artifact.committed");
+
+  const modifiedWorkspace = await createDraftWorkspace({
+    projectId, userId, taskId: randomUUID(), baseArtifactVersionId: result.commit!.version.id,
+  });
+  const modifiedRun = await createAgentRun({
+    workspaceId: modifiedWorkspace.id, userId, requestId: randomUUID(), goal: "Update the item response and page", runtimeType: "GO", appBlueprint: blueprint,
+  });
+  const modificationDecisions = [
+    { kind: "tool", name: "read_file", arguments: { path: "backend/operations.go" } },
+    { kind: "tool", name: "patch_file", arguments: { path: "backend/operations.go", oldText: '"ok": true', newText: '"ok": true, "label": "changed"' } },
+    { kind: "tool", name: "read_file", arguments: { path: "frontend/App.tsx" } },
+    { kind: "tool", name: "patch_file", arguments: { path: "frontend/App.tsx", oldText: "Ready", newText: "Updated" } },
+    { kind: "complete", summary: "Go operation and page updated" },
+  ];
+  const modified = await executeWorkspaceTask({
+    runId: modifiedRun.id, userId,
+    model: { decide: async ({ step }: { step: number }) => modificationDecisions[step] },
+  });
+  assert.equal(modified.run.status, "COMMITTED");
+  assert.equal(modified.commit?.version.versionNumber, result.commit!.version.versionNumber + 1);
+  assert.deepEqual((await prisma.draftFileChange.findMany({ where: { workspaceId: modifiedWorkspace.id }, orderBy: { revision: "asc" } })).map((change) => change.path), [
+    "backend/operations.go", "frontend/App.tsx",
+  ]);
+  const originalFiles = new Map(result.commit!.version.files.map((file) => [file.path, file.content]));
+  const modifiedFiles = new Map(modified.commit!.version.files.map((file) => [file.path, file.content]));
+  assert.deepEqual([...modifiedFiles.keys()].sort(), [...originalFiles.keys()].sort());
+  for (const path of ["migrations/001_init.sql", "acceptance/seed.json", "acceptance/scenarios.json"]) {
+    assert.equal(modifiedFiles.get(path), originalFiles.get(path), `${path} must survive an unrelated edit`);
+  }
+  assert.match(modifiedFiles.get("backend/operations.go") ?? "", /"label": "changed"/);
+  assert.match(modifiedFiles.get("frontend/App.tsx") ?? "", /Updated/);
+  assert.ok(modified.commit?.previewJob, "A changed Go version must enqueue its own Preview");
 });

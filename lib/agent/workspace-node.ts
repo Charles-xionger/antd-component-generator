@@ -22,9 +22,12 @@ export async function workspaceQueue(state: AgentState, config?: QueueConfig): P
   const base = state.baseArtifactVersionId
     ? await prisma.artifactVersion.findFirst({ where: { id: state.baseArtifactVersionId, artifact: { projectId } }, select: { id: true, runtimeVersion: true, requirementSpec: true, appBlueprint: true } })
     : null;
-  const active = await prisma.draftWorkspace.findFirst({ where: { projectId, status: "ACTIVE" }, select: { id: true, taskId: true, baseArtifactVersionId: true, agentRuns: { orderBy: { createdAt: "desc" }, take: 1, select: { goal: true, status: true, runtimeType: true, requirementSpec: true, appBlueprint: true } } } });
+  const active = await prisma.draftWorkspace.findFirst({ where: { projectId, status: "ACTIVE" }, select: { id: true, taskId: true, baseArtifactVersionId: true, agentRuns: { orderBy: { createdAt: "desc" }, take: 1, select: { requestId: true, goal: true, status: true, runtimeType: true, requirementSpec: true, appBlueprint: true } } } });
   const workspace = active ?? await createDraftWorkspace({ projectId, userId, taskId: requestId, baseArtifactVersionId: base?.id });
   const previousRun = active?.agentRuns[0];
+  if (previousRun && ["QUEUED", "RUNNING", "READY_TO_VALIDATE"].includes(previousRun.status) && previousRun.requestId !== requestId) {
+    throw new WorkspaceError("WORKSPACE_BUSY", "当前项目已有进行中的工作区任务，请等待完成或取消后再试");
+  }
   const isExistingApp = Boolean(base && ["MODIFY_APP", "FIX_APP"].includes(state.intentResult?.intent || ""));
   const blueprint = previousRun?.appBlueprint ?? (isExistingApp ? base?.appBlueprint ?? undefined : state.appBlueprint ?? base?.appBlueprint ?? undefined);
   const requirement = previousRun?.requirementSpec ?? (isExistingApp ? base?.requirementSpec ?? undefined : state.requirementSpec ?? base?.requirementSpec ?? undefined);

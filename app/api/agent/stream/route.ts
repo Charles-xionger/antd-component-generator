@@ -16,6 +16,7 @@ import prisma from "@/lib/database/prisma";
 import { auth } from "@/lib/auth";
 import { generateThreadTitle } from "@/lib/agent/models";
 import { getOwnedProject, getOwnedThread } from "@/lib/projects/ownership";
+import { WorkspaceError } from "@/lib/workspace/errors";
 
 const NODE_STAGE: Record<string, string> = {
   intentRouter: "intent",
@@ -623,6 +624,7 @@ export async function POST(request: NextRequest) {
           const errorChunk = encoder.encode(
             `data: ${JSON.stringify({
               type: "error",
+              code: error instanceof WorkspaceError ? error.code : undefined,
               error: error instanceof Error ? error.message : "Unknown error",
               details: error instanceof Error ? error.stack : undefined,
             })}\n\n`,

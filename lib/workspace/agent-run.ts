@@ -93,7 +93,8 @@ export async function createAgentRun(input: { workspaceId: string; userId: strin
     if (typeof error === "object" && error && "code" in error && error.code === "P2002") {
       const raced = await prisma.agentRun.findUnique({ where: { requestId: input.requestId } });
       if (raced?.workspaceId === workspace.id && raced.goal === input.goal && raced.runtimeType === input.runtimeType && raced.modelName === (input.modelName ?? "qwen3.7-flash-2026-07-15")) return raced;
-      throw new WorkspaceError("REQUEST_CONFLICT", "Request ID already used or workspace has an active run");
+      if (raced) throw new WorkspaceError("REQUEST_CONFLICT", "Request ID already used");
+      throw new WorkspaceError("WORKSPACE_BUSY", "当前项目已有进行中的工作区任务，请等待完成或取消后再试");
     }
     throw error;
   }

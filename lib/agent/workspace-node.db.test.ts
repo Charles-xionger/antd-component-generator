@@ -33,6 +33,13 @@ dbTest("generation graph queues a workspace run without code in assistant messag
   assert.equal((await prisma.draftWorkspace.findMany({ where: { projectId } })).length, 1);
   assert.equal((await prisma.agentRun.findMany({ where: { requestId } })).length, 1);
   assert.ok(!String(first.messages?.[0]?.content).includes("<boltArtifact"));
+  await assert.rejects(
+    workspaceQueue({ messages: [new HumanMessage("A different request in another tab")] } as AgentState, {
+      configurable: { ...config.configurable, generation_request_id: randomUUID() },
+    }),
+    { code: "WORKSPACE_BUSY", message: "当前项目已有进行中的工作区任务，请等待完成或取消后再试" },
+  );
+  assert.equal((await prisma.agentRun.findMany({ where: { workspaceId: first.workspaceId } })).length, 1);
   await prisma.agentRun.update({ where: { id: first.workspaceRunId }, data: { status: "NEEDS_INPUT", summary: "Which color?" } });
   const continued = await workspaceQueue({ messages: [new HumanMessage("Blue")], resumePendingWorkspace: true } as AgentState, { configurable: { ...config.configurable, generation_request_id: randomUUID() } });
   assert.equal(continued.workspaceId, first.workspaceId);

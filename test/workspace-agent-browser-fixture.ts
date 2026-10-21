@@ -139,6 +139,9 @@ async function main() {
   process.env.ALIYUN_API_KEY = "workspace-browser-fixture";
   const user = await prisma.user.create({ data: { email: `${id}@workspace-browser.test`, name: "工作区验收用户" } });
   const project = await prisma.project.create({ data: { userId: user.id, name: "新项目", slug: `workspace-browser-${id}`, thread: { create: { userId: user.id, title: "新项目" } } } });
+  const secondaryProject = await prisma.project.create({ data: { userId: user.id, name: "并行项目", slug: `workspace-parallel-${id}`, thread: { create: { userId: user.id, title: "并行项目" } } } });
+  const otherUser = await prisma.user.create({ data: { email: `${id}@workspace-browser-private.test`, name: "其他用户" } });
+  const privateProject = await prisma.project.create({ data: { userId: otherUser.id, name: "无权项目", slug: `workspace-private-${id}`, thread: { create: { userId: otherUser.id, title: "无权项目" } } } });
   const cookieName = "authjs.session-token";
   const token = await encode({ token: { id: user.id, sub: user.id, name: user.name, email: user.email }, secret: authSecret, salt: cookieName, maxAge: 3600 });
   let nextOutput = "";
@@ -157,6 +160,11 @@ async function main() {
       response.end();
       return;
     }
+    if (request.url === "/__test_auth_secondary") {
+      response.writeHead(302, { "Set-Cookie": `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax`, Location: `/projects/${secondaryProject.id}` });
+      response.end();
+      return;
+    }
     const upstream = httpRequest({ hostname: "127.0.0.1", port: nextPort, path: request.url, method: request.method, headers: { ...request.headers, host: `127.0.0.1:${proxyPort}`, "x-forwarded-host": `127.0.0.1:${proxyPort}` } }, (remote) => {
       response.writeHead(remote.statusCode ?? 502, remote.headers);
       remote.pipe(response);
@@ -169,7 +177,10 @@ async function main() {
   const ticker = setInterval(() => {
     if (busy) return;
     busy = true;
-    void processPendingWorkspaceTasks({ projectId: project.id, limit: 1 }).catch((error) => console.error("Fixture worker error:", error)).finally(() => { busy = false; });
+    void Promise.all([
+      processPendingWorkspaceTasks({ projectId: project.id, limit: 1 }),
+      processPendingWorkspaceTasks({ projectId: secondaryProject.id, limit: 1 }),
+    ]).catch((error) => console.error("Fixture worker error:", error)).finally(() => { busy = false; });
   }, 1000);
   let stopping = false;
   const stop = async () => {
@@ -179,12 +190,13 @@ async function main() {
     next.kill("SIGTERM");
     await Promise.all([new Promise<void>((resolve) => proxy.close(() => resolve())), new Promise<void>((resolve) => modelServer.close(() => resolve()))]);
     await prisma.user.delete({ where: { id: user.id } });
+    await prisma.user.delete({ where: { id: otherUser.id } });
     await prisma.$disconnect();
     process.exit(0);
   };
   process.once("SIGINT", () => { void stop(); });
   process.once("SIGTERM", () => { void stop(); });
-  process.stdout.write(`BROWSER_FIXTURE_URL=${baseUrl}/__test_auth\nPROJECT_ID=${project.id}\n`);
+  process.stdout.write(`BROWSER_FIXTURE_URL=${baseUrl}/__test_auth\nSECONDARY_URL=${baseUrl}/__test_auth_secondary\nPROJECT_ID=${project.id}\nSECONDARY_PROJECT_ID=${secondaryProject.id}\nPRIVATE_PROJECT_ID=${privateProject.id}\n`);
 }
 
 void main().catch((error) => { console.error(error); process.exitCode = 1; });

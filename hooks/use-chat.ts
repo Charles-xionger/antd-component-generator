@@ -487,9 +487,7 @@ export function useChat(options: UseChatOptions = {}) {
               } else if (data.type === "workspace_queued") {
                 onWorkspaceQueuedRef.current?.(String(data.workspaceId), String(data.runId));
               } else if (data.type === "error") {
-                streamFailure = new Error(
-                  data.error || "应用生成过程中发生错误",
-                );
+                streamFailure = Object.assign(new Error(data.error || "应用生成过程中发生错误"), { code: data.code });
               }
               // 注意：移除了 data.type === "saved" 的处理
               // 现在由前端主动保存，不再依赖后端的保存信号
@@ -612,7 +610,9 @@ export function useChat(options: UseChatOptions = {}) {
 
       // 根据错误类型提供更友好的提示
       let errorMessage: string = ERROR_CONFIG.DEFAULT_MESSAGE;
-      if (error.message.includes("timeout") || error.message.includes("超时")) {
+      if ("code" in error && error.code === "WORKSPACE_BUSY") {
+        errorMessage = "当前项目已有进行中的工作区任务，请等待完成或取消后再试。";
+      } else if (error.message.includes("timeout") || error.message.includes("超时")) {
         errorMessage = ERROR_CONFIG.TIMEOUT_MESSAGE;
       } else if (
         error.message.includes("network") ||
