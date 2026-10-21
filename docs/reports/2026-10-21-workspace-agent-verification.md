@@ -52,6 +52,10 @@
 
 ## 用户 Review 与目标环境待办
 
+### 分支集成门槛
+
+`feature/workspace-agent` 的直接开发基线是 `codex/data-gateway-v2`（`d25860c`），不是 `main`（`ed5af46`）。P0 自身相对该基线增加 42 个提交、110 个变动文件；直接把该 feature 合入当前 `main` 还会带入基线上的项目发布、Go 运行时、Data Gateway 与实时发布等前置提交。当前仓库没有 `develop`、`stage`、`production` 分支，因此不能套用工作流默认的分支命令，也不能把 `main` 擅自当作其中任一环境。用户 Review 通过后，须先确定这些前置提交的集成状态与实际环境分支映射，再决定合并及部署路径。
+
 1. [截图索引](assets/workspace-agent/README.md)已覆盖 BOT-1 至 BOT-7 与暗色模式的关键状态。请用户按本报告审查截图、交互与验收标准；截图覆盖不等于用户 Review 通过。
 2. 用户 Review 后，在获准的目标环境核对 Go Preview 与发布返回的 HTTPS 地址，包括真实 DNS、可信证书与公网入口。隔离 Docker E2E 已通过 Traefik 的 HTTPS Host 路由验证页面/JS，但使用自签名测试证书和容器内 Host 解析，不能替代环境验收。测试还发现 API 与 Worker 原有默认域名不一致；现已共用 `getPublishedAppsDomain()`，部署时仍应明确配置相同的 `PUBLISHED_APPS_DOMAIN`。
 
