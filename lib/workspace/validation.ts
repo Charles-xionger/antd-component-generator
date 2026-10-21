@@ -1,0 +1,46 @@
+import type { AppBlueprint } from "@/lib/app-contracts";
+import { buildWorkspaceFrontend } from "./frontend-build";
+import { compileBackendGo } from "./go-check";
+import { typecheckFrontend } from "./typecheck";
+import { validateJsonFile, validateWorkspaceFileContract, type WorkspaceDiagnostic } from "./diagnostics";
+import { listDraftFiles, readDraftFile } from "./service";
+
+type WorkspaceFile = { path: string; content: string };
+type CheckName = "contract" | "typescript" | "frontend_build" | "go_build";
+type Check = { name: CheckName; status: "passed" | "failed" | "skipped"; durationMs?: number };
+
+export async function validateWorkspaceFiles(files: WorkspaceFile[], runtimeType: "STATIC" | "GO", blueprint?: AppBlueprint) {
+  const checks: Check[] = ["contract", "typescript", "frontend_build", "go_build"].map((name) => ({ name: name as CheckName, status: "skipped" }));
+  const diagnostics: WorkspaceDiagnostic[] = [];
+  const run = async (name: CheckName, action: () => Promise<WorkspaceDiagnostic[]> | WorkspaceDiagnostic[]) => {
+    const check = checks.find((item) => item.name === name)!;
+    const started = Date.now();
+    try {
+      const result = await action();
+      diagnostics.push(...result);
+      check.status = result.length ? "failed" : "passed";
+    } catch (error) {
+      check.status = "failed";
+      diagnostics.push({ id: `command:${name}:infrastructure`, source: "command", severity: "error", code: "VALIDATOR_FAILED", message: error instanceof Error ? error.message.slice(0, 4096) : String(error).slice(0, 4096) });
+    }
+    check.durationMs = Date.now() - started;
+    return check.status === "passed";
+  };
+
+  const contractPassed = await run("contract", () => [
+    ...validateWorkspaceFileContract(files, runtimeType, blueprint),
+    ...files.filter((file) => file.path.endsWith(".json") && file.path !== "acceptance/scenarios.json").flatMap((file) => validateJsonFile(file.path, file.content)),
+  ]);
+  if (!contractPassed) return { checks, diagnostics };
+  if (!await run("typescript", () => typecheckFrontend(files))) return { checks, diagnostics };
+  if (!await run("frontend_build", async () => (await buildWorkspaceFrontend(files)).diagnostics)) return { checks, diagnostics };
+  if (runtimeType === "GO") await run("go_build", async () => (await compileBackendGo(files)).diagnostics);
+  return { checks, diagnostics };
+}
+
+export async function validateWorkspaceRevision(input: { workspaceId: string; userId: string; revision: number; runtimeType: "STATIC" | "GO"; blueprint?: AppBlueprint }) {
+  const listed = await listDraftFiles(input);
+  const files = await Promise.all(listed.map(async (file) => readDraftFile({ ...input, path: file.path })));
+  const result = await validateWorkspaceFiles(files, input.runtimeType, input.blueprint);
+  return { workspaceId: input.workspaceId, revision: input.revision, ...result };
+}
