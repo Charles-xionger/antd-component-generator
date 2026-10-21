@@ -4,7 +4,7 @@ import { normalizeWorkspacePath } from "./path";
 
 export type WorkspaceDiagnostic = {
   id: string;
-  source: "json" | "schema" | "migration" | "contract";
+  source: "json" | "schema" | "migration" | "contract" | "typescript" | "go" | "command";
   severity: "error";
   file?: string;
   line?: number;
@@ -14,6 +14,7 @@ export type WorkspaceDiagnostic = {
   message: string;
   expected?: string;
   actual?: string;
+  raw?: string;
 };
 
 type WorkspaceFile = { path: string; content: string };
