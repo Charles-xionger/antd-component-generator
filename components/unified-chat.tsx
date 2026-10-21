@@ -539,28 +539,28 @@ ${sandboxError}
               {!workspaceActivity.run && <GenerationStatusCard />}
 
               {workspaceActivity.run && (
-                <section className="rounded-lg border border-border bg-muted/40 p-3 text-sm" aria-label="工作区任务进度">
+                <section className="workspace-run-card rounded-lg border p-3 text-sm" data-status={workspaceActivity.run.status} aria-label="工作区任务进度">
                   <div className="flex items-center justify-between gap-2">
                     <span role="status" aria-live="polite" aria-atomic="true">工作区任务 · {workspaceRunLabel(workspaceActivity.run.status)} · 第 {workspaceActivity.run.nextStep}/{workspaceActivity.run.maxSteps} 步</span>
                     {workspaceBusy && (
                       <button className="text-destructive underline" onClick={() => { void cancelWorkspaceRun(); }}>取消</button>
                     )}
                   </div>
-                  {workspaceActivity.run.summary && <p className="mt-1 text-muted-foreground">{workspaceActivity.run.summary}</p>}
+                  {workspaceActivity.run.summary && <p className="workspace-muted mt-1">{workspaceActivity.run.summary}</p>}
                   {planSteps && (
                     <ol className="mt-2 space-y-1" aria-label="工作区计划">
                       {planSteps.map((step) => <li key={step.id}>{step.status === "completed" ? "✓" : step.status === "in_progress" ? "→" : "○"} {step.title}</li>)}
                     </ol>
                   )}
                   {workspaceActivity.error && <p role="alert" className="mt-1 text-destructive">{workspaceActivity.error}</p>}
-                  <div className="mt-2 max-h-40 space-y-1 overflow-y-auto text-xs text-muted-foreground">
+                  <div className="workspace-muted mt-2 max-h-40 space-y-1 overflow-y-auto text-xs">
                     {visibleEvents.map((event) => {
                       const diagnostic = event.type === "diagnostic.created" && event.payload.diagnostic && typeof event.payload.diagnostic === "object"
                         ? event.payload.diagnostic as { file?: string; path?: string; code?: string; raw?: string; expected?: string; actual?: string }
                         : null;
                       const file = diagnostic?.file && canvas.artifact?.files.some((entry) => entry.path === diagnostic.file) ? diagnostic.file : null;
                       return (
-                        <div key={event.sequence}>
+                        <div key={event.sequence} className={diagnostic ? "workspace-diagnostic" : undefined}>
                           {workspaceEventLabel(event)}
                           {file && <button type="button" className="ml-1 underline" onClick={() => openWorkspaceFile(file)}>打开文件</button>}
                           {diagnostic && <details className="ml-2"><summary>诊断详情</summary><pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all">{[diagnostic.code, diagnostic.path, diagnostic.expected && `预期：${diagnostic.expected}`, diagnostic.actual && `实际：${diagnostic.actual}`, diagnostic.raw?.slice(0, 4000)].filter(Boolean).join("\n")}</pre></details>}
@@ -568,7 +568,7 @@ ${sandboxError}
                       );
                     })}
                   </div>
-                  {detailEvents.length > 0 && <details className="mt-2 text-xs text-muted-foreground"><summary>工具明细（{detailEvents.length}）</summary><div className="max-h-40 space-y-1 overflow-y-auto">{detailEvents.map((event) => <div key={event.sequence}>{workspaceEventLabel(event) ?? `${event.type} · ${String(event.payload.check ?? event.payload.name ?? "")}`}{event.type === "command.output" && typeof event.payload.output === "string" && <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-all">{event.payload.output.slice(0, 4000)}</pre>}</div>)}</div></details>}
+                  {detailEvents.length > 0 && <details className="workspace-muted mt-2 text-xs"><summary>工具明细（{detailEvents.length}）</summary><div className="max-h-40 space-y-1 overflow-y-auto">{detailEvents.map((event) => <div key={event.sequence}>{workspaceEventLabel(event) ?? `${event.type} · ${String(event.payload.check ?? event.payload.name ?? "")}`}{event.type === "command.output" && typeof event.payload.output === "string" && <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-all">{event.payload.output.slice(0, 4000)}</pre>}</div>)}</div></details>}
                 </section>
               )}
 

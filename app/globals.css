@@ -216,3 +216,61 @@ input::placeholder {
     background-color: rgba(75, 85, 99, 0.7);
   }
 }
+
+/* Workspace Agent surfaces use the light/dark tokens in DESIGN.md. */
+.workspace-run-card,
+.workspace-file-panel {
+  --workspace-panel: #ffffff;
+  --workspace-inset: #f3f5f7;
+  --workspace-border: #cdd5df;
+  --workspace-text: #18202b;
+  --workspace-muted: #59677a;
+  --workspace-info: #2e7dd1;
+  --workspace-success: #16a34a;
+  --workspace-warning: #d99a24;
+  --workspace-error: #d94b57;
+  color: var(--workspace-text);
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.workspace-run-card {
+  background: var(--workspace-panel);
+  border-color: var(--workspace-border);
+  border-left: 3px solid var(--workspace-info);
+}
+
+.workspace-run-card[data-status="COMMITTED"] { border-left-color: var(--workspace-success); }
+.workspace-run-card[data-status="NEEDS_INPUT"] { border-left-color: var(--workspace-warning); }
+.workspace-run-card[data-status="FAILED"],
+.workspace-run-card[data-status="NO_PROGRESS"] { border-left-color: var(--workspace-error); }
+.workspace-run-card[data-status="CANCELLED"] { border-left-color: var(--workspace-muted); }
+.workspace-muted { color: var(--workspace-muted); }
+.workspace-diagnostic { border-left: 2px solid var(--workspace-error); padding-left: 8px; }
+
+.workspace-file-browser,
+.workspace-code-header { background: var(--workspace-inset); border-color: var(--workspace-border); }
+.workspace-code-pane { background: var(--workspace-panel); }
+.workspace-code-content { background: var(--workspace-inset); }
+.workspace-code { color: var(--workspace-text); font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; }
+.workspace-file-panel pre code { color: var(--workspace-text) !important; font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace !important; }
+
+.workspace-run-card :is(button, summary):focus-visible,
+.workspace-file-panel :is(button, summary):focus-visible {
+  outline: 2px solid #4c9aff;
+  outline-offset: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .workspace-run-card,
+  .workspace-file-panel {
+    --workspace-panel: #11161f;
+    --workspace-inset: #172033;
+    --workspace-border: #293241;
+    --workspace-text: #e8edf5;
+    --workspace-muted: #9ba8ba;
+    --workspace-info: #4c9aff;
+    --workspace-success: #22c55e;
+    --workspace-warning: #f5b942;
+    --workspace-error: #f0646e;
+  }
+}
