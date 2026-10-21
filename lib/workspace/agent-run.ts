@@ -260,7 +260,7 @@ export const resumeAgentRun = executeAgentRun;
 export async function cancelAgentRun(input: { runId: string; userId: string }) {
   const run = await ownedRun(input.runId, input.userId);
   await prisma.$transaction(async (tx) => {
-    const cancelled = await tx.agentRun.updateMany({ where: { id: run.id, status: { in: ["QUEUED", "RUNNING", "READY_TO_VALIDATE"] } }, data: { status: "CANCELLED", summary: "Cancelled by user", leaseToken: null, leaseUntil: null } });
+    const cancelled = await tx.agentRun.updateMany({ where: { id: run.id, status: { in: ["QUEUED", "RUNNING", "READY_TO_VALIDATE"] } }, data: { status: "CANCELLED", summary: "用户已取消，草稿已保留", leaseToken: null, leaseUntil: null } });
     if (cancelled.count) await appendAgentEvent(tx, { runId: run.id, type: "run.cancelled", itemId: run.id, payload: { workspaceId: run.workspaceId } });
   });
   return ownedRun(run.id, input.userId);

@@ -166,7 +166,9 @@ dbTest("cancellation fences a model response and subsequent file writes", async 
   await started;
   const claimed = await prisma.agentRun.findUniqueOrThrow({ where: { id: run.id } });
   assert.ok(claimed.leaseToken);
-  assert.equal((await cancelAgentRun({ runId: run.id, userId })).status, "CANCELLED");
+  const cancelled = await cancelAgentRun({ runId: run.id, userId });
+  assert.equal(cancelled.status, "CANCELLED");
+  assert.equal(cancelled.summary, "用户已取消，草稿已保留");
   release();
   assert.equal((await executing).status, "CANCELLED");
   await assert.rejects(writeDraftFile({ workspaceId: workspace.id, userId, toolCallId: "late", expectedRevision: 0, path: "frontend/App.tsx", content: "late", agentLease: { runId: run.id, leaseToken: claimed.leaseToken! } }), { code: "RUN_LEASE_LOST" });

@@ -50,7 +50,18 @@ function scriptedResponse(requestBody: Record<string, unknown>) {
   if (Array.isArray(requestBody.tools)) {
     const observation = JSON.parse(String(latestUser?.content ?? "{}")) as { goal?: string; step?: number };
     const modification = /按钮|blue|颜色/i.test(observation.goal ?? "");
-    if (modification) {
+    const questionFlow = /需要确认/.test(observation.goal ?? "");
+    if (/取消测试/.test(observation.goal ?? "")) {
+      tool = observation.step === 0
+        ? { name: "write_file", arguments: { path: "frontend/App.tsx", content: appFile } }
+        : { name: "complete", arguments: { summary: "取消测试任务" } };
+    } else if (questionFlow) {
+      tool = !/用户补充：/.test(observation.goal ?? "")
+        ? { name: "ask_question", arguments: { question: "整理按钮应该使用什么颜色？" } }
+        : observation.step === 0
+          ? { name: "write_file", arguments: { path: "frontend/App.tsx", content: appFile.replace('backgroundColor: "#444"', 'backgroundColor: "#2563eb"') } }
+          : { name: "complete", arguments: { summary: "已按确认的颜色生成页面" } };
+    } else if (modification) {
       tool = observation.step === 0 ? { name: "read_file", arguments: { path: "frontend/App.tsx" } }
         : observation.step === 1 ? { name: "patch_file", arguments: { path: "frontend/App.tsx", oldText: 'backgroundColor: "#444"', newText: 'backgroundColor: "#2563eb"' } }
           : { name: "complete", arguments: { summary: "按钮颜色已更新" } };
@@ -72,6 +83,12 @@ function fakeModelServer() {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+    if (Array.isArray(body.tools)) {
+      const messages = Array.isArray(body.messages) ? body.messages as Array<{ role?: string; content?: unknown }> : [];
+      const latestUser = [...messages].reverse().find((message) => message.role === "user");
+      const observation = JSON.parse(String(latestUser?.content ?? "{}")) as { goal?: string; step?: number };
+      if (/取消测试/.test(observation.goal ?? "") && observation.step === 0) await new Promise((resolve) => setTimeout(resolve, 8000));
+    }
     const result = scriptedResponse(body);
     const toolCalls = result.tool ? [{ index: 0, id: `call-${randomUUID()}`, type: "function", function: { name: result.tool.name, arguments: JSON.stringify(result.tool.arguments) } }] : undefined;
     const model = String(body.model ?? "test-model");
