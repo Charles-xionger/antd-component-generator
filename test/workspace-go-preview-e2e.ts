@@ -131,6 +131,38 @@ async function serveBrowserPreview(databaseUrl: string, user: { id: string; emai
   }
 }
 
+async function queueGoPublication(databaseUrl: string, user: { id: string; email: string | null }, projectId: string, versionId: string) {
+  const port = await freePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const authSecret = `workspace-go-publish-${suffix}`;
+  const cookieName = "authjs.session-token";
+  const token = await encode({ token: { id: user.id, sub: user.id, email: user.email }, secret: authSecret, salt: cookieName, maxAge: 3600 });
+  let nextOutput = "";
+  const next = spawn("pnpm", ["exec", "next", "start", "-p", String(port)], {
+    cwd: process.cwd(), env: { ...process.env, DATABASE_URL: databaseUrl, AUTH_SECRET: authSecret, NEXTAUTH_URL: baseUrl, GITHUB_ID: "workspace-go-publish", GITHUB_SECRET: "workspace-go-publish" }, stdio: ["ignore", "pipe", "pipe"],
+  });
+  const collect = (chunk: Buffer) => { nextOutput = `${nextOutput}${chunk.toString()}`.slice(-8000); };
+  next.stdout?.on("data", collect);
+  next.stderr?.on("data", collect);
+  try {
+    let ready = false;
+    for (let attempt = 0; attempt < 90; attempt += 1) {
+      if (next.exitCode !== null) throw new Error(`Next.js exited before publication: ${nextOutput}`);
+      try { if ((await fetch(`${baseUrl}/api/auth/session`)).status < 500) { ready = true; break; } } catch { /* startup pending */ }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    if (!ready) throw new Error(`Next.js did not start before publication: ${nextOutput}`);
+    const response = await fetch(`${baseUrl}/api/projects/${projectId}/deployments`, {
+      method: "POST", headers: { Cookie: `${cookieName}=${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ artifactVersionId: versionId }),
+    });
+    const body = await response.text();
+    assert.equal(response.status, 202, body);
+    return JSON.parse(body) as { deployment: { id: string }; job: { id: string }; publishedUrl: string };
+  } finally {
+    next.kill("SIGTERM");
+  }
+}
+
 async function main() {
   const port = await freePort();
   const buildRoot = await mkdtemp(path.join(tmpdir(), "workspace-preview-builds-"));
@@ -158,7 +190,7 @@ async function main() {
       const run = await createAgentRun({ workspaceId: workspace.id, userId: user.id, requestId: randomUUID(), goal: "Create a Go preview", runtimeType: "GO", appBlueprint: blueprint });
       const scenario = { scenarios: [{ id: "get.item", description: "Check the generated operation", steps: [{ operationId: "get.item", expectStatus: expectedStatus === "SUCCEEDED" ? 200 : 201, assertions: [{ path: "ok", operator: "equals", value: true }] }] }] };
       const files = [
-        ["migrations/001_init.sql", "CREATE TABLE items (id int);"],
+        ["migrations/001_init.sql", "CREATE TABLE IF NOT EXISTS items (id int);"],
         ["backend/operations.go", backend],
         ["acceptance/seed.json", "{}"],
         ["acceptance/scenarios.json", JSON.stringify(scenario)],
@@ -194,6 +226,49 @@ async function main() {
       }
       process.stdout.write(`Go Preview ${expectedStatus}: version ${result.commit.version.versionNumber}, job ${job.status}\n`);
     }
+    const successfulProjectId = projectIds.SUCCEEDED;
+    const firstVersion = await client.artifactVersion.findFirstOrThrow({ where: { artifact: { projectId: successfulProjectId } }, orderBy: { versionNumber: "asc" } });
+    const modifiedWorkspace = await createDraftWorkspace({ projectId: successfulProjectId, userId: user.id, taskId: randomUUID(), baseArtifactVersionId: firstVersion.id });
+    const modifiedRun = await createAgentRun({ workspaceId: modifiedWorkspace.id, userId: user.id, requestId: randomUUID(), goal: "Modify the Go page and operation", runtimeType: "GO", appBlueprint: blueprint });
+    const modificationDecisions = [
+      { kind: "tool", name: "read_file", arguments: { path: "backend/operations.go" } },
+      { kind: "tool", name: "patch_file", arguments: { path: "backend/operations.go", oldText: '"ok": true', newText: '"ok": true, "label": "changed"' } },
+      { kind: "tool", name: "read_file", arguments: { path: "frontend/App.tsx" } },
+      { kind: "tool", name: "patch_file", arguments: { path: "frontend/App.tsx", oldText: "Preview ready", newText: "Preview changed" } },
+      { kind: "complete", summary: "Go page and operation changed" },
+    ];
+    const modification = await executeWorkspaceTask({ runId: modifiedRun.id, userId: user.id, model: { decide: async ({ step }: { step: number }) => modificationDecisions[step] } });
+    assert.equal(modification.run.status, "COMMITTED");
+    assert.equal(modification.commit?.version.versionNumber, 2);
+    const modifiedFiles = await client.file.findMany({ where: { artifactVersionId: modification.commit!.version.id } });
+    assert.deepEqual(modifiedFiles.map(({ path }) => path).sort(), ["migrations/001_init.sql", "backend/operations.go", "acceptance/seed.json", "acceptance/scenarios.json", "frontend/App.tsx"].sort());
+    assert.match(modifiedFiles.find(({ path }) => path === "backend/operations.go")!.content, /"label": "changed"/);
+    assert.match(modifiedFiles.find(({ path }) => path === "frontend/App.tsx")!.content, /Preview changed/);
+    const modifiedPreviewJob = modification.commit!.previewJob!;
+    const modifiedPreviewContainer = `prompt-preview-${modifiedPreviewJob.id.replaceAll("-", "").slice(0, 16)}`;
+    appContainers.push(modifiedPreviewContainer);
+    appImages.push(`prompt-web-generated:${modifiedPreviewJob.id.toLowerCase()}`);
+    await command("pnpm", ["exec", "tsx", "lib/build-jobs/worker.ts"], {
+      DATABASE_URL: databaseUrl, MIGRATOR_DATABASE_URL: databaseUrl, APP_RUNTIME_DATABASE_URL: runtimeDatabaseUrl,
+      APP_RUNTIME_NETWORK: runtimeNetwork, TRAEFIK_NETWORK: routerNetwork, APP_BUILDS_ROOT: buildRoot,
+      BUILD_WORKER_ONCE: "1", PUBLISHED_APPS_DOMAIN: "preview.test",
+    });
+    assert.equal((await client.buildJob.findUniqueOrThrow({ where: { id: modifiedPreviewJob.id } })).status, "SUCCEEDED");
+    const publication = await queueGoPublication(databaseUrl, user, successfulProjectId, modification.commit!.version.id);
+    assert.match(publication.publishedUrl, /^https:\/\//);
+    const publicContainer = `prompt-app-${publication.job.id.replaceAll("-", "").slice(0, 16)}`;
+    appContainers.push(publicContainer);
+    appImages.push(`prompt-web-generated:${publication.job.id.toLowerCase()}`);
+    await command("pnpm", ["exec", "tsx", "lib/build-jobs/worker.ts"], {
+      DATABASE_URL: databaseUrl, MIGRATOR_DATABASE_URL: databaseUrl, APP_RUNTIME_DATABASE_URL: runtimeDatabaseUrl,
+      APP_RUNTIME_NETWORK: runtimeNetwork, TRAEFIK_NETWORK: routerNetwork, APP_BUILDS_ROOT: buildRoot,
+      BUILD_WORKER_ONCE: "1", PUBLISHED_APPS_DOMAIN: "preview.test",
+    });
+    assert.equal((await client.buildJob.findUniqueOrThrow({ where: { id: publication.job.id } })).status, "SUCCEEDED");
+    assert.equal((await client.deployment.findUniqueOrThrow({ where: { id: publication.deployment.id } })).status, "ACTIVE");
+    assert.match(await docker(["run", "--rm", "--network", runtimeNetwork, "curlimages/curl:8.12.1", "-fsS", `http://${publicContainer}:8080/healthz`]), /ok/);
+    assert.match(await docker(["run", "--rm", "--network", runtimeNetwork, "curlimages/curl:8.12.1", "-fsS", "-X", "POST", "-H", "Content-Type: application/json", "--data", "{}", `http://${publicContainer}:8080/api/operations/get.item`]), /"label":"changed"/);
+    process.stdout.write("Go workspace modification: v2 preview and public deployment succeeded\n");
     if (process.env.WORKSPACE_GO_BROWSER === "1") await serveBrowserPreview(databaseUrl, user, projectIds);
   } finally {
     await closeDatabaseConnections?.();
