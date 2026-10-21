@@ -4,6 +4,9 @@ import { createServer, request as httpRequest, type Server } from "node:http";
 import { createServer as createTcpServer } from "node:net";
 import { encode } from "next-auth/jwt";
 import prisma from "@/lib/database/prisma";
+import { createAgentRun } from "@/lib/workspace/agent-run";
+import { createDraftWorkspace, writeDraftFile } from "@/lib/workspace/service";
+import { executeWorkspaceTask } from "@/lib/workspace/task";
 import { processPendingWorkspaceTasks } from "@/lib/workspace/worker";
 
 if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL must point to an isolated test PostgreSQL database");
@@ -41,6 +44,56 @@ export default function App() {
 }
 `;
 const brokenAppFile = "export default function App() { return <div>Broken";
+const goBackend = `package backend
+import (
+  "context"
+  "encoding/json"
+  "log/slog"
+  "github.com/jackc/pgx/v5/pgxpool"
+)
+func Operations(_ *pgxpool.Pool, _ *slog.Logger) map[string]Operation {
+  return map[string]Operation{"get.item": func(_ context.Context, _ json.RawMessage) (any, error) { return map[string]any{"ok": true}, nil }}
+}`;
+const goBlueprint = {
+  blueprintVersion: 1, runtimeType: "GO",
+  product: { name: "Go 条目", goal: "读取条目", actors: ["用户"], workflows: ["读取条目"], acceptanceCriteria: ["接口返回条目"] },
+  pages: [{ id: "items", title: "条目", route: "/", operations: ["get.item"] }],
+  entities: [], operations: [{ id: "get.item", method: "GET", path: "/api/items", description: "读取条目" }],
+  businessRules: [], dataEvolution: [], testScenarios: [],
+};
+
+async function seedGoProject(projectId: string, userId: string) {
+  const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Create a Go item app", runtimeType: "GO", appBlueprint: goBlueprint });
+  const files = [
+    ["migrations/001_init.sql", "CREATE TABLE items (id int);"],
+    ["backend/operations.go", goBackend],
+    ["acceptance/seed.json", "{}"],
+    ["acceptance/scenarios.json", JSON.stringify({ scenarios: [{ id: "get.item", description: "Read item", steps: [{ operationId: "get.item", expectStatus: 200 }] }] })],
+    ["frontend/App.tsx", "export default function App() { return <main>Go v1 ready</main>; }"],
+  ] as const;
+  const decisions = [...files.map(([path, content]) => ({ kind: "tool", name: "write_file", arguments: { path, content } })), { kind: "complete", summary: "Go v1 ready" }];
+  const result = await executeWorkspaceTask({ runId: run.id, userId, model: { decide: async ({ step }: { step: number }) => decisions[step] } });
+  if (result.run.status !== "COMMITTED" || result.commit?.version.versionNumber !== 1) throw new Error("Could not seed Go browser project");
+}
+
+async function seedInterruptedRun(projectId: string, userId: string) {
+  const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "恢复测试：生成双文件页面", runtimeType: "STATIC" });
+  const leaseToken = randomUUID();
+  await prisma.agentRun.update({ where: { id: run.id }, data: { status: "RUNNING", leaseToken, leaseUntil: new Date(Date.now() + 120_000), plan: { summary: "写入页面和样式后验证", steps: [{ id: "write", title: "写入两个文件", status: "completed" }, { id: "validate", title: "验证并提交", status: "in_progress" }] } } });
+  const files = [
+    ["frontend/App.tsx", "import './styles.css'; export default function App() { return <main>恢复后的页面</main>; }"],
+    ["frontend/styles.css", "main { color: #2563eb; }"],
+  ] as const;
+  for (const [index, [path, content]] of files.entries()) {
+    await writeDraftFile({ workspaceId: workspace.id, userId, toolCallId: `${run.id}:${index}`, expectedRevision: index, path, content, agentLease: { runId: run.id, leaseToken } });
+    await prisma.agentRunStep.create({ data: { runId: run.id, number: index, status: "COMPLETED", decision: { decision: { kind: "tool", name: "write_file", arguments: { path, content } }, expectedRevision: index }, result: { ok: true }, completedAt: new Date() } });
+  }
+  await prisma.agentRunStep.create({ data: { runId: run.id, number: 2, decision: { decision: { kind: "complete", summary: "双文件页面已恢复" }, expectedRevision: 2 } } });
+  await prisma.agentRun.update({ where: { id: run.id }, data: { nextStep: 2, leaseUntil: new Date(Date.now() - 1000) } });
+  return { workspaceId: workspace.id, runId: run.id };
+}
 
 function scriptedResponse(requestBody: Record<string, unknown>) {
   const messages = Array.isArray(requestBody.messages) ? requestBody.messages as Array<{ role?: string; content?: unknown }> : [];
@@ -52,7 +105,13 @@ function scriptedResponse(requestBody: Record<string, unknown>) {
     const observation = JSON.parse(String(latestUser?.content ?? "{}")) as { goal?: string; step?: number };
     const modification = /按钮|blue|颜色/i.test(observation.goal ?? "");
     const questionFlow = /需要确认/.test(observation.goal ?? "");
-    if (/诊断测试/.test(observation.goal ?? "")) {
+    if (/Go修改测试/.test(observation.goal ?? "")) {
+      tool = observation.step === 0 ? { name: "read_file", arguments: { path: "backend/operations.go" } }
+        : observation.step === 1 ? { name: "patch_file", arguments: { path: "backend/operations.go", oldText: '"ok": true', newText: '"ok": true, "label": "updated"' } }
+          : observation.step === 2 ? { name: "read_file", arguments: { path: "frontend/App.tsx" } }
+            : observation.step === 3 ? { name: "patch_file", arguments: { path: "frontend/App.tsx", oldText: "Go v1 ready", newText: "Go v2 updated" } }
+              : { name: "complete", arguments: { summary: "Go 页面与接口已定向修改" } };
+    } else if (/诊断测试/.test(observation.goal ?? "")) {
       tool = observation.step === 0 ? { name: "update_plan", arguments: { summary: "编写页面并修复编译错误", steps: [{ id: "frontend", title: "编写页面", status: "in_progress" }, { id: "repair", title: "修复诊断并提交", status: "pending" }] } }
         : observation.step === 1 ? { name: "write_file", arguments: { path: "frontend/App.tsx", content: brokenAppFile } }
           : observation.step === 2 ? { name: "complete", arguments: { summary: "检查页面" } }
@@ -139,7 +198,12 @@ async function main() {
   process.env.ALIYUN_API_KEY = "workspace-browser-fixture";
   const user = await prisma.user.create({ data: { email: `${id}@workspace-browser.test`, name: "工作区验收用户" } });
   const project = await prisma.project.create({ data: { userId: user.id, name: "新项目", slug: `workspace-browser-${id}`, thread: { create: { userId: user.id, title: "新项目" } } } });
+  const interrupted = process.env.WORKSPACE_BROWSER_RECOVERY_SEED === "1" ? await seedInterruptedRun(project.id, user.id) : null;
   const secondaryProject = await prisma.project.create({ data: { userId: user.id, name: "并行项目", slug: `workspace-parallel-${id}`, thread: { create: { userId: user.id, title: "并行项目" } } } });
+  const goProject = process.env.WORKSPACE_BROWSER_GO_SEED === "1"
+    ? await prisma.project.create({ data: { userId: user.id, name: "Go 修改项目", slug: `workspace-go-${id}`, thread: { create: { userId: user.id, title: "Go 修改项目" } } } })
+    : null;
+  if (goProject) await seedGoProject(goProject.id, user.id);
   const otherUser = await prisma.user.create({ data: { email: `${id}@workspace-browser-private.test`, name: "其他用户" } });
   const privateProject = await prisma.project.create({ data: { userId: otherUser.id, name: "无权项目", slug: `workspace-private-${id}`, thread: { create: { userId: otherUser.id, title: "无权项目" } } } });
   const cookieName = "authjs.session-token";
@@ -154,7 +218,13 @@ async function main() {
   next.stdout?.on("data", collect);
   next.stderr?.on("data", collect);
   await waitForNext(nextPort, next, () => nextOutput);
+  let workerPaused = process.env.WORKSPACE_BROWSER_START_PAUSED === "1";
   const proxy = createServer((request, response) => {
+    if (request.url === "/__test_resume_worker" && request.method === "POST") {
+      workerPaused = false;
+      response.writeHead(204).end();
+      return;
+    }
     if (request.url === "/__test_auth") {
       response.writeHead(302, { "Set-Cookie": `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax`, Location: `/projects/${project.id}` });
       response.end();
@@ -162,6 +232,11 @@ async function main() {
     }
     if (request.url === "/__test_auth_secondary") {
       response.writeHead(302, { "Set-Cookie": `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax`, Location: `/projects/${secondaryProject.id}` });
+      response.end();
+      return;
+    }
+    if (request.url === "/__test_auth_go" && goProject) {
+      response.writeHead(302, { "Set-Cookie": `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax`, Location: `/projects/${goProject.id}` });
       response.end();
       return;
     }
@@ -175,11 +250,12 @@ async function main() {
   await listen(proxy, proxyPort);
   let busy = false;
   const ticker = setInterval(() => {
-    if (busy) return;
+    if (busy || workerPaused) return;
     busy = true;
     void Promise.all([
       processPendingWorkspaceTasks({ projectId: project.id, limit: 1 }),
       processPendingWorkspaceTasks({ projectId: secondaryProject.id, limit: 1 }),
+      ...(goProject ? [processPendingWorkspaceTasks({ projectId: goProject.id, limit: 1 })] : []),
     ]).catch((error) => console.error("Fixture worker error:", error)).finally(() => { busy = false; });
   }, 1000);
   let stopping = false;
@@ -196,7 +272,7 @@ async function main() {
   };
   process.once("SIGINT", () => { void stop(); });
   process.once("SIGTERM", () => { void stop(); });
-  process.stdout.write(`BROWSER_FIXTURE_URL=${baseUrl}/__test_auth\nSECONDARY_URL=${baseUrl}/__test_auth_secondary\nPROJECT_ID=${project.id}\nSECONDARY_PROJECT_ID=${secondaryProject.id}\nPRIVATE_PROJECT_ID=${privateProject.id}\n`);
+  process.stdout.write(`BROWSER_FIXTURE_URL=${baseUrl}/__test_auth\nSECONDARY_URL=${baseUrl}/__test_auth_secondary\n${goProject ? `GO_URL=${baseUrl}/__test_auth_go\nGO_PROJECT_ID=${goProject.id}\n` : ""}${interrupted ? `RECOVERY_WORKSPACE_ID=${interrupted.workspaceId}\nRECOVERY_RUN_ID=${interrupted.runId}\nRESUME_WORKER_URL=${baseUrl}/__test_resume_worker\n` : ""}PROJECT_ID=${project.id}\nSECONDARY_PROJECT_ID=${secondaryProject.id}\nPRIVATE_PROJECT_ID=${privateProject.id}\n`);
 }
 
 void main().catch((error) => { console.error(error); process.exitCode = 1; });
