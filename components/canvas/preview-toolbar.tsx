@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { DeviceType, ArtifactVersion } from "./types";
+import { workspacePreviewLabel } from "@/lib/workspace/presentation";
 
 interface PreviewToolbarProps {
   selectedDevice: DeviceType;
@@ -68,12 +69,15 @@ export function PreviewToolbar({
         {fullstackPreview && (
           fullstackPreview.status === "SUCCEEDED" && fullstackPreview.previewUrl ? (
             <Button variant="outline" size="sm" onClick={onOpenFullstackPreview}>
-              <ExternalLink className="h-4 w-4 mr-1" />打开可用版本
+              <ExternalLink className="h-4 w-4 mr-1" />{workspacePreviewLabel(fullstackPreview.status)}
             </Button>
+          ) : fullstackPreview.status === "FAILED" ? (
+            <details className="max-w-64 text-xs text-destructive">
+              <summary className="cursor-pointer">{workspacePreviewLabel(fullstackPreview.status)}</summary>
+              <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-all text-foreground">{(fullstackPreview.errorMessage || "构建或启动失败，错误详情暂不可用").slice(0, 4000)}</pre>
+            </details>
           ) : (
-            <span className={fullstackPreview.status === "FAILED" ? "text-xs text-destructive" : "text-xs text-muted-foreground"} title={fullstackPreview.errorMessage || undefined}>
-              {fullstackPreview.status === "FAILED" ? "应用构建未通过" : "正在准备可用版本"}
-            </span>
+            <span className="text-xs text-muted-foreground" role="status">{workspacePreviewLabel(fullstackPreview.status)}</span>
           )
         )}
         {versions.length > 0 && (

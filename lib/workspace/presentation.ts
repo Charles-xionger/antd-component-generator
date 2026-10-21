@@ -16,6 +16,12 @@ export function workspaceEventSection(type: string): "summary" | "details" {
   return ["tool.started", "tool.completed", "command.output"].includes(type) ? "details" : "summary";
 }
 
+export function workspacePreviewLabel(status: string): string {
+  if (status === "SUCCEEDED") return "Preview 成功 · 打开";
+  if (status === "FAILED") return "Preview 失败 · 查看错误";
+  return "Preview 验证中";
+}
+
 export function workspaceEventLabel(event: { type: string; payload: Record<string, unknown> }): string | null {
   const payload = event.payload;
   const path = typeof payload.path === "string" ? payload.path : null;

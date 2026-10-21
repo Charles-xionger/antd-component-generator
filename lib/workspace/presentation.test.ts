@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { workspaceEventLabel, workspaceEventSection, workspaceRunLabel } from "./presentation";
+import { workspaceEventLabel, workspaceEventSection, workspacePreviewLabel, workspaceRunLabel } from "./presentation";
 
 test("committed code is not presented as a successful Preview", () => {
   assert.match(workspaceRunLabel("COMMITTED"), /代码已提交/);
   assert.match(workspaceRunLabel("COMMITTED"), /预览结果请查看右侧/);
   assert.match(workspaceEventLabel({ type: "artifact.committed", payload: {} }) || "", /Preview 将独立验证/);
+});
+
+test("Preview states distinguish a committed version from runtime validation", () => {
+  assert.equal(workspacePreviewLabel("PENDING"), "Preview 验证中");
+  assert.equal(workspacePreviewLabel("SUCCEEDED"), "Preview 成功 · 打开");
+  assert.equal(workspacePreviewLabel("FAILED"), "Preview 失败 · 查看错误");
 });
 
 test("tool internals are collapsed while meaningful events remain visible", () => {
