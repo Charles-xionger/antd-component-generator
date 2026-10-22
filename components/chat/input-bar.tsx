@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/dialog";
 import { MCPConfigPanel } from "@/components/mcp/config-panel";
 import { useIsGenerating } from "@/stores/use-generation-store";
+import { CHAT_MODEL_OPTIONS } from "./model-options";
 
 interface ImageItem {
   dataUrl: string;
@@ -184,18 +185,7 @@ function ModelSelector({
   selectedModel?: string;
   onModelChange?: (model: string) => void;
 }) {
-  const models = [
-    {
-      id: "qwen3.7-flash-2026-07-15",
-      name: "Qwen 3.7 Flash",
-      icon: "Q",
-    },
-    {
-      id: "deepseek-v4-flash-0731",
-      name: "DeepSeek V4 Flash",
-      icon: "D",
-    },
-  ];
+  const models = CHAT_MODEL_OPTIONS;
 
   const currentModel = models.find((m) => m.id === selectedModel) || models[0];
 
