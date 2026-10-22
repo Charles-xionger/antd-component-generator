@@ -257,7 +257,13 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
         <div className="flex items-center justify-between border-b px-4 py-2">
           <Tabs
             value={activeTab}
-            onValueChange={(value) => setActiveTab(value as "preview" | "code")}
+            onValueChange={(value) => {
+              const nextTab = value as "preview" | "code";
+              setActiveTab(nextTab);
+              if (nextTab === "preview" && artifact?.files.length) {
+                setShouldSendToSandbox(true);
+              }
+            }}
             className="flex-1"
           >
             <div className="flex items-center justify-between">
