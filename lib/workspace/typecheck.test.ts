@@ -11,3 +11,12 @@ test("front-end typecheck accepts a valid component", async () => {
   const diagnostics = await typecheckFrontend([{ path: "frontend/App.tsx", content: "export default function App() { return null; }" }]);
   assert.deepEqual(diagnostics, []);
 });
+
+test("front-end typecheck includes the platform app runtime contract", async () => {
+  const diagnostics = await typecheckFrontend([{
+    path: "frontend/App.tsx",
+    content: `import { invoke } from "@prompt-web/app-runtime";
+export default function App() { void invoke("list.items"); return null; }`,
+  }]);
+  assert.deepEqual(diagnostics, []);
+});

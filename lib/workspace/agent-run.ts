@@ -7,6 +7,7 @@ import { appendAgentEvent } from "./events";
 import { WorkspacePathError } from "./path";
 import { deleteDraftFile, listDraftFiles, patchDraftFile, readDraftFile, readDraftFileRange, searchDraftFiles, WorkspaceError, writeDraftFile } from "./service";
 import { inspectWorkspaceDiagnostics, runWorkspaceCommand, validateAndRecordWorkspaceRevision } from "./validation";
+import { assertWorkspaceMutationPath, isObservationTool, repeatedObservationError, sameArguments, type WorkspaceRuntimeType } from "./runtime-contract";
 
 const toolDecisionSchema = z.object({
   kind: z.literal("tool"),
@@ -36,11 +37,13 @@ function modelErrorDecision(error: unknown): ModelErrorDecision {
 export type AgentModel = { decide(observation: {
   goal: string;
   workspaceId: string;
+  runtimeType: WorkspaceRuntimeType;
   revision: number;
+  files: Array<{ path: string; sha256: string; revision: number }>;
   step: number;
   plan: unknown;
   previousResult: unknown;
-  history: Array<{ step: number; action: string; path?: string; outcome?: string }>;
+  history: Array<{ step: number; action: string; path?: string; outcome?: string; details?: string }>;
 }): Promise<unknown> };
 
 const locationSchema = z.object({ path: z.string().min(1).max(512) }).strict();
@@ -120,19 +123,28 @@ async function executeTool(decision: Extract<Decision, { kind: "tool" }>, contex
     case "search_files": return searchDraftFiles({ ...scope, ...searchSchema.parse(decision.arguments) });
     case "read_file": return readDraftFile({ ...scope, ...locationSchema.parse(decision.arguments) });
     case "read_file_range": return readDraftFileRange({ ...scope, ...rangeSchema.parse(decision.arguments) });
-    case "write_file": return writeDraftFile({ ...mutation, ...writeSchema.parse(decision.arguments) });
+    case "write_file": {
+      const value = writeSchema.parse(decision.arguments);
+      return writeDraftFile({ ...mutation, ...value, path: assertWorkspaceMutationPath(value.path, context.runtimeType) });
+    }
     case "write_json_file": {
       const { path, value } = jsonWriteSchema.parse(decision.arguments);
       if (!path.endsWith(".json") || path === "acceptance/scenarios.json") throw new WorkspaceError("INVALID_JSON_TARGET", "Use write_scenarios for acceptance/scenarios.json; other JSON targets must end in .json");
-      return writeDraftFile({ ...mutation, path, content: `${JSON.stringify(value, null, 2)}\n` });
+      return writeDraftFile({ ...mutation, path: assertWorkspaceMutationPath(path, context.runtimeType), content: `${JSON.stringify(value, null, 2)}\n` });
     }
     case "write_scenarios": {
       const { scenarios } = scenarioWriteSchema.parse(decision.arguments);
       const suite = acceptanceScenarioSuiteSchema.parse({ scenarios });
-      return writeDraftFile({ ...mutation, path: "acceptance/scenarios.json", content: `${JSON.stringify(suite, null, 2)}\n` });
+      return writeDraftFile({ ...mutation, path: assertWorkspaceMutationPath("acceptance/scenarios.json", context.runtimeType), content: `${JSON.stringify(suite, null, 2)}\n` });
     }
-    case "patch_file": return patchDraftFile({ ...mutation, ...patchSchema.parse(decision.arguments) });
-    case "delete_file": return deleteDraftFile({ ...mutation, ...locationSchema.parse(decision.arguments) });
+    case "patch_file": {
+      const value = patchSchema.parse(decision.arguments);
+      return patchDraftFile({ ...mutation, ...value, path: assertWorkspaceMutationPath(value.path, context.runtimeType) });
+    }
+    case "delete_file": {
+      const value = locationSchema.parse(decision.arguments);
+      return deleteDraftFile({ ...mutation, ...value, path: assertWorkspaceMutationPath(value.path, context.runtimeType) });
+    }
     case "validate_json": {
       const file = await readDraftFile({ ...scope, ...locationSchema.parse(decision.arguments), revision: context.expectedRevision });
       return { revision: context.expectedRevision, diagnostics: validateJsonFile(file.path, file.content) };
@@ -196,11 +208,18 @@ export async function executeAgentRun(input: { runId: string; userId: string; mo
           const error = result?.error && typeof result.error === "object" ? result.error as Record<string, unknown> : null;
           const validation = result?.validation && typeof result.validation === "object" ? result.validation as Record<string, unknown> : null;
           const args = choice?.kind === "tool" ? choice.arguments : null;
-          return { step: entry.number, action: choice?.kind === "tool" ? choice.name : choice?.kind ?? "unknown", path: typeof args?.path === "string" ? args.path : undefined, outcome: typeof error?.code === "string" ? error.code : typeof validation?.status === "string" ? validation.status : result?.ok === true ? "ok" : undefined };
+          return {
+            step: entry.number,
+            action: choice?.kind === "tool" ? choice.name : choice?.kind ?? "unknown",
+            path: typeof args?.path === "string" ? args.path : undefined,
+            outcome: typeof error?.code === "string" ? error.code : typeof validation?.status === "string" ? validation.status : result?.ok === true ? "ok" : undefined,
+            details: result ? JSON.stringify(result).slice(0, 6000) : undefined,
+          };
         });
         let decision: Decision | ModelErrorDecision;
         try {
-          const response = await input.model.decide({ goal: run.goal, workspaceId: run.workspaceId, revision: run.workspace.revision, step: run.nextStep, plan: run.plan, previousResult: prior?.result, history });
+          const files = await listDraftFiles({ workspaceId: run.workspaceId, userId: input.userId, revision: run.workspace.revision });
+          const response = await input.model.decide({ goal: run.goal, workspaceId: run.workspaceId, runtimeType: run.runtimeType, revision: run.workspace.revision, files, step: run.nextStep, plan: run.plan, previousResult: prior?.result, history });
           decision = decisionSchema.parse(response);
         } catch (error) {
           // An incomplete model response is one failed step, not a failed
@@ -244,20 +263,44 @@ export async function executeAgentRun(input: { runId: string; userId: string; mo
         continue;
       }
       let result: { ok: boolean; value?: unknown; error?: { code: string; message: string } };
+      let repeatedObservationLimit = false;
       if (decision.kind === "model_error") {
         result = { ok: false, error: { code: decision.code, message: modelErrorMessages[decision.code] } };
       } else {
-        try {
-          result = { ok: true, value: await executeTool(decision, { workspaceId: run.workspaceId, userId: input.userId, expectedRevision, toolCallId: `${run.id}:${run.nextStep}`, runId: run.id, leaseToken, runtimeType: run.runtimeType, appBlueprint: run.appBlueprint ?? run.workspace.baseArtifactVersion?.appBlueprint ?? undefined }) };
-        } catch (error) {
-          if (!(error instanceof WorkspaceError) && !(error instanceof WorkspacePathError) && !(error instanceof z.ZodError)) throw error;
-          result = { ok: false, error: { code: error instanceof WorkspaceError || error instanceof WorkspacePathError ? error.code : "INVALID_TOOL_ARGUMENTS", message: error.message.slice(0, 1000) } };
+        let repeatedObservationCount = 0;
+        if (isObservationTool(decision.name)) {
+          const recentDecisions = await prisma.agentRunStep.findMany({
+            where: { runId: run.id, status: "COMPLETED", number: { lt: run.nextStep } },
+            orderBy: { number: "desc" },
+            take: 12,
+            select: { decision: true },
+          });
+          repeatedObservationCount = recentDecisions.filter((entry) => {
+            const saved = persistedDecisionSchema.safeParse(entry.decision);
+            return saved.success
+              && saved.data.expectedRevision === expectedRevision
+              && saved.data.decision.kind === "tool"
+              && saved.data.decision.name === decision.name
+              && sameArguments(saved.data.decision.arguments, decision.arguments);
+          }).length;
+        }
+        const repeatedObservation = repeatedObservationCount > 0;
+        repeatedObservationLimit = repeatedObservationCount > 1;
+        if (repeatedObservation) {
+          result = repeatedObservationError(decision.name, expectedRevision);
+        } else {
+          try {
+            result = { ok: true, value: await executeTool(decision, { workspaceId: run.workspaceId, userId: input.userId, expectedRevision, toolCallId: `${run.id}:${run.nextStep}`, runId: run.id, leaseToken, runtimeType: run.runtimeType, appBlueprint: run.appBlueprint ?? run.workspace.baseArtifactVersion?.appBlueprint ?? undefined }) };
+          } catch (error) {
+            if (!(error instanceof WorkspaceError) && !(error instanceof WorkspacePathError) && !(error instanceof z.ZodError)) throw error;
+            result = { ok: false, error: { code: error instanceof WorkspaceError || error instanceof WorkspacePathError ? error.code : "INVALID_TOOL_ARGUMENTS", message: error.message.slice(0, 1000) } };
+          }
         }
       }
       const previous = prior?.result && typeof prior.result === "object" ? prior.result as { ok?: unknown; error?: { code?: string; message?: string }; revision?: number } : null;
-      const noProgress = !result.ok && previous?.ok === false && previous.error?.code === result.error?.code && previous.error?.message === result.error?.message && expectedRevision === run.workspace.revision;
+      const noProgress = repeatedObservationLimit || (!result.ok && previous?.ok === false && previous.error?.code === result.error?.code && previous.error?.message === result.error?.message && expectedRevision === run.workspace.revision);
       await prisma.$transaction(async (tx) => {
-        const updated = await tx.agentRun.updateMany({ where: { id: run.id, status: "RUNNING", leaseToken, leaseUntil: { gt: new Date() } }, data: { nextStep: { increment: 1 }, ...(noProgress ? { status: "NO_PROGRESS", summary: "Same tool error repeated without a workspace change", leaseToken: null, leaseUntil: null } : { leaseUntil: new Date(Date.now() + 120_000) }) } });
+        const updated = await tx.agentRun.updateMany({ where: { id: run.id, status: "RUNNING", leaseToken, leaseUntil: { gt: new Date() } }, data: { nextStep: { increment: 1 }, ...(noProgress ? { status: "NO_PROGRESS", summary: repeatedObservationLimit ? "Same read operation repeated without a workspace change" : "Same tool error repeated without a workspace change", leaseToken: null, leaseUntil: null } : { leaseUntil: new Date(Date.now() + 120_000) }) } });
         if (updated.count !== 1) throw new WorkspaceError("RUN_LEASE_LOST", "Agent run lease was lost before completing a step");
         await tx.agentRunStep.update({ where: { runId_number: { runId: run.id, number: run.nextStep } }, data: { status: "COMPLETED", result: JSON.parse(JSON.stringify(result)), completedAt: new Date() } });
         await appendAgentEvent(tx, decision.kind === "model_error"

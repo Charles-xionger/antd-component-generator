@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseWorkspaceToolDecision } from "./model-adapter";
+import { parseWorkspaceToolDecision, workspaceAgentInstructions } from "./model-adapter";
 
 test("accepts only one complete structured tool call", () => {
   assert.deepEqual(parseWorkspaceToolDecision({ tool_calls: [{ name: "write_file", args: { path: "frontend/App.tsx", content: "export default function App() { return null; }" } }] }), {
@@ -17,4 +17,16 @@ test("does not treat content, partial calls, forged events, or multiple calls as
     { tool_calls: [{ name: "write_file", args: { path: "frontend/App.tsx" } }, { name: "complete", args: { summary: "done" } }] },
     { invalid_tool_calls: [{}], tool_calls: [{ name: "write_file", args: { path: "frontend/App.tsx", content: "bad" } }] },
   ]) assert.throws(() => parseWorkspaceToolDecision(response), /MODEL_/);
+});
+
+test("Go workspace instructions expose the platform-owned scaffold and required business files", () => {
+  const instructions = workspaceAgentInstructions("GO");
+  assert.match(instructions, /go\.mod.*platform/i);
+  assert.match(instructions, /frontend\/App\.tsx/);
+  assert.match(instructions, /backend\/operations\.go/);
+  assert.match(instructions, /migrations\/\d+_/);
+  assert.match(instructions, /acceptance\/seed\.json/);
+  assert.match(instructions, /acceptance\/scenarios\.json/);
+  assert.match(instructions, /empty workspace.*normal/i);
+  assert.match(instructions, /currentFiles.*provided/i);
 });
