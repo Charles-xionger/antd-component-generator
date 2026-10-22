@@ -5,6 +5,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useArtifactParser } from "./use-artifact-parser";
 import { parseArtifactFromContent } from "./use-message-parser";
 import { SANDBOX_ORIGIN } from "@/lib/sandbox-config";
+import { projectArtifactForSandbox } from "@/lib/sandbox-projection";
 import type { Message } from "./use-chat";
 import type {
   ArtifactVersion,
@@ -475,7 +476,7 @@ export function useCanvas({
         isSelectingVersionRef.current = false;
       }
     },
-    [versions, getCachedVersion, cacheVersion]
+    [versions, selectedVersion, getCachedVersion, cacheVersion]
   );
 
   // 创建乐观更新版本，用于代码生成过程的展示
@@ -545,31 +546,17 @@ export function useCanvas({
         return;
       }
 
-      // 将文件转换为 sandbox 需要的格式（使用文件名作为 key）
-      const files: Record<string, string> = {};
-      artifact.files.forEach((file) => {
-        if (file.path.startsWith("backend/") || file.path.startsWith("migrations/") || file.path.startsWith("acceptance/")) return;
-        const fileName = file.path.startsWith("frontend/") ? file.path.slice("frontend/".length) : file.path;
-        files[fileName] = file.content;
-      });
-
-      // 查找入口文件
-      const entryFileName = (() => {
-        const appFile = artifact.files.find((f) => f.path.includes("App.tsx"));
-        if (appFile) return appFile.path.startsWith("frontend/") ? appFile.path.slice("frontend/".length) : appFile.path;
-
-        const componentFile = artifact.files.find(
-          (f) =>
-            f.path.endsWith(".tsx") && !f.path.toLowerCase().includes("use")
-        );
-        if (componentFile)
-          return componentFile.path.split("/").pop() || "App.tsx";
-
-        const tsxFile = artifact.files.find((f) => f.path.endsWith(".tsx"));
-        if (tsxFile) return tsxFile.path.split("/").pop() || "App.tsx";
-
-        return "App.tsx";
-      })();
+      const selectedRuntimeVersion = versions.find(
+        (version) => version.versionNumber === selectedVersion,
+      )?.runtimeVersion;
+      const { files, entryFile } = projectArtifactForSandbox(
+        artifact.files,
+        selectedRuntimeVersion,
+      );
+      if (Object.keys(files).length === 0) {
+        console.log("No frontend files to send to sandbox");
+        return;
+      }
 
       // 发送文件到 sandbox
       iframe.contentWindow.postMessage(
@@ -578,7 +565,7 @@ export function useCanvas({
           type: "artifacts",
           payload: {
             files,
-            entryFile: entryFileName,
+            entryFile,
             runtime: versions.find((version) => version.versionNumber === selectedVersion)?.runtimeManifest || undefined,
           },
         },

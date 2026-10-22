@@ -12,6 +12,7 @@ export interface ArtifactVersion {
   versionNumber: number;
   description: string;
   createdAt: string;
+  runtimeVersion?: string | null;
   files: {
     path: string;
     content: string;

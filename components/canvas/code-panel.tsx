@@ -74,7 +74,6 @@ export function CodePanel({
         <div className="flex-1 overflow-y-auto py-1">
           {artifact && artifact.files.length > 0 ? (
             artifact.files.map((file) => {
-              const fileName = file.path.split("/").pop() || file.path;
               const isSelected = selectedFile?.path === file.path;
 
               return (
@@ -93,7 +92,7 @@ export function CodePanel({
                 >
                   <FileIcon language={file.language} />
                   <span className="truncate font-mono text-xs flex-1">
-                    {fileName}
+                    {file.path}
                   </span>
                   {/* 生成状态指示器 */}
                   {file.isGenerating && (
@@ -125,7 +124,7 @@ export function CodePanel({
               <div className="flex items-center gap-2 text-sm text-secondary-foreground">
                 <FileIcon language={selectedFile.language} />
                 <span className="font-mono">
-                  {selectedFile.path.split("/").pop()}
+                  {selectedFile.path}
                 </span>
               </div>
               <Button

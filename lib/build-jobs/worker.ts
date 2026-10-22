@@ -18,10 +18,11 @@ import {
 import { appBlueprintSchema } from "@/lib/app-contracts";
 import { validateFullstackArtifact } from "@/lib/go-runtime/artifact-validator";
 import { getPublishedAppsDomain, getPublishedHostname } from "@/lib/projects/slug";
+import { resolveBuildsRoot } from "./config";
 
 const run = promisify(execFile);
 const workerId = randomUUID();
-const buildsRoot = path.resolve(process.env.APP_BUILDS_ROOT || "/app-builds");
+const buildsRoot = resolveBuildsRoot(process.env, process.cwd());
 const dockerNetwork = process.env.APP_RUNTIME_NETWORK || "prompt_web_internal";
 const traefikNetwork = process.env.TRAEFIK_NETWORK || "traefik_net";
 
