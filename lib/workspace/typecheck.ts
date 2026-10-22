@@ -1,4 +1,5 @@
 import path from "node:path";
+import { writeFile } from "node:fs/promises";
 import ts from "typescript";
 import type { WorkspaceDiagnostic } from "./diagnostics";
 import { materializeWorkspaceFiles } from "./projection";
@@ -10,7 +11,11 @@ export async function typecheckFrontend(files: FrontendFile[]): Promise<Workspac
   if (!source.length) return [];
   const projection = await materializeWorkspaceFiles(source);
   try {
-    const rootNames = source.map((file) => path.join(projection.directory, file.path));
+    const runtimeTypes = path.join(projection.directory, "__prompt_web_app_runtime.d.ts");
+    await writeFile(runtimeTypes, `declare module "@prompt-web/app-runtime" {
+  export function invoke<T = unknown>(operationId: string, input?: Record<string, unknown>): Promise<T>;
+}\n`, "utf8");
+    const rootNames = [...source.map((file) => path.join(projection.directory, file.path)), runtimeTypes];
     const options: ts.CompilerOptions = {
       noEmit: true, strict: true, skipLibCheck: true, jsx: ts.JsxEmit.ReactJSX,
       target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,

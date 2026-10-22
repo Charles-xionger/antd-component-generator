@@ -1,13 +1,13 @@
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { createLLM } from "@/lib/agent/models";
 import type { AgentModel } from "./agent-run";
+import { GO_REQUIRED_FILES, type WorkspaceRuntimeType } from "./runtime-contract";
 
 type ToolCall = { name?: unknown; args?: unknown };
 
 const stringField = { type: "string" } as const;
 const pathField = { type: "string", description: "Workspace-relative path; never an absolute path." } as const;
 const toolDefinitions = [
-  ["list_files", "List current workspace files and revisions.", {}],
   ["search_files", "Search current workspace file text.", { query: stringField, maxResults: { type: "integer" } }],
   ["read_file", "Read one workspace file.", { path: pathField }],
   ["read_file_range", "Read a bounded line range of one file.", { path: pathField, startLine: { type: "integer" }, endLine: { type: "integer" } }],
@@ -27,6 +27,14 @@ const toolDefinitions = [
 ] as const;
 
 const knownNames = new Set<string>(toolDefinitions.map(([name]) => name));
+
+export function workspaceAgentInstructions(runtimeType: WorkspaceRuntimeType) {
+  const common = "The currentFiles manifest is provided in every turn and is authoritative; do not call list_files. Recent history includes bounded tool-result details, so reuse earlier reads and diagnostics instead of requesting them again. An empty workspace is normal for a new application. Never repeat an unchanged read. Keep one concise plan current, write one precise file per turn, validate the workspace, repair only reported diagnostics, and call complete only after validation is ready.";
+  if (runtimeType === "STATIC") {
+    return `${common} This is a STATIC workspace. Only frontend/ files are writable and frontend/App.tsx is required.`;
+  }
+  return `${common} This is a GO workspace, but go.mod, go.sum, main.go, the HTTP server, database connection, health checks, Dockerfile, backend/runtime.go, and backend/register.go are platform-owned and must never be written. Only frontend/, backend/, migrations/, and acceptance/ are writable. Generate these business artifacts: ${GO_REQUIRED_FILES.join(", ")}. frontend/App.tsx must call stable blueprint operation IDs through invoke from @prompt-web/app-runtime. backend/operations.go must expose Operations(*pgxpool.Pool, *slog.Logger) map[string]Operation; business handlers use func(context.Context, json.RawMessage) (any, error). Use only the Go standard library, github.com/jackc/pgx/v5, and internal packages. Migrations are forward-only PostgreSQL SQL. acceptance/seed.json keys match blueprint entity IDs, and acceptance scenarios use blueprint operation IDs. Do not initialize a conventional standalone Go or Vite project.`;
+}
 
 export function parseWorkspaceToolDecision(response: { tool_calls?: ToolCall[]; invalid_tool_calls?: unknown[] }) {
   if (response.invalid_tool_calls?.length) throw new Error("MODEL_TOOL_CALL_INVALID");
@@ -55,8 +63,8 @@ export function createWorkspaceAgentModel(modelName: string, context: { requirem
     async decide(observation) {
       const previous = JSON.stringify(observation.previousResult ?? null).slice(0, 16_000);
       const response = await bound.invoke([
-        new SystemMessage("You are a workspace coding agent. The database workspace is the only source of code. Call exactly one provided tool each turn. Never output <boltArtifact>, file-change events, or complete project snapshots in text. Read relevant files before editing. For JSON files use write_json_file, and for acceptance/scenarios.json use write_scenarios so the runtime constructs its required envelope. Keep the plan current with update_plan. Use precise file writes or patches, inspect tool results, and call complete only when the coding phase is ready for validation. Ask a question only if user input is essential."),
-        new HumanMessage(JSON.stringify({ goal: observation.goal, requirementSpec: context.requirementSpec, appBlueprint: context.appBlueprint, workspaceId: observation.workspaceId, revision: observation.revision, step: observation.step, plan: observation.plan, history: observation.history, previousResult: previous })),
+        new SystemMessage(`You are a workspace coding agent. The database workspace is the only source of code. Call exactly one provided tool each turn. Never output <boltArtifact>, file-change events, or complete project snapshots in text. For JSON files use write_json_file, and for acceptance/scenarios.json use write_scenarios so the runtime constructs its required envelope. Ask a question only if user input is essential. ${workspaceAgentInstructions(observation.runtimeType)}`),
+        new HumanMessage(JSON.stringify({ goal: observation.goal, runtimeType: observation.runtimeType, requirementSpec: context.requirementSpec, appBlueprint: context.appBlueprint, workspaceId: observation.workspaceId, revision: observation.revision, currentFiles: observation.files, step: observation.step, plan: observation.plan, history: observation.history, previousResult: previous })),
       ]);
       return parseWorkspaceToolDecision(response);
     },

@@ -46,6 +46,35 @@ dbTest("scripted model writes one file and resumes without replaying a completed
   await closeDraftWorkspace({ workspaceId: workspace.id, userId });
 });
 
+dbTest("every model turn receives the current file manifest without calling list_files", async () => {
+  const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Create a page", runtimeType: "STATIC", maxSteps: 3 });
+  const result = await executeAgentRun({ runId: run.id, userId, model: { decide: async ({ step, files }) => {
+    if (step === 0) {
+      assert.deepEqual(files, []);
+      return { kind: "tool", name: "write_file", arguments: { path: "frontend/App.tsx", content: "export default function App() { return null; }" } };
+    }
+    assert.deepEqual(files.map((file: { path: string }) => file.path), ["frontend/App.tsx"]);
+    return { kind: "complete", summary: "Ready" };
+  } } });
+  assert.equal(result.status, "READY_TO_VALIDATE");
+  await closeDraftWorkspace({ workspaceId: workspace.id, userId });
+});
+
+dbTest("recent history retains bounded tool results across a plan update", async () => {
+  const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  await writeDraftFile({ workspaceId: workspace.id, userId, toolCallId: "seed-history", expectedRevision: 0, path: "frontend/App.tsx", content: "export default function App() { return <div>History marker</div>; }" });
+  const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Inspect the page", runtimeType: "STATIC", maxSteps: 4 });
+  const result = await executeAgentRun({ runId: run.id, userId, model: { decide: async ({ step, history }) => {
+    if (step === 0) return { kind: "tool", name: "read_file", arguments: { path: "frontend/App.tsx" } };
+    if (step === 1) return { kind: "tool", name: "update_plan", arguments: { summary: "Inspect page", steps: [{ id: "page", title: "Inspect page", status: "in_progress" }] } };
+    assert.match(history.find((entry: { step: number }) => entry.step === 0)?.details ?? "", /History marker/);
+    return { kind: "question", question: "History verified" };
+  } } });
+  assert.equal(result.status, "NEEDS_INPUT");
+  await closeDraftWorkspace({ workspaceId: workspace.id, userId });
+});
+
 dbTest("invalid model tool args return a structured failure and permit a local retry", async () => {
   const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
   const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Create a page", runtimeType: "STATIC", maxSteps: 4 });
@@ -97,6 +126,52 @@ dbTest("repeated invalid model calls stop without writing a file", async () => {
   assert.equal((firstStep.result as { error: { code: string } }).error.code, "MODEL_DECISION_INVALID");
   assert.equal(await prisma.draftFileChange.count({ where: { workspaceId: workspace.id } }), 0);
   assert.equal(await prisma.agentEvent.count({ where: { runId: run.id, type: "file.changed" } }), 0);
+  await closeDraftWorkspace({ workspaceId: workspace.id, userId });
+});
+
+dbTest("repeated successful observations are rejected before exhausting the run", async () => {
+  const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Create a page", runtimeType: "STATIC", maxSteps: 8 });
+  let calls = 0;
+  const result = await executeAgentRun({ runId: run.id, userId, model: { decide: async () => {
+    calls += 1;
+    return { kind: "tool", name: "list_files", arguments: {} };
+  } } });
+  assert.equal(result.status, "NO_PROGRESS");
+  assert.equal(calls, 3);
+  const repeated = await prisma.agentRunStep.findUniqueOrThrow({ where: { runId_number: { runId: run.id, number: 1 } } });
+  assert.equal((repeated.result as { error: { code: string } }).error.code, "REPEATED_OBSERVATION");
+  assert.equal(await prisma.draftFileChange.count({ where: { workspaceId: workspace.id } }), 0);
+  await closeDraftWorkspace({ workspaceId: workspace.id, userId });
+});
+
+dbTest("interleaved plan updates cannot hide a repeated observation loop", async () => {
+  const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Create a page", runtimeType: "STATIC", maxSteps: 8 });
+  let calls = 0;
+  const result = await executeAgentRun({ runId: run.id, userId, model: { decide: async () => {
+    const call = calls++;
+    if (call % 2 === 0) return { kind: "tool", name: "list_files", arguments: {} };
+    return { kind: "tool", name: "update_plan", arguments: { summary: "Build page", steps: [{ id: "page", title: "Build page", status: "in_progress" }] } };
+  } } });
+  assert.equal(result.status, "NO_PROGRESS");
+  assert.equal(calls, 5);
+  assert.equal(await prisma.draftFileChange.count({ where: { workspaceId: workspace.id } }), 0);
+  await closeDraftWorkspace({ workspaceId: workspace.id, userId });
+});
+
+dbTest("Go workspace rejects go.mod without changing the workspace revision", async () => {
+  const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Create a Go app", runtimeType: "GO", maxSteps: 4 });
+  const decisions = [
+    { kind: "tool", name: "write_file", arguments: { path: "go.mod", content: "module bad" } },
+    { kind: "question", question: "Stop after verifying the guard" },
+  ];
+  const result = await executeAgentRun({ runId: run.id, userId, model: { decide: async ({ step }) => decisions[step] } });
+  assert.equal(result.status, "NEEDS_INPUT");
+  const rejected = await prisma.agentRunStep.findUniqueOrThrow({ where: { runId_number: { runId: run.id, number: 0 } } });
+  assert.equal((rejected.result as { error: { code: string } }).error.code, "PLATFORM_FILE_NOT_WRITABLE");
+  assert.equal((await prisma.draftWorkspace.findUniqueOrThrow({ where: { id: workspace.id } })).revision, 0);
   await closeDraftWorkspace({ workspaceId: workspace.id, userId });
 });
 
