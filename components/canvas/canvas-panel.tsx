@@ -29,6 +29,7 @@ interface CanvasPanelProps {
   sandboxError?: string | null;
   onFullscreenToggle?: () => void;
   onSandboxReset?: () => void;
+  onSandboxReady?: () => void;
   isFullscreen?: boolean;
 }
 
@@ -42,6 +43,7 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
       sandboxError = null,
       onFullscreenToggle,
       onSandboxReset,
+      onSandboxReady,
       isFullscreen = false,
     },
     ref
@@ -77,7 +79,6 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
     const [publishDialogOpen, setPublishDialogOpen] = useState(false);
     const [fullstackPreview, setFullstackPreview] = useState<{ status: string; previewUrl?: string | null; errorMessage?: string | null } | null>(null);
     const [fullstackPreviewOpen, setFullstackPreviewOpen] = useState(false);
-
     useEffect(() => {
       if (!projectId || !selectedVersion) return;
       const version = versions.find((item) => item.versionNumber === selectedVersion);
@@ -306,6 +307,7 @@ export const CanvasPanel = forwardRef<HTMLDivElement, CanvasPanelProps>(
             isSandboxReady={isSandboxReady}
             sandboxError={sandboxError}
             selectedDevice={selectedDevice}
+            onSandboxReady={onSandboxReady}
           />
           {/* Code Panel */}
           <CodePanel

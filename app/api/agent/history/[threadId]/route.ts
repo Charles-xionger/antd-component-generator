@@ -98,6 +98,7 @@ export async function GET(
               versionNumber: version.versionNumber,
               description: version.description,
               createdAt: version.createdAt,
+              runtimeVersion: version.runtimeVersion,
               runtimeManifest: version.runtimeManifest,
               files: version.files.map((file) => ({
                 id: file.id,
@@ -111,6 +112,7 @@ export async function GET(
                   versionNumber: currentVersion.versionNumber,
                   description: currentVersion.description,
                   createdAt: currentVersion.createdAt,
+                  runtimeVersion: currentVersion.runtimeVersion,
                   runtimeManifest: currentVersion.runtimeManifest,
                   files: files.map((file) => ({
                     id: file.id,

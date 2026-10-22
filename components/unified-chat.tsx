@@ -593,6 +593,10 @@ ${sandboxError}
               sandboxError={sandboxError}
               onFullscreenToggle={handleFullscreenToggle}
               onSandboxReset={handleSandboxReset}
+              onSandboxReady={() => {
+                setIsSandboxReady(true);
+                setSandboxError(null);
+              }}
               isFullscreen={isFullscreen}
             />
           </div>

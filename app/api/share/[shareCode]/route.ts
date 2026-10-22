@@ -39,6 +39,7 @@ export async function GET(
         versionNumber: share.artifactVersion.versionNumber,
         description: share.artifactVersion.description,
         createdAt: share.artifactVersion.createdAt,
+        runtimeVersion: share.artifactVersion.runtimeVersion,
         files: share.artifactVersion.files.map((file) => ({
           path: file.path,
           content: file.content,

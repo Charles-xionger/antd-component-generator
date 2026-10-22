@@ -4,6 +4,7 @@
 import { useEffect, useState, use, useRef } from "react";
 import { PreviewPanel } from "@/components/canvas/preview-panel";
 import { SANDBOX_ORIGIN } from "@/lib/sandbox-config";
+import { projectArtifactForSandbox } from "@/lib/sandbox-projection";
 
 interface FileData {
   path: string;
@@ -16,6 +17,7 @@ interface ShareData {
     versionNumber: number;
     description: string | null;
     createdAt: string;
+    runtimeVersion?: string | null;
     files: FileData[];
   };
 }
@@ -65,33 +67,10 @@ export default function SharePreviewPage({
       shareData.version.files.length
     );
 
-    // 将文件转换为 sandbox 需要的格式（使用文件名作为 key）
-    const files: Record<string, string> = {};
-    shareData.version.files.forEach((file) => {
-      const fileName = file.path.split("/").pop() || file.path;
-      files[fileName] = file.content;
-    });
-
-    // 查找入口文件（优先 App.tsx）
-    const entryFile = (() => {
-      const appFile = shareData.version.files.find((f) =>
-        f.path.includes("App.tsx")
-      );
-      if (appFile) return appFile.path.split("/").pop() || "App.tsx";
-
-      const componentFile = shareData.version.files.find(
-        (f) => f.path.endsWith(".tsx") && !f.path.toLowerCase().includes("use")
-      );
-      if (componentFile)
-        return componentFile.path.split("/").pop() || "App.tsx";
-
-      const tsxFile = shareData.version.files.find((f) =>
-        f.path.endsWith(".tsx")
-      );
-      if (tsxFile) return tsxFile.path.split("/").pop() || "App.tsx";
-
-      return "App.tsx";
-    })();
+    const { files, entryFile } = projectArtifactForSandbox(
+      shareData.version.files,
+      shareData.version.runtimeVersion,
+    );
 
     console.log(
       "[Share] 入口文件:",
