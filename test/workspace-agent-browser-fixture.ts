@@ -111,16 +111,18 @@ function scriptedResponse(requestBody: Record<string, unknown>) {
     const modification = /按钮|blue|颜色/i.test(observation.goal ?? "");
     const questionFlow = /需要确认/.test(observation.goal ?? "");
     if (/Go修改测试/.test(observation.goal ?? "")) {
-      tool = observation.step === 0 ? { name: "read_file", arguments: { path: "backend/operations.go" } }
-        : observation.step === 1 ? { name: "patch_file", arguments: { path: "backend/operations.go", oldText: '"ok": true', newText: '"ok": true, "label": "updated"' } }
-          : observation.step === 2 ? { name: "read_file", arguments: { path: "frontend/App.tsx" } }
-            : observation.step === 3 ? { name: "patch_file", arguments: { path: "frontend/App.tsx", oldText: "Go v1 ready", newText: "Go v2 updated" } }
-              : { name: "complete", arguments: { summary: "Go 页面与接口已定向修改" } };
+      tool = observation.step === 0 ? { name: "search_files", arguments: { query: '"ok": true', pathGlob: "backend/**/*.go", mode: "literal", contextLines: 2, maxResults: 10 } }
+        : observation.step === 1 ? { name: "read_file_range", arguments: { path: "backend/operations.go", startLine: 1, endLine: 20 } }
+          : observation.step === 2 ? { name: "patch_file", arguments: { path: "backend/operations.go", oldText: '"ok": true', newText: '"ok": true, "label": "updated"' } }
+            : observation.step === 3 ? { name: "search_files", arguments: { query: "Go v1 ready", pathGlob: "frontend/**/*.tsx", mode: "literal", contextLines: 1, maxResults: 10 } }
+              : observation.step === 4 ? { name: "read_file_range", arguments: { path: "frontend/App.tsx", startLine: 1, endLine: 1 } }
+                : observation.step === 5 ? { name: "patch_file", arguments: { path: "frontend/App.tsx", oldText: "Go v1 ready", newText: "Go v2 updated" } }
+                  : { name: "complete", arguments: { summary: "Go 页面与接口已定向修改" } };
     } else if (/诊断测试/.test(observation.goal ?? "")) {
       tool = observation.step === 0 ? { name: "update_plan", arguments: { summary: "编写页面并修复编译错误", steps: [{ id: "frontend", title: "编写页面", status: "in_progress" }, { id: "repair", title: "修复诊断并提交", status: "pending" }] } }
         : observation.step === 1 ? { name: "write_file", arguments: { path: "frontend/App.tsx", content: brokenAppFile } }
           : observation.step === 2 ? { name: "complete", arguments: { summary: "检查页面" } }
-            : observation.step === 3 ? { name: "read_file", arguments: { path: "frontend/App.tsx" } }
+            : observation.step === 3 ? { name: "read_file_range", arguments: { path: "frontend/App.tsx", startLine: 1, endLine: 1 } }
               : observation.step === 4 ? { name: "patch_file", arguments: { path: "frontend/App.tsx", oldText: brokenAppFile, newText: appFile } }
                 : { name: "complete", arguments: { summary: "编译错误已定向修复" } };
     } else if (/取消测试/.test(observation.goal ?? "")) {
@@ -134,9 +136,10 @@ function scriptedResponse(requestBody: Record<string, unknown>) {
           ? { name: "write_file", arguments: { path: "frontend/App.tsx", content: appFile.replace('backgroundColor: "#444"', 'backgroundColor: "#2563eb"') } }
           : { name: "complete", arguments: { summary: "已按确认的颜色生成页面" } };
     } else if (modification) {
-      tool = observation.step === 0 ? { name: "read_file", arguments: { path: "frontend/App.tsx" } }
-        : observation.step === 1 ? { name: "patch_file", arguments: { path: "frontend/App.tsx", oldText: 'backgroundColor: "#444"', newText: 'backgroundColor: "#2563eb"' } }
-          : { name: "complete", arguments: { summary: "按钮颜色已更新" } };
+      tool = observation.step === 0 ? { name: "search_files", arguments: { query: 'backgroundColor: "#444"', pathGlob: "frontend/**/*.tsx", mode: "literal", contextLines: 2, maxResults: 10 } }
+        : observation.step === 1 ? { name: "read_file_range", arguments: { path: "frontend/App.tsx", startLine: 1, endLine: 20 } }
+          : observation.step === 2 ? { name: "patch_file", arguments: { path: "frontend/App.tsx", oldText: 'backgroundColor: "#444"', newText: 'backgroundColor: "#2563eb"' } }
+            : { name: "complete", arguments: { summary: "按钮颜色已更新" } };
     } else {
       tool = observation.step === 0 ? { name: "update_plan", arguments: { summary: "建立文本整理页面并验证", steps: [{ id: "frontend", title: "编写文本整理页面", status: "in_progress" }, { id: "validation", title: "检查并提交", status: "pending" }] } }
         : observation.step === 1 ? { name: "write_file", arguments: { path: "frontend/App.tsx", content: appFile } }
