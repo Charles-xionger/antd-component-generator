@@ -95,7 +95,8 @@ async function main() {
     assert.equal(changedResponse.status, 202, changedText);
     const changed = JSON.parse(changedText);
     const modifyDecisions = [
-      { kind: "tool", name: "read_file", arguments: { path: "frontend/App.tsx" } },
+      { kind: "tool", name: "search_files", arguments: { query: "First", pathGlob: "frontend/**/*.tsx", mode: "literal", contextLines: 1, maxResults: 10 } },
+      { kind: "tool", name: "read_file_range", arguments: { path: "frontend/App.tsx", startLine: 1, endLine: 1 } },
       { kind: "tool", name: "patch_file", arguments: { path: "frontend/App.tsx", oldText: "First", newText: "Second" } },
       { kind: "complete", summary: "Second version ready" },
     ];
