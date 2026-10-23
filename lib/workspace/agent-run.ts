@@ -5,13 +5,13 @@ import prisma from "@/lib/database/prisma";
 import { validateAcceptanceScenarios, validateJsonFile } from "./diagnostics";
 import { appendAgentEvent } from "./events";
 import { WorkspacePathError } from "./path";
-import { deleteDraftFile, listDraftFiles, patchDraftFile, readDraftFile, readDraftFileRange, searchDraftFiles, WorkspaceError, writeDraftFile } from "./service";
+import { deleteDraftFile, listDraftFiles, patchDraftFile, readDraftFile, readDraftFileRange, rewriteDraftFile, searchDraftFiles, WorkspaceError, writeDraftFile } from "./service";
 import { inspectWorkspaceDiagnostics, runWorkspaceCommand, validateAndRecordWorkspaceRevision } from "./validation";
-import { assertWorkspaceMutationPath, isObservationTool, repeatedObservationError, sameArguments, type WorkspaceRuntimeType } from "./runtime-contract";
+import { assertWorkspaceMutationPath, evaluateWorkspacePolicy, isObservationTool, isTargetedValidationForPath, repeatedObservationError, sameArguments, type WorkspacePolicyEvidence, type WorkspaceRuntimeType } from "./runtime-contract";
 
 const toolDecisionSchema = z.object({
   kind: z.literal("tool"),
-  name: z.enum(["list_files", "search_files", "read_file", "read_file_range", "write_file", "write_json_file", "write_scenarios", "patch_file", "delete_file", "update_plan", "validate_json", "validate_schema", "validate_workspace", "inspect_diagnostics", "run_command"]),
+  name: z.enum(["list_files", "search_files", "read_file", "read_file_range", "write_file", "write_json_file", "write_scenarios", "patch_file", "rewrite_file", "delete_file", "update_plan", "validate_json", "validate_schema", "validate_workspace", "inspect_diagnostics", "run_command"]),
   arguments: z.record(z.string(), z.unknown()),
 }).strict();
 const decisionSchema = z.discriminatedUnion("kind", [
@@ -49,7 +49,14 @@ export type AgentModel = { decide(observation: {
 const locationSchema = z.object({ path: z.string().min(1).max(512) }).strict();
 const writeSchema = locationSchema.extend({ content: z.string().max(1024 * 1024) });
 const patchSchema = locationSchema.extend({ oldText: z.string().min(1), newText: z.string() });
-const searchSchema = z.object({ query: z.string().min(1).max(512), maxResults: z.number().int().min(1).max(100).optional() }).strict();
+const rewriteSchema = writeSchema.extend({ expectedSha256: z.string().regex(/^[a-f0-9]{64}$/), reason: z.string().min(1).max(1000) });
+const searchSchema = z.object({
+  query: z.string().min(1).max(512),
+  pathGlob: z.string().min(1).max(256).optional(),
+  mode: z.enum(["literal", "regex"]).optional(),
+  contextLines: z.number().int().min(0).max(8).optional(),
+  maxResults: z.number().int().min(1).max(100).optional(),
+}).strict();
 const rangeSchema = locationSchema.extend({ startLine: z.number().int().min(1), endLine: z.number().int().min(1) });
 const commandSchema = z.object({ command: z.enum(["typecheck_frontend", "build_frontend", "build_backend"]) }).strict();
 const jsonWriteSchema = locationSchema.extend({ value: z.record(z.string(), z.unknown()) });
@@ -64,6 +71,96 @@ const diagnosticFingerprint = (value: unknown) => Array.isArray(value)
       return [diagnostic.code, diagnostic.file, diagnostic.path, diagnostic.line, diagnostic.column, diagnostic.message].map((part) => String(part ?? "")).join(":");
     }).sort().join("|")
   : "";
+
+type CompletedStep = { number: number; decision: unknown; result: unknown };
+
+function object(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function boundedHistoryDetails(action: string, result: Record<string, unknown> | null) {
+  if (!result) return undefined;
+  if (action !== "read_file") return JSON.stringify(result).slice(0, 6000);
+  const value = object(result.value);
+  return JSON.stringify({
+    ...result,
+    value: value ? { path: value.path, sha256: value.sha256, revision: value.revision, fullRead: true } : value,
+  }).slice(0, 6000);
+}
+
+function replacementRatio(before: string, after: string) {
+  if (before === after) return 0;
+  let prefix = 0;
+  while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix += 1;
+  let suffix = 0;
+  while (suffix < before.length - prefix && suffix < after.length - prefix && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix += 1;
+  return Math.max(before.length - prefix - suffix, after.length - prefix - suffix) / Math.max(1, before.length, after.length);
+}
+
+export function buildWorkspacePolicyEvidence(steps: CompletedStep[], revision: number): WorkspacePolicyEvidence {
+  const locatedPaths = new Set<string>();
+  const ranges: WorkspacePolicyEvidence["ranges"] = [];
+  const fullReads = new Map<string, string>();
+  const patchConflicts = new Map<string, number>();
+  let rewriteDebt: WorkspacePolicyEvidence["rewriteDebt"] = null;
+  for (const step of steps.sort((a, b) => a.number - b.number)) {
+    const saved = persistedDecisionSchema.safeParse(step.decision);
+    if (!saved.success) continue;
+    const result = object(step.result);
+    const validation = object(result?.validation);
+    if (saved.data.expectedRevision === revision && Array.isArray(validation?.diagnostics)) {
+      for (const diagnostic of validation.diagnostics) {
+        const item = object(diagnostic);
+        const diagnosticPath = typeof item?.path === "string" ? item.path : typeof item?.file === "string" ? item.file : null;
+        if (diagnosticPath && Number.isInteger(item?.line)) locatedPaths.add(diagnosticPath);
+      }
+    }
+    if (saved.data.decision.kind !== "tool") continue;
+    const decision = saved.data.decision;
+    const value = object(result?.value);
+    const error = object(result?.error);
+    const expectedRevision = saved.data.expectedRevision;
+    const path = typeof decision.arguments.path === "string" ? decision.arguments.path : "";
+    if (decision.name === "rewrite_file" && result?.ok === true && typeof value?.revision === "number") {
+      rewriteDebt = { path, revision: value.revision, auditItemId: typeof value.auditItemId === "string" ? value.auditItemId : `${step.number}` };
+    }
+    if (rewriteDebt && expectedRevision === rewriteDebt.revision && result?.ok === true && isTargetedValidationForPath(rewriteDebt.path, decision.name, decision.arguments.command)) {
+      const diagnostics = Array.isArray(value?.diagnostics) ? value.diagnostics : [];
+      const statusPassed = decision.name === "validate_workspace" ? value?.status === "PASSED" : diagnostics.length === 0;
+      if (statusPassed) rewriteDebt = null;
+    }
+    if (expectedRevision !== revision) continue;
+    if (decision.name === "patch_file" && error?.code === "PATCH_CONFLICT" && path) patchConflicts.set(path, (patchConflicts.get(path) ?? 0) + 1);
+    if (result?.ok !== true) continue;
+    if (decision.name === "search_files" && Array.isArray(value?.hits)) {
+      for (const hit of value.hits) {
+        const item = object(hit);
+        if (typeof item?.path === "string") locatedPaths.add(item.path);
+      }
+    }
+    if (decision.name === "inspect_diagnostics") {
+      const diagnostics = Array.isArray(value?.diagnostics) ? value.diagnostics : [];
+      for (const diagnostic of diagnostics) {
+        const item = object(diagnostic);
+        const diagnosticPath = typeof item?.path === "string" ? item.path : typeof item?.file === "string" ? item.file : null;
+        if (diagnosticPath && Number.isInteger(item?.line)) locatedPaths.add(diagnosticPath);
+      }
+    }
+    if (decision.name === "read_file_range" && path && typeof value?.content === "string" && typeof value.startLine === "number" && typeof value.endLine === "number") {
+      ranges.push({ path, startLine: value.startLine, endLine: value.endLine, content: value.content });
+    }
+    if (decision.name === "read_file" && path && typeof value?.sha256 === "string") fullReads.set(path, value.sha256);
+  }
+  const fingerprint = JSON.stringify({
+    revision,
+    located: [...locatedPaths].sort(),
+    ranges: ranges.map(({ path, startLine, endLine }) => [path, startLine, endLine]),
+    fullReads: [...fullReads].sort(),
+    patchConflicts: [...patchConflicts].sort(),
+    rewriteDebt,
+  });
+  return { revision, locatedPaths, ranges, fullReads, patchConflicts, rewriteDebt, fingerprint };
+}
 
 async function ownedRun(runId: string, userId: string) {
   const run = await prisma.agentRun.findFirst({ where: { id: runId, workspace: { project: { userId, status: "ACTIVE" } } }, include: { workspace: { include: { baseArtifactVersion: true } } } });
@@ -115,13 +212,36 @@ export async function createAgentRun(input: { workspaceId: string; userId: strin
   }
 }
 
-async function executeTool(decision: Extract<Decision, { kind: "tool" }>, context: { workspaceId: string; userId: string; expectedRevision: number; toolCallId: string; runId: string; leaseToken: string; runtimeType: "STATIC" | "GO"; appBlueprint?: unknown }) {
+async function executeTool(decision: Extract<Decision, { kind: "tool" }>, context: { workspaceId: string; userId: string; expectedRevision: number; toolCallId: string; runId: string; leaseToken: string; runtimeType: "STATIC" | "GO"; appBlueprint?: unknown; policyEvidence: WorkspacePolicyEvidence }) {
   const scope = { workspaceId: context.workspaceId, userId: context.userId };
   const mutation = { ...scope, toolCallId: context.toolCallId, expectedRevision: context.expectedRevision, agentLease: { runId: context.runId, leaseToken: context.leaseToken } };
+  const rawPath = decision.name === "write_scenarios" ? "acceptance/scenarios.json" : typeof decision.arguments.path === "string" ? decision.arguments.path : undefined;
+  const mutationNames = new Set(["write_file", "write_json_file", "write_scenarios", "patch_file", "rewrite_file", "delete_file"]);
+  const argumentPath = rawPath && mutationNames.has(decision.name) ? assertWorkspaceMutationPath(rawPath, context.runtimeType) : rawPath;
+  let currentFile: Awaited<ReturnType<typeof readDraftFile>> | null = null;
+  if (argumentPath && mutationNames.has(decision.name)) {
+    try { currentFile = await readDraftFile({ ...scope, path: argumentPath, revision: context.expectedRevision }); }
+    catch (error) { if (!(error instanceof WorkspaceError) || error.code !== "FILE_NOT_FOUND") throw error; }
+  }
+  const policy = evaluateWorkspacePolicy({
+    action: decision.name,
+    path: argumentPath,
+    oldText: typeof decision.arguments.oldText === "string" ? decision.arguments.oldText : undefined,
+    fileExists: currentFile !== null,
+    fileIsEmpty: currentFile?.content.length === 0,
+    expectedSha256: typeof decision.arguments.expectedSha256 === "string" ? decision.arguments.expectedSha256 : undefined,
+    reason: typeof decision.arguments.reason === "string" ? decision.arguments.reason : undefined,
+    replacementRatio: currentFile && typeof decision.arguments.content === "string" ? replacementRatio(currentFile.content, decision.arguments.content) : undefined,
+  }, context.policyEvidence);
+  if (policy) throw new WorkspaceError(policy.code, policy.message, { requiredEvidence: policy.requiredEvidence, allowedNextActions: policy.allowedNextActions });
   switch (decision.name) {
     case "list_files": return listDraftFiles(scope);
     case "search_files": return searchDraftFiles({ ...scope, ...searchSchema.parse(decision.arguments) });
-    case "read_file": return readDraftFile({ ...scope, ...locationSchema.parse(decision.arguments) });
+    case "read_file": {
+      const file = await readDraftFile({ ...scope, ...locationSchema.parse(decision.arguments), revision: context.expectedRevision });
+      if (Buffer.byteLength(file.content, "utf8") > 128 * 1024) throw new WorkspaceError("FILE_TOO_LARGE", "Full reads are limited to 128 KiB; use read_file_range");
+      return file;
+    }
     case "read_file_range": return readDraftFileRange({ ...scope, ...rangeSchema.parse(decision.arguments) });
     case "write_file": {
       const value = writeSchema.parse(decision.arguments);
@@ -140,6 +260,12 @@ async function executeTool(decision: Extract<Decision, { kind: "tool" }>, contex
     case "patch_file": {
       const value = patchSchema.parse(decision.arguments);
       return patchDraftFile({ ...mutation, ...value, path: assertWorkspaceMutationPath(value.path, context.runtimeType) });
+    }
+    case "rewrite_file": {
+      const value = rewriteSchema.parse(decision.arguments);
+      const path = assertWorkspaceMutationPath(value.path, context.runtimeType);
+      const conflicts = context.policyEvidence.patchConflicts.get(path) ?? 0;
+      return rewriteDraftFile({ ...mutation, ...value, path, exception: conflicts >= 2 ? "patch_conflicts" : "broad_replacement" });
     }
     case "delete_file": {
       const value = locationSchema.parse(decision.arguments);
@@ -213,7 +339,7 @@ export async function executeAgentRun(input: { runId: string; userId: string; mo
             action: choice?.kind === "tool" ? choice.name : choice?.kind ?? "unknown",
             path: typeof args?.path === "string" ? args.path : undefined,
             outcome: typeof error?.code === "string" ? error.code : typeof validation?.status === "string" ? validation.status : result?.ok === true ? "ok" : undefined,
-            details: result ? JSON.stringify(result).slice(0, 6000) : undefined,
+            details: boundedHistoryDetails(choice?.kind === "tool" ? choice.name : "", result),
           };
         });
         let decision: Decision | ModelErrorDecision;
@@ -231,11 +357,35 @@ export async function executeAgentRun(input: { runId: string; userId: string; mo
         step = await prisma.agentRunStep.create({ data: { runId: run.id, number: run.nextStep, decision: JSON.parse(JSON.stringify({ decision, expectedRevision: run.workspace.revision })) } });
       }
       const { decision, expectedRevision } = persistedDecisionSchema.parse(step.decision);
+      const completedPolicySteps = await prisma.agentRunStep.findMany({
+        where: { runId: run.id, status: "COMPLETED" },
+        orderBy: { number: "asc" },
+        select: { number: true, decision: true, result: true },
+      });
+      const policyEvidence = buildWorkspacePolicyEvidence(completedPolicySteps, expectedRevision);
       await renew();
       if (leaseLost) throw new WorkspaceError("RUN_LEASE_LOST", "Agent run lease was lost");
       const itemId = `${run.id}:${run.nextStep}`;
       if (decision.kind === "tool") {
         await prisma.$transaction((tx) => appendAgentEvent(tx, { runId: run.id, type: "tool.started", itemId, toolCallId: itemId, payload: { name: decision.name, path: typeof decision.arguments.path === "string" ? decision.arguments.path : null, revision: expectedRevision } }));
+      }
+      if (decision.kind === "complete" && policyEvidence.rewriteDebt) {
+        const policy = evaluateWorkspacePolicy({ action: "complete" }, policyEvidence)!;
+        const result = { ok: false, error: { ...policy, evidenceFingerprint: policyEvidence.fingerprint } };
+        const previous = prior?.result && typeof prior.result === "object" ? prior.result as { ok?: unknown; error?: { code?: string; message?: string; evidenceFingerprint?: string } } : null;
+        const noProgress = previous?.ok === false && previous.error?.code === policy.code && previous.error?.message === policy.message && previous.error.evidenceFingerprint === policyEvidence.fingerprint;
+        await prisma.$transaction(async (tx) => {
+          const updated = await tx.agentRun.updateMany({
+            where: { id: run.id, status: "RUNNING", leaseToken, leaseUntil: { gt: new Date() } },
+            data: { nextStep: { increment: 1 }, ...(noProgress ? { status: "NO_PROGRESS", summary: "Same workspace policy violation repeated without new evidence", leaseToken: null, leaseUntil: null } : { leaseUntil: new Date(Date.now() + 120_000) }) },
+          });
+          if (updated.count !== 1) throw new WorkspaceError("RUN_LEASE_LOST", "Agent run lease was lost before completing a step");
+          await tx.agentRunStep.update({ where: { runId_number: { runId: run.id, number: run.nextStep } }, data: { status: "COMPLETED", result, completedAt: new Date() } });
+          await appendAgentEvent(tx, { runId: run.id, type: "policy.rejected", itemId, payload: { revision: expectedRevision, error: policy } });
+          if (noProgress) await appendAgentEvent(tx, { runId: run.id, type: "run.stopped", itemId: run.id, payload: { reason: "no_progress", revision: expectedRevision } });
+        });
+        if (noProgress) return ownedRun(run.id, input.userId);
+        continue;
       }
       if (decision.kind === "complete" || decision.kind === "question") {
         const validation = decision.kind === "complete" ? await validateAndRecordWorkspaceRevision({ workspaceId: run.workspaceId, userId: input.userId, revision: expectedRevision, runtimeType: run.runtimeType, blueprint: (run.appBlueprint ?? run.workspace.baseArtifactVersion?.appBlueprint ?? undefined) as never }) : null;
@@ -262,7 +412,7 @@ export async function executeAgentRun(input: { runId: string; userId: string; mo
         if (status !== "RUNNING") return ownedRun(run.id, input.userId);
         continue;
       }
-      let result: { ok: boolean; value?: unknown; error?: { code: string; message: string } };
+      let result: { ok: boolean; value?: unknown; error?: { code: string; message: string; requiredEvidence?: string[]; allowedNextActions?: string[]; evidenceFingerprint?: string } };
       let repeatedObservationLimit = false;
       if (decision.kind === "model_error") {
         result = { ok: false, error: { code: decision.code, message: modelErrorMessages[decision.code] } };
@@ -290,15 +440,22 @@ export async function executeAgentRun(input: { runId: string; userId: string; mo
           result = repeatedObservationError(decision.name, expectedRevision);
         } else {
           try {
-            result = { ok: true, value: await executeTool(decision, { workspaceId: run.workspaceId, userId: input.userId, expectedRevision, toolCallId: `${run.id}:${run.nextStep}`, runId: run.id, leaseToken, runtimeType: run.runtimeType, appBlueprint: run.appBlueprint ?? run.workspace.baseArtifactVersion?.appBlueprint ?? undefined }) };
+            result = { ok: true, value: await executeTool(decision, { workspaceId: run.workspaceId, userId: input.userId, expectedRevision, toolCallId: `${run.id}:${run.nextStep}`, runId: run.id, leaseToken, runtimeType: run.runtimeType, appBlueprint: run.appBlueprint ?? run.workspace.baseArtifactVersion?.appBlueprint ?? undefined, policyEvidence }) };
           } catch (error) {
             if (!(error instanceof WorkspaceError) && !(error instanceof WorkspacePathError) && !(error instanceof z.ZodError)) throw error;
-            result = { ok: false, error: { code: error instanceof WorkspaceError || error instanceof WorkspacePathError ? error.code : "INVALID_TOOL_ARGUMENTS", message: error.message.slice(0, 1000) } };
+            const code = error instanceof WorkspaceError || error instanceof WorkspacePathError ? error.code : "INVALID_TOOL_ARGUMENTS";
+            result = { ok: false, error: {
+              code,
+              message: error.message.slice(0, 1000),
+              ...(error instanceof WorkspaceError && error.details ? error.details : {}),
+              ...(new Set(["OBSERVATION_REQUIRED", "PATCH_REQUIRED", "VALIDATION_REQUIRED"]).has(code) ? { evidenceFingerprint: policyEvidence.fingerprint } : {}),
+            } };
           }
         }
       }
-      const previous = prior?.result && typeof prior.result === "object" ? prior.result as { ok?: unknown; error?: { code?: string; message?: string }; revision?: number } : null;
-      const noProgress = repeatedObservationLimit || (!result.ok && previous?.ok === false && previous.error?.code === result.error?.code && previous.error?.message === result.error?.message && expectedRevision === run.workspace.revision);
+      const previous = prior?.result && typeof prior.result === "object" ? prior.result as { ok?: unknown; error?: { code?: string; message?: string; evidenceFingerprint?: string }; revision?: number } : null;
+      const policyFingerprintMatches = !result.error?.evidenceFingerprint || previous?.error?.evidenceFingerprint === result.error.evidenceFingerprint;
+      const noProgress = repeatedObservationLimit || (!result.ok && previous?.ok === false && previous.error?.code === result.error?.code && previous.error?.message === result.error?.message && policyFingerprintMatches && expectedRevision === run.workspace.revision);
       await prisma.$transaction(async (tx) => {
         const updated = await tx.agentRun.updateMany({ where: { id: run.id, status: "RUNNING", leaseToken, leaseUntil: { gt: new Date() } }, data: { nextStep: { increment: 1 }, ...(noProgress ? { status: "NO_PROGRESS", summary: repeatedObservationLimit ? "Same read operation repeated without a workspace change" : "Same tool error repeated without a workspace change", leaseToken: null, leaseUntil: null } : { leaseUntil: new Date(Date.now() + 120_000) }) } });
         if (updated.count !== 1) throw new WorkspaceError("RUN_LEASE_LOST", "Agent run lease was lost before completing a step");
@@ -311,6 +468,11 @@ export async function executeAgentRun(input: { runId: string; userId: string; mo
           if (check.output) await appendAgentEvent(tx, { runId: run.id, type: "command.output", itemId, payload: { revision: expectedRevision, check: check.command ?? decision.name, output: check.output } });
           if (check.status) await appendAgentEvent(tx, { runId: run.id, type: "validation.completed", itemId, payload: { revision: expectedRevision, status: check.status, diagnosticCount: check.diagnostics?.length ?? 0 } });
           for (const diagnostic of check.diagnostics ?? []) await appendAgentEvent(tx, { runId: run.id, type: "diagnostic.created", itemId: `${itemId}:${diagnostic.id ?? randomUUID()}`, payload: { revision: expectedRevision, diagnostic } });
+          const targetedPassed = isTargetedValidationForPath(policyEvidence.rewriteDebt?.path ?? "", decision.name, decision.arguments.command)
+            && (decision.name === "validate_workspace" ? check.status === "PASSED" : (check.diagnostics?.length ?? 0) === 0);
+          if (policyEvidence.rewriteDebt && policyEvidence.rewriteDebt.revision === expectedRevision && targetedPassed) {
+            await appendAgentEvent(tx, { runId: run.id, type: "file.rewrite.validated", itemId: policyEvidence.rewriteDebt.auditItemId, payload: { path: policyEvidence.rewriteDebt.path, revision: expectedRevision, validationStatus: "passed", command: check.command ?? decision.name } });
+          }
         }
         if (noProgress) await appendAgentEvent(tx, { runId: run.id, type: "run.stopped", itemId: run.id, payload: { reason: "no_progress", revision: expectedRevision } });
       });

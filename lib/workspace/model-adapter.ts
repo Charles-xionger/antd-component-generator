@@ -8,13 +8,14 @@ type ToolCall = { name?: unknown; args?: unknown };
 const stringField = { type: "string" } as const;
 const pathField = { type: "string", description: "Workspace-relative path; never an absolute path." } as const;
 const toolDefinitions = [
-  ["search_files", "Search current workspace file text.", { query: stringField, maxResults: { type: "integer" } }],
-  ["read_file", "Read one workspace file.", { path: pathField }],
+  ["search_files", "Locate code in the current immutable workspace revision. Supports rg-like path filtering, literal or regex mode, bounded context and result limits.", { query: stringField, pathGlob: stringField, mode: { type: "string", enum: ["literal", "regex"] }, contextLines: { type: "integer" }, maxResults: { type: "integer" } }],
+  ["read_file", "Fully read one current-revision file only to prepare an exceptional guarded rewrite. Normal edits must use read_file_range.", { path: pathField }],
   ["read_file_range", "Read a bounded line range of one file.", { path: pathField, startLine: { type: "integer" }, endLine: { type: "integer" } }],
-  ["write_file", "Write exactly one workspace file.", { path: pathField, content: stringField }],
-  ["write_json_file", "Write one non-scenario JSON object. The runtime serializes the object; never handwrite its JSON envelope.", { path: pathField, value: { type: "object" } }],
-  ["write_scenarios", "Write acceptance/scenarios.json from an array of scenario objects. The runtime validates the suite and constructs the required {scenarios:[...]} envelope.", { scenarios: { type: "array", items: { type: "object" } } }],
+  ["write_file", "Create one new file or initialize one empty file. Cannot replace an existing non-empty file.", { path: pathField, content: stringField }],
+  ["write_json_file", "Create or initialize one non-scenario JSON object. Cannot replace an existing non-empty file. The runtime serializes the object; never handwrite its JSON envelope.", { path: pathField, value: { type: "object" } }],
+  ["write_scenarios", "Create or initialize acceptance/scenarios.json from an array of scenario objects. Cannot replace an existing non-empty file. The runtime validates the suite and constructs the required {scenarios:[...]} envelope.", { scenarios: { type: "array", items: { type: "object" } } }],
   ["patch_file", "Replace one exact span in one workspace file.", { path: pathField, oldText: stringField, newText: stringField }],
+  ["rewrite_file", "Exceptional whole-file replacement after a full current-revision read and either two patch conflicts or an objectively broad change. Requires immediate targeted validation.", { path: pathField, content: stringField, expectedSha256: stringField, reason: stringField }],
   ["delete_file", "Delete exactly one workspace file.", { path: pathField }],
   ["validate_json", "Parse and diagnose one JSON workspace file.", { path: pathField }],
   ["validate_schema", "Validate acceptance/scenarios.json against the scenario suite schema.", {}],
@@ -29,7 +30,7 @@ const toolDefinitions = [
 const knownNames = new Set<string>(toolDefinitions.map(([name]) => name));
 
 export function workspaceAgentInstructions(runtimeType: WorkspaceRuntimeType) {
-  const common = "The currentFiles manifest is provided in every turn and is authoritative; do not call list_files. Recent history includes bounded tool-result details, so reuse earlier reads and diagnostics instead of requesting them again. An empty workspace is normal for a new application. Never repeat an unchanged read. Keep one concise plan current, write one precise file per turn, validate the workspace, repair only reported diagnostics, and call complete only after validation is ready.";
+  const common = "The currentFiles manifest is provided in every turn and is authoritative; do not call list_files. For an existing file, the normal sequence is search_files → read_file_range → patch_file → run_command targeted validation. A precise current diagnostic may replace search_files, but never the bounded read. write_file is only for a new or empty file. read_file and rewrite_file are an exceptional guarded-rewrite path, never a shortcut for normal edits; a rewrite must be immediately followed by targeted validation. Recent history includes bounded tool-result details, so reuse earlier reads and diagnostics instead of requesting them again. An empty workspace is normal for a new application. Never repeat an unchanged read. Keep one concise plan current, write one precise file per turn, validate the workspace, repair only reported diagnostics, and call complete only after validation is ready.";
   if (runtimeType === "STATIC") {
     return `${common} This is a STATIC workspace. Only frontend/ files are writable and frontend/App.tsx is required.`;
   }
@@ -56,7 +57,7 @@ export function createWorkspaceAgentModel(modelName: string, context: { requirem
     function: {
       name,
       description,
-      parameters: { type: "object", properties, required: name === "complete" ? ["summary"] : name === "ask_question" ? ["question"] : Object.keys(properties).filter((key) => key !== "maxResults"), additionalProperties: false },
+      parameters: { type: "object", properties, required: name === "complete" ? ["summary"] : name === "ask_question" ? ["question"] : Object.keys(properties).filter((key) => !["maxResults", "pathGlob", "mode", "contextLines"].includes(key)), additionalProperties: false },
     },
   })));
   return {

@@ -4,7 +4,7 @@ import { after, afterEach, before, test } from "node:test";
 import prisma from "@/lib/database/prisma";
 import { createAgentRun } from "./agent-run";
 import { commitValidatedWorkspace } from "./commit";
-import { closeDraftWorkspace, createDraftWorkspace, writeDraftFile } from "./service";
+import { closeDraftWorkspace, createDraftWorkspace, patchDraftFile, writeDraftFile } from "./service";
 import { validateAndRecordWorkspaceRevision } from "./validation";
 
 const dbTest = process.env.DATABASE_URL ? test : test.skip;
@@ -60,7 +60,7 @@ dbTest("failed or stale validation cannot produce a version", async () => {
   assert.equal(failed.status, "FAILED");
   await prisma.agentRun.update({ where: { id: run.id }, data: { status: "READY_TO_VALIDATE" } });
   await assert.rejects(commitValidatedWorkspace({ runId: run.id, userId, revision: 1, validationRunId: failed.validationRunId }), { code: "VALIDATION_REQUIRED" });
-  await writeDraftFile({ workspaceId: workspace.id, userId, toolCallId: "fixed-app", expectedRevision: 1, path: "frontend/App.tsx", content: "export default function App() { return null; }" });
+  await patchDraftFile({ workspaceId: workspace.id, userId, toolCallId: "fixed-app", expectedRevision: 1, path: "frontend/App.tsx", oldText: "export default function App() { return <div>", newText: "export default function App() { return null; }" });
   await assert.rejects(commitValidatedWorkspace({ runId: run.id, userId, revision: 1, validationRunId: failed.validationRunId }), { code: "REVISION_CONFLICT" });
   assert.equal(await prisma.artifactVersion.count({ where: { generationRequestId: `workspace:${workspace.id}` } }), 0);
   await closeDraftWorkspace({ workspaceId: workspace.id, userId });

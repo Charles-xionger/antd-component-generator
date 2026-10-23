@@ -140,10 +140,24 @@ dbTest("searches and reads bounded ranges from a selected revision", async () =>
   const draft = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
   await writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "range-1", expectedRevision: 0, path: "frontend/App.tsx", content: "alpha\nbeta\nalpha" });
   await writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "range-2", expectedRevision: 1, path: "frontend/Other.tsx", content: "beta" });
-  assert.deepEqual((await searchDraftFiles({ workspaceId: draft.id, userId, query: "beta", revision: 1 })).map((hit) => [hit.path, hit.line]), [["frontend/App.tsx", 2]]);
-  assert.deepEqual((await searchDraftFiles({ workspaceId: draft.id, userId, query: "beta" })).map((hit) => [hit.path, hit.line]), [["frontend/App.tsx", 2], ["frontend/Other.tsx", 1]]);
+  assert.deepEqual((await searchDraftFiles({ workspaceId: draft.id, userId, query: "beta", revision: 1 })).hits.map((hit) => [hit.path, hit.line]), [["frontend/App.tsx", 2]]);
+  const searched = await searchDraftFiles({ workspaceId: draft.id, userId, query: "^be", mode: "regex", pathGlob: "frontend/**/*.tsx", contextLines: 1, maxResults: 1 });
+  assert.equal(searched.revision, 2);
+  assert.equal(searched.truncated, true);
+  assert.deepEqual(searched.hits[0], { path: "frontend/App.tsx", line: 2, text: "beta", before: ["alpha"], after: ["alpha"] });
+  await assert.rejects(searchDraftFiles({ workspaceId: draft.id, userId, query: "[", mode: "regex" }), { code: "INVALID_QUERY" });
+  await assert.rejects(searchDraftFiles({ workspaceId: draft.id, userId, query: "x", pathGlob: "../**" }), { code: "INVALID_QUERY" });
   assert.deepEqual(await readDraftFileRange({ workspaceId: draft.id, userId, path: "frontend/App.tsx", startLine: 2, endLine: 3 }), { path: "frontend/App.tsx", startLine: 2, endLine: 3, totalLines: 3, content: "beta\nalpha" });
   await assert.rejects(readDraftFileRange({ workspaceId: draft.id, userId, path: "frontend/App.tsx", startLine: 0, endLine: 3 }), { code: "INVALID_RANGE" });
+});
+
+dbTest("whole-file writes cannot replace existing non-empty files but may initialize empty files", async () => {
+  const draft = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  await writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "nonempty", expectedRevision: 0, path: "frontend/App.tsx", content: "original" });
+  await assert.rejects(writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "overwrite", expectedRevision: 1, path: "frontend/App.tsx", content: "replacement" }), { code: "PATCH_REQUIRED" });
+  await writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "empty", expectedRevision: 1, path: "frontend/Empty.tsx", content: "" });
+  const initialized = await writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "initialize", expectedRevision: 2, path: "frontend/Empty.tsx", content: "ready" });
+  assert.equal(initialized.revision, 3);
 });
 
 dbTest("patch and delete are CAS protected, idempotent, and retain history", async () => {
@@ -167,7 +181,7 @@ dbTest("patch and delete are CAS protected, idempotent, and retain history", asy
 dbTest("reconstructs an older workspace revision after later writes", async () => {
   const draft = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
   await writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "projection-1", expectedRevision: 0, path: "frontend/App.tsx", content: "old" });
-  await writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "projection-2", expectedRevision: 1, path: "frontend/App.tsx", content: "new" });
+  await patchDraftFile({ workspaceId: draft.id, userId, toolCallId: "projection-2", expectedRevision: 1, path: "frontend/App.tsx", oldText: "old", newText: "new" });
   const oldFiles = await listDraftFiles({ workspaceId: draft.id, userId, revision: 1 });
   assert.deepEqual(oldFiles.map((file) => [file.path, file.revision]), [["frontend/App.tsx", 1]]);
   assert.equal(oldFiles[0].sha256, (await readDraftFile({ workspaceId: draft.id, userId, path: "frontend/App.tsx", revision: 1 })).sha256);
@@ -185,7 +199,7 @@ dbTest("persists validation against its source revision and keeps it readable af
   await writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "validate-1", expectedRevision: 0, path: "frontend/App.tsx", content: "export default function App() { return <div>Hello</div>; }" });
   const result = await validateAndRecordWorkspaceRevision({ workspaceId: draft.id, userId, revision: 1, runtimeType: "STATIC" });
   assert.equal(result.status, "PASSED");
-  await writeDraftFile({ workspaceId: draft.id, userId, toolCallId: "validate-2", expectedRevision: 1, path: "frontend/App.tsx", content: "broken" });
+  await patchDraftFile({ workspaceId: draft.id, userId, toolCallId: "validate-2", expectedRevision: 1, path: "frontend/App.tsx", oldText: "export default function App() { return <div>Hello</div>; }", newText: "broken" });
   const recorded = await inspectWorkspaceDiagnostics({ workspaceId: draft.id, userId, revision: 1 });
   assert.equal(recorded?.id, result.validationRunId);
   assert.equal(recorded?.revision, 1);
