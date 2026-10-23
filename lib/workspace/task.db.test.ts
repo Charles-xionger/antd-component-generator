@@ -50,7 +50,8 @@ dbTest("first generation and later modification share a tool loop and commit ful
   const modified = await createDraftWorkspace({ projectId, userId, taskId: randomUUID(), baseArtifactVersionId: first.commit!.version.id });
   const modifyRun = await createAgentRun({ workspaceId: modified.id, userId, requestId: randomUUID(), goal: "Change First to Second", runtimeType: "STATIC" });
   const modifyDecisions = [
-    { kind: "tool", name: "read_file", arguments: { path: "frontend/App.tsx" } },
+    { kind: "tool", name: "search_files", arguments: { query: "First", pathGlob: "frontend/**/*.tsx" } },
+    { kind: "tool", name: "read_file_range", arguments: { path: "frontend/App.tsx", startLine: 1, endLine: 1 } },
     { kind: "tool", name: "patch_file", arguments: { path: "frontend/App.tsx", oldText: "First", newText: "Second" } },
     { kind: "complete", summary: "Text changed" },
   ];
@@ -81,6 +82,7 @@ func Operations(_ *pgxpool.Pool, _ *slog.Logger) map[string]Operation {
   return map[string]Operation{"get.item": func(_ context.Context, _ json.RawMessage) (any, error) { return map[string]any{"ok": true}, nil }}
 }`;
   const scenarios = [{ id: "get.item", description: "Get an item", steps: [{ operationId: "get.item", expectStatus: 200 }] }];
+  const repairedScenarioContent = `${JSON.stringify({ scenarios: [{ ...scenarios[0], steps: [{ ...scenarios[0].steps[0], input: {}, assertions: [] }] }] }, null, 2)}\n`;
   const decisions = [
     { kind: "tool", name: "write_file", arguments: { path: "migrations/001_init.sql", content: "CREATE TABLE items (id int);" } },
     { kind: "tool", name: "write_file", arguments: { path: "backend/operations.go", content: backend } },
@@ -88,8 +90,9 @@ func Operations(_ *pgxpool.Pool, _ *slog.Logger) map[string]Operation {
     { kind: "tool", name: "write_file", arguments: { path: "frontend/App.tsx", content: "export default function App() { return <div>Ready</div>; }" } },
     { kind: "tool", name: "write_file", arguments: { path: "acceptance/scenarios.json", content: "[]" } },
     { kind: "complete", summary: "Initial files ready" },
-    { kind: "tool", name: "read_file", arguments: { path: "acceptance/scenarios.json" } },
-    { kind: "tool", name: "write_scenarios", arguments: { scenarios } },
+    { kind: "tool", name: "search_files", arguments: { query: "[]", pathGlob: "acceptance/scenarios.json" } },
+    { kind: "tool", name: "read_file_range", arguments: { path: "acceptance/scenarios.json", startLine: 1, endLine: 1 } },
+    { kind: "tool", name: "patch_file", arguments: { path: "acceptance/scenarios.json", oldText: "[]", newText: repairedScenarioContent.trimEnd() } },
     { kind: "complete", summary: "Acceptance repaired" },
   ];
   const result = await executeWorkspaceTask({ runId: run.id, userId, model: { decide: async ({ step, previousResult }: { step: number; previousResult: unknown }) => {
@@ -121,9 +124,11 @@ func Operations(_ *pgxpool.Pool, _ *slog.Logger) map[string]Operation {
     workspaceId: modifiedWorkspace.id, userId, requestId: randomUUID(), goal: "Update the item response and page", runtimeType: "GO", appBlueprint: blueprint,
   });
   const modificationDecisions = [
-    { kind: "tool", name: "read_file", arguments: { path: "backend/operations.go" } },
+    { kind: "tool", name: "search_files", arguments: { query: '"ok": true', pathGlob: "backend/**/*.go" } },
+    { kind: "tool", name: "read_file_range", arguments: { path: "backend/operations.go", startLine: 1, endLine: 20 } },
     { kind: "tool", name: "patch_file", arguments: { path: "backend/operations.go", oldText: '"ok": true', newText: '"ok": true, "label": "changed"' } },
-    { kind: "tool", name: "read_file", arguments: { path: "frontend/App.tsx" } },
+    { kind: "tool", name: "search_files", arguments: { query: "Ready", pathGlob: "frontend/**/*.tsx" } },
+    { kind: "tool", name: "read_file_range", arguments: { path: "frontend/App.tsx", startLine: 1, endLine: 1 } },
     { kind: "tool", name: "patch_file", arguments: { path: "frontend/App.tsx", oldText: "Ready", newText: "Updated" } },
     { kind: "complete", summary: "Go operation and page updated" },
   ];

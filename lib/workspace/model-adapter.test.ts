@@ -29,4 +29,13 @@ test("Go workspace instructions expose the platform-owned scaffold and required 
   assert.match(instructions, /acceptance\/scenarios\.json/);
   assert.match(instructions, /empty workspace.*normal/i);
   assert.match(instructions, /currentFiles.*provided/i);
+  assert.match(instructions, /search_files.*read_file_range.*patch_file.*run_command/i);
+  assert.match(instructions, /write_file.*new or empty/i);
+  assert.match(instructions, /rewrite_file.*exception/i);
+});
+
+test("accepts guarded rewrite tool calls", () => {
+  assert.deepEqual(parseWorkspaceToolDecision({ tool_calls: [{ name: "rewrite_file", args: {
+    path: "frontend/App.tsx", content: "next", expectedSha256: "abc", reason: "large refactor",
+  } }] }), { kind: "tool", name: "rewrite_file", arguments: { path: "frontend/App.tsx", content: "next", expectedSha256: "abc", reason: "large refactor" } });
 });

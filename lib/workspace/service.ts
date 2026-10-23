@@ -40,6 +40,9 @@ export async function createDraftWorkspace(input: {
   });
   if (!project) throw new WorkspaceError("NOT_FOUND", "Project not found");
 
+  const active = await prisma.draftWorkspace.findFirst({ where: { projectId: input.projectId, status: "ACTIVE" }, select: { taskId: true } });
+  if (active && active.taskId !== input.taskId) throw new WorkspaceError("WORKSPACE_BUSY", "Another draft workspace is active for this project");
+
   const existing = await prisma.draftWorkspace.findUnique({ where: { taskId: input.taskId } });
   if (existing) {
     if (existing.projectId !== input.projectId || existing.baseArtifactVersionId !== (input.baseArtifactVersionId ?? null)) {
@@ -121,8 +124,9 @@ async function writeDraftFileInternal(input: {
   expectedRevision: number;
   path: string;
   content: string;
-  operation: "write" | "patch";
+  operation: "write" | "patch" | "rewrite";
   agentLease?: AgentLease;
+  rewriteAudit?: { reason: string; exception: "patch_conflicts" | "broad_replacement" };
 }) {
   const path = normalizeWorkspacePath(input.path);
   if (!input.toolCallId || input.toolCallId.length > 128) throw new WorkspaceError("INVALID_TOOL_CALL", "Invalid tool call ID");
@@ -132,7 +136,7 @@ async function writeDraftFileInternal(input: {
   if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 0) throw new WorkspaceError("INVALID_REVISION", "Invalid expected revision");
   await ownedWorkspace(input.workspaceId, input.userId);
   const sha256 = hash(input.content);
-  const inputHash = hash(JSON.stringify({ operation: input.operation, path, sha256, expectedRevision: input.expectedRevision }));
+  const inputHash = hash(JSON.stringify({ operation: input.operation, path, sha256, expectedRevision: input.expectedRevision, rewriteAudit: input.rewriteAudit }));
 
   const execute = () => prisma.$transaction(async (tx) => {
     const receipt = await tx.draftWriteReceipt.findUnique({ where: { workspaceId_toolCallId: { workspaceId: input.workspaceId, toolCallId: input.toolCallId } } });
@@ -141,16 +145,22 @@ async function writeDraftFileInternal(input: {
       return { revision: receipt.revision, path: receipt.path, sha256: receipt.sha256, repeated: true };
     }
     await fenceAgentLease(tx, input.workspaceId, input.agentLease);
+    const before = await tx.draftFile.findUnique({
+      where: { workspaceId_path: { workspaceId: input.workspaceId, path } },
+      select: { sha256: true, content: true },
+    });
     const updated = await tx.draftWorkspace.updateMany({
       where: { id: input.workspaceId, revision: input.expectedRevision, status: "ACTIVE" },
       data: { revision: { increment: 1 } },
     });
     if (updated.count !== 1) throw new WorkspaceError("REVISION_CONFLICT", "Workspace revision has changed");
+    if (input.operation === "write" && before?.content) {
+      throw new WorkspaceError("PATCH_REQUIRED", `${path} already exists and is non-empty; use read_file_range and patch_file`, {
+        requiredEvidence: ["current-revision location", "bounded read covering the patch target"],
+        allowedNextActions: ["search_files", "read_file_range", "patch_file"],
+      });
+    }
     const revision = input.expectedRevision + 1;
-    const before = await tx.draftFile.findUnique({
-      where: { workspaceId_path: { workspaceId: input.workspaceId, path } },
-      select: { sha256: true },
-    });
     await tx.draftFile.upsert({
       where: { workspaceId_path: { workspaceId: input.workspaceId, path } },
       create: { workspaceId: input.workspaceId, path, content: input.content, sha256, revision },
@@ -162,6 +172,21 @@ async function writeDraftFileInternal(input: {
       data: { workspaceId: input.workspaceId, revision, toolCallId: input.toolCallId, path, beforeSha256: before?.sha256, afterSha256: sha256 },
     });
     if (input.agentLease) await appendAgentEvent(tx, { runId: input.agentLease.runId, type: "file.changed", itemId: input.toolCallId, toolCallId: input.toolCallId, payload: { workspaceId: input.workspaceId, path, beforeRevision: input.expectedRevision, revision, beforeSha256: before?.sha256 ?? null, afterSha256: sha256 } });
+    if (input.agentLease && input.rewriteAudit) await appendAgentEvent(tx, {
+      runId: input.agentLease.runId,
+      type: "file.rewritten",
+      itemId: input.toolCallId,
+      toolCallId: input.toolCallId,
+      payload: {
+        path,
+        beforeSha256: before?.sha256 ?? null,
+        afterSha256: sha256,
+        revision,
+        reason: input.rewriteAudit.reason,
+        exception: input.rewriteAudit.exception,
+        validationStatus: "pending",
+      },
+    });
     return { revision, path, sha256, repeated: false };
   });
 
@@ -208,6 +233,24 @@ export async function patchDraftFile(input: {
   }
   const content = file.content.slice(0, first) + input.newText + file.content.slice(first + input.oldText.length);
   return writeDraftFileInternal({ ...input, content, operation: "patch" });
+}
+
+export async function rewriteDraftFile(input: {
+  workspaceId: string;
+  userId: string;
+  toolCallId: string;
+  expectedRevision: number;
+  path: string;
+  content: string;
+  expectedSha256: string;
+  reason: string;
+  exception: "patch_conflicts" | "broad_replacement";
+  agentLease?: AgentLease;
+}) {
+  const before = await readDraftFile({ workspaceId: input.workspaceId, userId: input.userId, path: input.path, revision: input.expectedRevision });
+  if (before.sha256 !== input.expectedSha256) throw new WorkspaceError("REVISION_CONFLICT", "Guarded rewrite expectedSha256 does not match the current file");
+  const result = await writeDraftFileInternal({ ...input, content: input.content, operation: "rewrite", rewriteAudit: { reason: input.reason, exception: input.exception } });
+  return { ...result, guardedRewrite: true, exception: input.exception, auditItemId: input.toolCallId };
 }
 
 export async function deleteDraftFile(input: {
@@ -283,22 +326,62 @@ export async function searchDraftFiles(input: {
   userId: string;
   query: string;
   revision?: number;
+  pathGlob?: string;
+  mode?: "literal" | "regex";
+  contextLines?: number;
   maxResults?: number;
 }) {
   if (typeof input.query !== "string" || !input.query || input.query.length > 512 || input.query.includes("\0")) throw new WorkspaceError("INVALID_QUERY", "Invalid search query");
+  const mode = input.mode ?? "literal";
+  const contextLines = input.contextLines ?? 0;
   const maxResults = input.maxResults ?? 100;
+  if (mode !== "literal" && mode !== "regex") throw new WorkspaceError("INVALID_QUERY", "Search mode must be literal or regex");
+  if (!Number.isInteger(contextLines) || contextLines < 0 || contextLines > 8) throw new WorkspaceError("INVALID_QUERY", "Search contextLines must be 0 to 8");
   if (!Number.isInteger(maxResults) || maxResults < 1 || maxResults > 100) throw new WorkspaceError("INVALID_QUERY", "Search result limit must be 1 to 100");
+  if (input.pathGlob !== undefined && (!input.pathGlob || input.pathGlob.length > 256 || input.pathGlob.includes("\0") || input.pathGlob.startsWith("/") || input.pathGlob.split("/").includes(".."))) {
+    throw new WorkspaceError("INVALID_QUERY", "Invalid search pathGlob");
+  }
+  let matcher: RegExp | null = null;
+  try { matcher = mode === "regex" ? new RegExp(input.query) : null; } catch { throw new WorkspaceError("INVALID_QUERY", "Invalid regular expression"); }
+  const globRegex = input.pathGlob ? globToRegExp(input.pathGlob) : null;
   const workspace = await ownedWorkspace(input.workspaceId, input.userId);
   const revision = input.revision ?? workspace.revision;
   const files = await listDraftFiles({ ...input, revision });
-  const hits: { path: string; line: number; text: string }[] = [];
+  const hits: { path: string; line: number; text: string; before: string[]; after: string[] }[] = [];
+  let truncated = false;
   for (const listed of files) {
+    if (globRegex && !globRegex.test(listed.path)) continue;
     const file = await readDraftFile({ ...input, path: listed.path, revision });
     const lines = file.content.split(/\r?\n/);
     for (let index = 0; index < lines.length; index += 1) {
-      if (lines[index].includes(input.query)) hits.push({ path: listed.path, line: index + 1, text: lines[index].slice(0, 400) });
-      if (hits.length === maxResults) return hits;
+      const matched = matcher ? (matcher.lastIndex = 0, matcher.test(lines[index])) : lines[index].includes(input.query);
+      if (!matched) continue;
+      if (hits.length === maxResults) { truncated = true; break; }
+      hits.push({
+        path: listed.path,
+        line: index + 1,
+        text: lines[index].slice(0, 400),
+        before: lines.slice(Math.max(0, index - contextLines), index).map((line) => line.slice(0, 400)),
+        after: lines.slice(index + 1, index + 1 + contextLines).map((line) => line.slice(0, 400)),
+      });
     }
+    if (truncated) break;
   }
-  return hits;
+  return { revision, hits, truncated };
+}
+
+function globToRegExp(glob: string) {
+  let source = "^";
+  for (let index = 0; index < glob.length; index += 1) {
+    const char = glob[index];
+    if (char === "*") {
+      if (glob[index + 1] === "*") {
+        index += 1;
+        if (glob[index + 1] === "/") { index += 1; source += "(?:.*/)?"; }
+        else source += ".*";
+      } else source += "[^/]*";
+    } else if (char === "?") source += "[^/]";
+    else source += char.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+  }
+  try { return new RegExp(`${source}$`); } catch { throw new WorkspaceError("INVALID_QUERY", "Invalid search pathGlob"); }
 }

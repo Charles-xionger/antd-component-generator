@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { after, afterEach, before, test } from "node:test";
 import prisma from "@/lib/database/prisma";
 import { closeDraftWorkspace, createDraftWorkspace, readDraftFile, writeDraftFile } from "./service";
@@ -68,7 +68,9 @@ dbTest("recent history retains bounded tool results across a plan update", async
   const result = await executeAgentRun({ runId: run.id, userId, model: { decide: async ({ step, history }) => {
     if (step === 0) return { kind: "tool", name: "read_file", arguments: { path: "frontend/App.tsx" } };
     if (step === 1) return { kind: "tool", name: "update_plan", arguments: { summary: "Inspect page", steps: [{ id: "page", title: "Inspect page", status: "in_progress" }] } };
-    assert.match(history.find((entry: { step: number }) => entry.step === 0)?.details ?? "", /History marker/);
+    const details = history.find((entry: { step: number }) => entry.step === 0)?.details ?? "";
+    assert.doesNotMatch(details, /History marker/);
+    assert.match(details, /fullRead/);
     return { kind: "question", question: "History verified" };
   } } });
   assert.equal(result.status, "NEEDS_INPUT");
@@ -177,10 +179,11 @@ dbTest("Go workspace rejects go.mod without changing the workspace revision", as
 
 dbTest("compiler diagnostics return to the same run and trigger a one-file patch", async () => {
   const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
-  const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Fix the page", runtimeType: "STATIC", maxSteps: 5 });
+  const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Fix the page", runtimeType: "STATIC", maxSteps: 6 });
   const decisions = [
     { kind: "tool", name: "write_file", arguments: { path: "frontend/App.tsx", content: "export default function App() { return <div>" } },
     { kind: "complete", summary: "Check page" },
+    { kind: "tool", name: "read_file_range", arguments: { path: "frontend/App.tsx", startLine: 1, endLine: 1 } },
     { kind: "tool", name: "patch_file", arguments: { path: "frontend/App.tsx", oldText: "return <div>", newText: "return <div>Fixed</div>; }" } },
     { kind: "complete", summary: "Fixed page" },
   ];
@@ -212,12 +215,90 @@ dbTest("run_command accepts only named checks and leaves workspace files unchang
   await closeDraftWorkspace({ workspaceId: workspace.id, userId });
 });
 
+dbTest("existing-file changes require search, bounded read and a fresh evidence chain after every patch", async () => {
+  const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  await writeDraftFile({ workspaceId: workspace.id, userId, toolCallId: "seed-patch-first", expectedRevision: 0, path: "frontend/App.tsx", content: "export default function App() { return <p>Old</p>; }" });
+  const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Change the title twice", runtimeType: "STATIC", maxSteps: 10 });
+  const decisions = [
+    { kind: "tool", name: "search_files", arguments: { query: "Old", pathGlob: "frontend/**/*.tsx", mode: "literal", contextLines: 1, maxResults: 10 } },
+    { kind: "tool", name: "read_file_range", arguments: { path: "frontend/App.tsx", startLine: 1, endLine: 1 } },
+    { kind: "tool", name: "patch_file", arguments: { path: "frontend/App.tsx", oldText: "Old", newText: "Middle" } },
+    { kind: "tool", name: "patch_file", arguments: { path: "frontend/App.tsx", oldText: "Middle", newText: "Final" } },
+    { kind: "tool", name: "search_files", arguments: { query: "Middle", pathGlob: "frontend/**/*.tsx" } },
+    { kind: "tool", name: "read_file_range", arguments: { path: "frontend/App.tsx", startLine: 1, endLine: 1 } },
+    { kind: "tool", name: "patch_file", arguments: { path: "frontend/App.tsx", oldText: "Middle", newText: "Final" } },
+    { kind: "complete", summary: "Title updated" },
+  ];
+  const result = await executeAgentRun({ runId: run.id, userId, model: { decide: async ({ step }) => decisions[step] } });
+  assert.equal(result.status, "READY_TO_VALIDATE", result.summary ?? undefined);
+  assert.match((await readDraftFile({ workspaceId: workspace.id, userId, path: "frontend/App.tsx" })).content, /Final/);
+  const rejected = await prisma.agentRunStep.findUniqueOrThrow({ where: { runId_number: { runId: run.id, number: 3 } } });
+  assert.equal((rejected.result as { error: { code: string } }).error.code, "OBSERVATION_REQUIRED");
+  assert.equal(await prisma.draftFileChange.count({ where: { workspaceId: workspace.id } }), 3);
+});
+
+dbTest("two identical patch-first policy violations stop as no_progress without changing the revision", async () => {
+  const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  await writeDraftFile({ workspaceId: workspace.id, userId, toolCallId: "seed-no-progress", expectedRevision: 0, path: "frontend/App.tsx", content: "original" });
+  const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Replace the file", runtimeType: "STATIC", maxSteps: 5 });
+  const result = await executeAgentRun({ runId: run.id, userId, model: { decide: async () => ({ kind: "tool", name: "write_file", arguments: { path: "frontend/App.tsx", content: "replacement" } }) } });
+  assert.equal(result.status, "NO_PROGRESS");
+  assert.equal((await prisma.draftWorkspace.findUniqueOrThrow({ where: { id: workspace.id } })).revision, 1);
+  const steps = await prisma.agentRunStep.findMany({ where: { runId: run.id }, orderBy: { number: "asc" } });
+  assert.deepEqual(steps.map((step) => (step.result as { error: { code: string } }).error.code), ["PATCH_REQUIRED", "PATCH_REQUIRED"]);
+});
+
+dbTest("structured JSON writers cannot overwrite existing non-empty files", async () => {
+  for (const target of [
+    { path: "acceptance/seed.json", name: "write_json_file", arguments: { path: "acceptance/seed.json", value: { changed: true } } },
+    { path: "acceptance/scenarios.json", name: "write_scenarios", arguments: { scenarios: [] } },
+  ]) {
+    const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+    await writeDraftFile({ workspaceId: workspace.id, userId, toolCallId: `seed-${target.name}`, expectedRevision: 0, path: target.path, content: "{}\n" });
+    const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Replace structured JSON", runtimeType: "GO", maxSteps: 4 });
+    const result = await executeAgentRun({ runId: run.id, userId, model: { decide: async () => ({ kind: "tool", name: target.name, arguments: target.arguments }) } });
+    assert.equal(result.status, "NO_PROGRESS");
+    assert.equal((await prisma.draftWorkspace.findUniqueOrThrow({ where: { id: workspace.id } })).revision, 1);
+    assert.equal((await readDraftFile({ workspaceId: workspace.id, userId, path: target.path })).content, "{}\n");
+    const steps = await prisma.agentRunStep.findMany({ where: { runId: run.id }, orderBy: { number: "asc" } });
+    assert.deepEqual(steps.map((step) => (step.result as { error: { code: string } }).error.code), ["PATCH_REQUIRED", "PATCH_REQUIRED"]);
+    await closeDraftWorkspace({ workspaceId: workspace.id, userId });
+  }
+});
+
+dbTest("guarded rewrite creates audit evidence and blocks mutations and completion until targeted validation", async () => {
+  const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
+  const before = "export default function App() { return <main>Before content that will be broadly replaced</main>; }";
+  const after = "const label = 'Completely new implementation';\nexport default function App() { return <section>{label}</section>; }";
+  await writeDraftFile({ workspaceId: workspace.id, userId, toolCallId: "seed-rewrite", expectedRevision: 0, path: "frontend/App.tsx", content: before });
+  const expectedSha256 = createHash("sha256").update(before).digest("hex");
+  const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Perform a broad refactor", runtimeType: "STATIC", maxSteps: 8 });
+  const decisions = [
+    { kind: "tool", name: "read_file", arguments: { path: "frontend/App.tsx" } },
+    { kind: "tool", name: "rewrite_file", arguments: { path: "frontend/App.tsx", content: after, expectedSha256, reason: "The requested refactor replaces the component structure" } },
+    { kind: "tool", name: "write_file", arguments: { path: "frontend/Other.tsx", content: "export const other = 1" } },
+    { kind: "tool", name: "run_command", arguments: { command: "build_backend" } },
+    { kind: "complete", summary: "Too early" },
+    { kind: "tool", name: "run_command", arguments: { command: "typecheck_frontend" } },
+    { kind: "complete", summary: "Refactor validated" },
+  ];
+  const result = await executeAgentRun({ runId: run.id, userId, model: { decide: async ({ step }) => decisions[step] } });
+  assert.equal(result.status, "READY_TO_VALIDATE", result.summary ?? undefined);
+  assert.equal((await readDraftFile({ workspaceId: workspace.id, userId, path: "frontend/App.tsx" })).content, after);
+  const blockedMutation = await prisma.agentRunStep.findUniqueOrThrow({ where: { runId_number: { runId: run.id, number: 2 } } });
+  const blockedCompletion = await prisma.agentRunStep.findUniqueOrThrow({ where: { runId_number: { runId: run.id, number: 4 } } });
+  assert.equal((blockedMutation.result as { error: { code: string } }).error.code, "VALIDATION_REQUIRED");
+  assert.equal((blockedCompletion.result as { error: { code: string } }).error.code, "VALIDATION_REQUIRED");
+  assert.equal(await prisma.agentEvent.count({ where: { runId: run.id, type: "file.rewritten" } }), 1);
+  assert.equal(await prisma.agentEvent.count({ where: { runId: run.id, type: "file.rewrite.validated" } }), 1);
+  await assert.rejects(readDraftFile({ workspaceId: workspace.id, userId, path: "frontend/Other.tsx" }), { code: "FILE_NOT_FOUND" });
+});
+
 dbTest("plan updates and structured scenarios survive as workspace data without a JSON envelope from the model", async () => {
   const workspace = await createDraftWorkspace({ projectId, userId, taskId: randomUUID() });
   const run = await createAgentRun({ workspaceId: workspace.id, userId, requestId: randomUUID(), goal: "Build an item flow", runtimeType: "GO", maxSteps: 5 });
   const decisions = [
     { kind: "tool", name: "update_plan", arguments: { summary: "Build and check item flow", steps: [{ id: "acceptance", title: "Write acceptance scenarios", status: "in_progress" }] } },
-    { kind: "tool", name: "write_scenarios", arguments: { scenarios: [] } },
     { kind: "tool", name: "write_scenarios", arguments: { scenarios: [{ id: "basic", description: "Get item", steps: [{ operationId: "get.item" }] }] } },
     { kind: "question", question: "Which data source?" },
   ];
@@ -228,8 +309,6 @@ dbTest("plan updates and structured scenarios survive as workspace data without 
   assert.deepEqual(JSON.parse(file.content).scenarios[0].steps[0].operationId, "get.item");
   assert.equal((await prisma.draftWorkspace.findUniqueOrThrow({ where: { id: workspace.id } })).revision, 1);
   assert.equal((await prisma.agentEvent.count({ where: { runId: run.id, type: "plan.updated" } })), 2);
-  const invalid = await prisma.agentRunStep.findUniqueOrThrow({ where: { runId_number: { runId: run.id, number: 1 } } });
-  assert.equal((invalid.result as { ok: boolean }).ok, false);
   await closeDraftWorkspace({ workspaceId: workspace.id, userId });
 });
 
